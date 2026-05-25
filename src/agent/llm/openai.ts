@@ -67,15 +67,25 @@ export class OpenAIProvider implements LLMProvider {
 
     if (reasoning) {
       // No custom temperature — reasoning models require the default.
-      // Reasoning intensity → reasoning_effort. The API surface changed
-      // mid-2026: gpt-5.4-mini (and later) accept
-      // `'none' | 'low' | 'medium' | 'high' | 'xhigh'`. The earlier
-      // `'minimal'` keyword was removed — passing it now returns HTTP 400
-      // `Unsupported value: 'reasoning_effort' does not support
-      // 'minimal' with this model.` Map our internal `'off'` to `'none'`
-      // (skip reasoning entirely) and pass the others through.
-      if (opts.thinking) {
-        body.reasoning_effort = opts.thinking === 'off' ? 'none' : opts.thinking;
+      // Reasoning intensity → reasoning_effort. Three gotchas on
+      // /v1/chat/completions in mid-2026:
+      //   1. The `'minimal'` value was retired — passing it returns
+      //      HTTP 400 "Unsupported value: ... Supported values are
+      //      'none', 'low', 'medium', 'high', 'xhigh'."
+      //   2. `reasoning_effort` is INCOMPATIBLE with `tools`: HTTP 400
+      //      "Function tools with reasoning_effort are not supported …
+      //      Please use /v1/responses instead."
+      //   3. gpt-5.4-mini and similar "mini" variants default to NO
+      //      reasoning at the API level — so when the caller asked for
+      //      `thinking: 'off'`, the cleanest path is to send nothing
+      //      and let the server default kick in (zero conflict with
+      //      tools, no risk of the parameter being renamed again).
+      // So: only send the param when the caller explicitly wants
+      // reasoning enabled, AND the request isn't sending tools.
+      const hasTools = (opts.tools?.length ?? 0) > 0;
+      const wantsReasoning = opts.thinking && opts.thinking !== 'off';
+      if (wantsReasoning && !hasTools) {
+        body.reasoning_effort = opts.thinking;
       }
     } else {
       body.temperature = opts.temperature ?? 0.7;

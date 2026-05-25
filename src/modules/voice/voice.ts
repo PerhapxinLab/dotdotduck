@@ -103,6 +103,11 @@ export class Voice {
   private config: Required<Pick<VoiceConfig, 'language' | 'continuous' | 'interimResults' | 'autoRestartOnEnd'>> &
     VoiceConfig;
   private recognition: SpeechRecognition | null = null;
+  /** Warm-up recognition spawned by warmUp(). Held so a real voice
+   *  gesture can abort it before spawning its own — Web Speech rejects
+   *  a second concurrent start() with InvalidStateError, and the
+   *  symptom is identical to "voice didn't start" (silent failure). */
+  private warmupRecognition: SpeechRecognition | null = null;
   private listeners: Map<string, Set<Listener>> = new Map();
   private finalText = '';
   private interimText = '';
@@ -179,6 +184,13 @@ export class Voice {
     this.finalText = '';
     this.interimText = '';
     this.mediaChunks = [];
+    // Tear down any in-flight warmup recognition. Web Speech rejects a
+    // second concurrent start() with InvalidStateError — symptom in the
+    // wild is "voice gesture seems to do nothing". This happens when
+    // the user's FIRST page interaction (the gesture that fired
+    // warmUp) is immediately followed by a real voice gesture before
+    // the warmup recognition's onstart→abort cycle completes.
+    this.abortWarmup();
 
     // Decide which path:
     //   1. transcribeMode==='always' AND transcribe provided → MediaRecorder
@@ -326,30 +338,55 @@ export class Voice {
         (window as unknown as { SpeechRecognition?: typeof SpeechRecognition }).SpeechRecognition ??
         (window as unknown as { webkitSpeechRecognition?: typeof SpeechRecognition }).webkitSpeechRecognition;
       if (Recognition) {
+        // If a previous warmup recognition is somehow still alive (rapid
+        // refresh, double warmup call), abort it before spawning a new
+        // one — Web Speech rejects concurrent `start()` with
+        // InvalidStateError.
+        this.abortWarmup();
         try {
           const rec = new Recognition();
+          this.warmupRecognition = rec;
           rec.lang = this.config.language;
           rec.continuous = false;
           rec.interimResults = false;
-          // Tear it down the instant the engine is live — we just
-          // wanted the handshake.
-          rec.onstart = () => { try { rec.abort(); } catch { /* ignore */ } };
-          rec.onerror = () => { /* swallow — warmup must never surface */ };
+          const clear = () => {
+            if (this.warmupRecognition === rec) this.warmupRecognition = null;
+          };
+          rec.onstart = () => {
+            try { rec.abort(); } catch { /* ignore */ }
+            clear();
+          };
+          rec.onerror = () => { clear(); /* swallow — warmup must never surface */ };
+          rec.onend = clear;
           rec.start();
-          // Backstop: if onstart never fires (e.g. engine choked
-          // because nothing has user gesture activation yet), bail
-          // after 800ms so we don't leak the recognition forever.
-          setTimeout(() => { try { rec.abort(); } catch { /* ignore */ } }, 800);
+          // Backstop: if onstart never fires (engine choked, no audio
+          // gesture activation yet), bail after 800ms so a stuck
+          // warmup can't block a real voice gesture spawning its own.
+          setTimeout(() => {
+            if (this.warmupRecognition === rec) {
+              try { rec.abort(); } catch { /* ignore */ }
+              clear();
+            }
+          }, 800);
         } catch {
           /* Some browsers throw `start() can only be called from a
              user gesture` on the warmup path. Silent fail — the real
              gesture will spawn a fresh recognition anyway. */
+          this.warmupRecognition = null;
         }
       }
     }
 
     this.warmedUp = true;
     return 'granted';
+  }
+
+  /** Abort any in-flight warmup recognition. Called by `start()` so the
+   *  real voice gesture isn't blocked by a still-handshaking warmup. */
+  private abortWarmup(): void {
+    if (!this.warmupRecognition) return;
+    try { this.warmupRecognition.abort(); } catch { /* ignore */ }
+    this.warmupRecognition = null;
   }
 
   // ─── Web Speech path ─────────────────────────────────────────────
