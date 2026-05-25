@@ -1,0 +1,41 @@
+# Deps + build output
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Env
+.env
+.env.*.local
+
+# pnpm / npm / yarn
+.pnpm-store/
+.npm/
+.yarn/
+yarn-error.log
+pnpm-debug.log*
+npm-debug.log*
+
+# Test / coverage
+coverage/
+.nyc_output/
+*.lcov
+
+# Logs + caches
+*.log
+.cache/
+.vite/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.swp
+*.swo
+
+# Local agent / tooling state
+.claude/settings.local.json
+.cursor/
+.windsurf/

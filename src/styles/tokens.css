@@ -1,0 +1,252 @@
+/*
+ * dddk — design tokens (CSS custom properties).
+ *
+ * All dddk UI (palette, spotter, subtitle, dwell, agent cursor,
+ * mobile chrome, ...) reads from these variables. Override any of them in
+ * your host stylesheet to retheme:
+ *
+ *   :root {
+ *     --dddk-accent: #6366f1;       // your brand color
+ *     --dddk-radius: 8px;
+ *   }
+ *
+ * Color modes — light by default, dark when `[data-theme="dark"]` is set
+ * anywhere up the tree (typically `<html data-theme="dark">`). Custom modes
+ * (sepia / high-contrast / etc.) just add another selector that overrides
+ * the same variables.
+ */
+
+:root {
+  /* ─── color: surfaces ──────────────────────────────────────────── */
+  --dddk-bg: #ffffff;
+  --dddk-bg-elevated: #ffffff;
+  --dddk-bg-overlay: rgba(0, 0, 0, 0.45);
+  --dddk-mobile-bar: rgba(255, 255, 255, 0.82);
+
+  /* ─── color: text ──────────────────────────────────────────────── */
+  --dddk-text: #18181b;
+  --dddk-text-muted: #71717a;
+  --dddk-text-on-accent: #ffffff;
+
+  /* ─── color: accent (brand) ────────────────────────────────────── */
+  --dddk-accent: #ec4899;
+  --dddk-accent-hover: #db2777;
+  --dddk-accent-soft: rgba(236, 72, 153, 0.12);
+
+  /* ─── color: borders ───────────────────────────────────────────── */
+  --dddk-border: rgba(0, 0, 0, 0.08);
+
+  /* ─── shape ────────────────────────────────────────────────────── */
+  --dddk-radius: 10px;
+  --dddk-radius-sm: 6px;
+  --dddk-blur: 16px;
+
+  /* ─── shadow ───────────────────────────────────────────────────── */
+  --dddk-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --dddk-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --dddk-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.12);
+
+  /* ─── typography ───────────────────────────────────────────────── */
+  --dddk-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --dddk-font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  --dddk-font-size-sm: 12px;
+  --dddk-font-size-md: 14px;
+  --dddk-font-size-lg: 16px;
+  --dddk-font-weight-medium: 500;
+  --dddk-line-height: 1.55;
+
+  /* ─── component sizing ─────────────────────────────────────────── */
+  --dddk-palette-width: 600px;
+  --dddk-palette-max-height: 480px;
+
+  /* ─── subtitle bar ─────────────────────────────────────────────── */
+  /* The bar must read as a CLEARLY LIFTED surface, NOT an inverted
+   * pop AND NOT the same colour as the page. So we use explicit values
+   * instead of inheriting `--dddk-bg-elevated` (which on many hosts is
+   * only ~5–8 luma points above page bg — the bar disappears into the
+   * background, see user feedback). Visible border + strong shadow do
+   * the lifting work. Hosts override `--dddk-bar-bg` directly to
+   * theme it. */
+  --dddk-bar-bg: rgba(255, 255, 255, 0.98);
+  --dddk-bar-bottom: 32px;
+  --dddk-bar-font: var(--dddk-font);
+  --dddk-bar-max-width: 720px;
+  --dddk-bar-padding: 12px 18px;
+  --dddk-bar-radius: 12px;
+  --dddk-bar-shadow: 0 12px 36px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08);
+  --dddk-bar-text: var(--dddk-text, #18181b);
+  --dddk-bar-border: rgba(0, 0, 0, 0.12);
+
+  /* ─── dwell frame (the long-press selection outline) ────────────── */
+  --dddk-dwell-frame-color: var(--dddk-accent);
+  --dddk-dwell-frame-width: 2px;
+  --dddk-dwell-frame-style: solid;
+  --dddk-dwell-frame-offset: 3px;
+  --dddk-dwell-frame-radius: var(--dddk-radius-sm);
+
+  /* ─── palette items (per-row visual tokens) ────────────────────────
+   * Each PaletteItem renders as: [icon] [prefix] [name] — [description] [shortcut].
+   * Every part below is independently themable.
+   */
+  --dddk-palette-row-padding: 9px 16px;
+  --dddk-palette-row-gap: 12px;
+  --dddk-palette-row-radius: var(--dddk-radius-sm);
+
+  /* icon. Both active and inactive use a calm accent so the row signal is
+   * the row background, not a colour flash. */
+  --dddk-palette-icon-size: 16px;
+  --dddk-palette-icon-color: var(--dddk-text-muted);
+  --dddk-palette-icon-color-active: var(--dddk-accent);
+
+  /* prefix label (`nav:` / `/theme` etc.). Rendered as plain inline text —
+   * same font as the row, muted colour — so it reads as a discoverable
+   * token, not a brand-coloured chip. Keeps the list calm when many
+   * commands share the screen. */
+  --dddk-palette-prefix-font: inherit;
+  --dddk-palette-prefix-font-size: var(--dddk-font-size-md);
+  --dddk-palette-prefix-bg: transparent;
+  --dddk-palette-prefix-color: var(--dddk-text-muted);
+  --dddk-palette-prefix-radius: 0;
+  --dddk-palette-prefix-padding: 0;
+
+  /* item name. Active variant keeps the same text colour as the inactive
+   * one — only the row background tints. (Full-fill backgrounds force
+   * --dddk-text-on-accent which on saturated pink swallows the text.) */
+  --dddk-palette-name-color: var(--dddk-text);
+  --dddk-palette-name-color-active: var(--dddk-text);
+  --dddk-palette-name-font-size: var(--dddk-font-size-md);
+  --dddk-palette-name-font-weight: var(--dddk-font-weight-medium);
+
+  /* dash between name and description */
+  --dddk-palette-dash-color: var(--dddk-text-muted);
+  --dddk-palette-dash-opacity: 0.55;
+
+  /* description (the bit after the dash). Same colour active/inactive — the
+   * row tint alone signals selection. */
+  --dddk-palette-desc-color: var(--dddk-text-muted);
+  --dddk-palette-desc-color-active: var(--dddk-text-muted);
+  --dddk-palette-desc-font-size: var(--dddk-font-size-sm);
+  --dddk-palette-desc-opacity-active: 1;
+
+  /* shortcut hint (⌘K etc.) on the far right */
+  --dddk-palette-shortcut-color: var(--dddk-text-muted);
+  --dddk-palette-shortcut-font: var(--dddk-font-mono);
+  --dddk-palette-shortcut-font-size: var(--dddk-font-size-sm);
+  --dddk-palette-shortcut-opacity: 0.6;
+
+  /* section header (e.g. "Navigation", "Settings"). Sentence-case, no
+   * letter-spacing — the row content carries the visual weight; the header
+   * is just a quiet label. Sticky-positioned in the list, so `bg` MUST be
+   * opaque (or match the palette body) to occlude rows scrolling beneath. */
+  --dddk-palette-section-color: var(--dddk-text-muted);
+  --dddk-palette-section-font-size: 12px;
+  --dddk-palette-section-font-weight: 500;
+  --dddk-palette-section-letter-spacing: 0;
+  --dddk-palette-section-padding: 14px 16px 6px;
+  --dddk-palette-section-text-transform: none;
+  --dddk-palette-section-bg: var(--dddk-bg-elevated);
+
+  /* hover/active row backgrounds. Neutral semi-transparent black on light
+   * mode (matching token rebinds for dark mode below). Decoupled from the
+   * brand accent so the row signal stays calm even when the host pins a
+   * loud accent colour (pink, neon, etc.). */
+  --dddk-palette-row-bg-hover: rgba(0, 0, 0, 0.04);
+  --dddk-palette-row-bg-active: rgba(0, 0, 0, 0.06);
+  /* Arrow indicator on the focused row (Cloudflare uses `→` on the right). */
+  --dddk-palette-row-arrow-color: var(--dddk-text-muted);
+
+  /* Search-match highlight on row name / description. Warm yellow on light;
+   * dark mode overrides below. Independent of the brand accent so it always
+   * reads as "this is the part of the row your query matched". */
+  --dddk-palette-match-bg: rgba(250, 204, 21, 0.35);
+  --dddk-palette-match-color: inherit;
+  --dddk-palette-match-radius: 2px;
+  --dddk-palette-match-weight: 600;
+
+  /* Footer kbd chips (the ↑ ↓ ⏎ esc hints at the bottom). Quiet by default
+   * so the hint strip reads as ambient help, not chrome. */
+  --dddk-palette-kbd-bg: rgba(0, 0, 0, 0.05);
+  --dddk-palette-kbd-color: var(--dddk-text-muted);
+
+  /* ─── z-index ──────────────────────────────────────────────────── */
+  --dddk-z-bar: 9700;
+  --dddk-z-palette: 9600;
+  --dddk-z-pointer: 9500;
+  --dddk-z-cursor: 9800;
+}
+
+/* ─── dark mode ──────────────────────────────────────────────────── */
+
+[data-theme='dark'] {
+  --dddk-bg: #09090b;
+  --dddk-bg-elevated: #18181b;
+  --dddk-bg-overlay: rgba(0, 0, 0, 0.6);
+  --dddk-mobile-bar: rgba(24, 24, 27, 0.85);
+
+  --dddk-text: #fafafa;
+  --dddk-text-muted: #a1a1aa;
+
+  --dddk-border: rgba(255, 255, 255, 0.1);
+
+  --dddk-accent-soft: rgba(236, 72, 153, 0.18);
+
+  --dddk-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --dddk-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --dddk-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+
+  /* Bar in dark mode: an explicit lifted surface noticeably brighter
+   * than the page bg, with a visible white-tint border. Hard-coded
+   * instead of inheriting `--dddk-bg-elevated` so the lift is
+   * predictable across hosts (some bridge bg-elevated to ~#111 which
+   * is too close to a #0a page bg). The shadow goes harder than light
+   * mode because dark bgs absorb subtle shadows. */
+  --dddk-bar-bg: rgba(38, 38, 44, 0.96);
+  --dddk-bar-text: var(--dddk-text, #fafafa);
+  --dddk-bar-border: rgba(255, 255, 255, 0.14);
+  --dddk-bar-shadow: 0 16px 48px rgba(0, 0, 0, 0.55), 0 2px 12px rgba(0, 0, 0, 0.3);
+
+  /* Neutral row backgrounds flip to white-tinted on dark. */
+  --dddk-palette-row-bg-hover: rgba(255, 255, 255, 0.05);
+  --dddk-palette-row-bg-active: rgba(255, 255, 255, 0.08);
+  /* Match highlight: softer amber on dark, brighter text colour so the
+   * yellow doesn't muddy against the dark row tint. */
+  --dddk-palette-match-bg: rgba(250, 204, 21, 0.25);
+  --dddk-palette-match-color: #fde68a;
+  /* Footer kbd chip — white-tint on dark for legibility. */
+  --dddk-palette-kbd-bg: rgba(255, 255, 255, 0.08);
+}
+
+/* ─── system preference fallback ──────────────────────────────────
+ * Only applies when no explicit data-theme is set on a parent.
+ * Hosts that want hard-pinned light or dark should set data-theme manually.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --dddk-bg: #09090b;
+    --dddk-bg-elevated: #18181b;
+    --dddk-bg-overlay: rgba(0, 0, 0, 0.6);
+    --dddk-mobile-bar: rgba(24, 24, 27, 0.85);
+
+    --dddk-text: #fafafa;
+    --dddk-text-muted: #a1a1aa;
+
+    --dddk-border: rgba(255, 255, 255, 0.1);
+
+    --dddk-accent-soft: rgba(236, 72, 153, 0.18);
+
+    --dddk-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --dddk-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
+    --dddk-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+
+    --dddk-bar-bg: rgba(38, 38, 44, 0.96);
+    --dddk-bar-text: var(--dddk-text, #fafafa);
+    --dddk-bar-border: rgba(255, 255, 255, 0.14);
+    --dddk-bar-shadow: 0 16px 48px rgba(0, 0, 0, 0.55), 0 2px 12px rgba(0, 0, 0, 0.3);
+
+    --dddk-palette-row-bg-hover: rgba(255, 255, 255, 0.05);
+    --dddk-palette-row-bg-active: rgba(255, 255, 255, 0.08);
+    --dddk-palette-match-bg: rgba(250, 204, 21, 0.25);
+    --dddk-palette-match-color: #fde68a;
+    --dddk-palette-kbd-bg: rgba(255, 255, 255, 0.08);
+  }
+}

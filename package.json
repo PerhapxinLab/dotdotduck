@@ -1,0 +1,96 @@
+{
+  "name": "@perhapxin/dddk",
+  "version": "0.1.0",
+  "description": "Command palette + voice + Dwell + inline AI + DOM-grounded agent SDK for any web app",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./agent": {
+      "types": "./dist/agent/index.d.ts",
+      "import": "./dist/agent/index.js"
+    },
+    "./llm": {
+      "types": "./dist/llm/index.d.ts",
+      "import": "./dist/llm/index.js"
+    },
+    "./ui": {
+      "types": "./dist/ui/index.d.ts",
+      "import": "./dist/ui/index.js"
+    },
+    "./skills": {
+      "types": "./dist/skills/index.d.ts",
+      "import": "./dist/skills/index.js"
+    },
+    "./toolbox":           { "types": "./dist/toolbox/index.d.ts",           "import": "./dist/toolbox/index.js" },
+    "./toolbox/search":    { "types": "./dist/toolbox/search/index.d.ts",    "import": "./dist/toolbox/search/index.js" },
+    "./toolbox/recommend": { "types": "./dist/toolbox/recommend/index.d.ts", "import": "./dist/toolbox/recommend/index.js" },
+    "./modules/analytics": { "types": "./dist/modules/analytics/index.d.ts", "import": "./dist/modules/analytics/index.js" },
+    "./modules/proactive": { "types": "./dist/modules/proactive/index.d.ts", "import": "./dist/modules/proactive/index.js" },
+    "./styles.css": "./dist/styles.css",
+    "./styles/tokens.css": "./dist/styles/tokens.css",
+    "./styles/index.css": "./dist/styles/index.css"
+  },
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/dom-speech-recognition": "^0.0.6",
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PerhapxinLab/dddk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/PerhapxinLab/dddk/issues"
+  },
+  "homepage": "https://dddk.perhapxin.com",
+  "keywords": [
+    "command-palette",
+    "cmdk",
+    "ai-agent",
+    "browser-agent",
+    "web-agent",
+    "dom",
+    "voice",
+    "inline-ai",
+    "dwell",
+    "skill-sdk",
+    "react",
+    "svelte",
+    "vue"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
