@@ -67,10 +67,15 @@ export class OpenAIProvider implements LLMProvider {
 
     if (reasoning) {
       // No custom temperature — reasoning models require the default.
-      // Reasoning intensity → reasoning_effort param. 'off' maps to
-      // 'minimal' (the lowest setting the API exposes).
+      // Reasoning intensity → reasoning_effort. The API surface changed
+      // mid-2026: gpt-5.4-mini (and later) accept
+      // `'none' | 'low' | 'medium' | 'high' | 'xhigh'`. The earlier
+      // `'minimal'` keyword was removed — passing it now returns HTTP 400
+      // `Unsupported value: 'reasoning_effort' does not support
+      // 'minimal' with this model.` Map our internal `'off'` to `'none'`
+      // (skip reasoning entirely) and pass the others through.
       if (opts.thinking) {
-        body.reasoning_effort = opts.thinking === 'off' ? 'minimal' : opts.thinking;
+        body.reasoning_effort = opts.thinking === 'off' ? 'none' : opts.thinking;
       }
     } else {
       body.temperature = opts.temperature ?? 0.7;

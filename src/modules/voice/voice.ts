@@ -250,6 +250,48 @@ export class Voice {
     this.listeners.clear();
   }
 
+  /**
+   * Pre-warm the mic permission so the FIRST real voice gesture isn't
+   * eaten by the browser's permission prompt.
+   *
+   * Without this, the first `start()` chains:
+   *   getUserMedia() → permission prompt (200-2000ms) → release stream
+   *   → SpeechRecognition.start() → onstart fires
+   * In practice the user holds Space, sees nothing, releases — by the
+   * time `onstart` fires there's no audio to capture and the second
+   * press is the one that actually transcribes.
+   *
+   * Call this from any incidental user gesture (first pointerdown /
+   * keydown) once permission state is `prompt`. Idempotent — repeated
+   * calls after `granted` skip the prompt. Resolves with the permission
+   * state so the host can stop calling it after success.
+   */
+  async warmUp(): Promise<'granted' | 'prompt' | 'denied' | 'unavailable'> {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      return 'unavailable';
+    }
+    // Honour explicit Permissions API state if available — granted means
+    // no work, denied means we'd just hit an error.
+    if (navigator.permissions?.query) {
+      try {
+        const status = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+        if (status.state === 'granted') return 'granted';
+        if (status.state === 'denied') return 'denied';
+      } catch {
+        /* Firefox / some embedded webviews don't expose `microphone`
+           in the Permissions API. Fall through to the getUserMedia
+           probe — slightly more invasive but correct on every engine. */
+      }
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop());
+      return 'granted';
+    } catch (err) {
+      return (err as { name?: string })?.name === 'NotAllowedError' ? 'denied' : 'prompt';
+    }
+  }
+
   // ─── Web Speech path ─────────────────────────────────────────────
 
   private startWebSpeech(): void {

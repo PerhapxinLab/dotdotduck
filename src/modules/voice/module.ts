@@ -91,6 +91,14 @@ export class VoiceModule {
     });
   }
 
+  /**
+   * Pre-warm the mic permission. Forwards to the underlying `Voice.warmUp()` —
+   * see that doc for why. Resolves with the permission state.
+   */
+  warmUp(): Promise<'granted' | 'prompt' | 'denied' | 'unavailable'> {
+    return this.stt.warmUp();
+  }
+
   async speakSubtitle(text: string): Promise<void> {
     if (!this.autoSpeakSubtitles) return;
     if (!this.tts.isSupported()) return;
