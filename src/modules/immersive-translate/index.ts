@@ -86,8 +86,14 @@ export class ImmersiveTranslate {
   constructor(config: ImmersiveTranslateConfig) {
     this.cfg = {
       llm: config.llm,
-      batchSize: config.batchSize ?? 30,
-      batchCharCap: config.batchCharCap ?? 4500,
+      // Smaller batches than the original 30 / 4500. With Promise.all
+      // fan-out, latency is bounded by the slowest single call —
+      // generating 4500 chars of translation takes ~5s on a mid model,
+      // generating 1200 chars takes ~1.5s. The total work is the same,
+      // so more, smaller batches → much faster wall-clock on parallel
+      // hardware. Hosts that hit rate limits can override upward.
+      batchSize: config.batchSize ?? 8,
+      batchCharCap: config.batchCharCap ?? 1200,
       root: config.root ?? (typeof document !== 'undefined' ? document.body : (null as unknown as HTMLElement)),
       ignoreSelector: config.ignoreSelector,
       cache: config.cache,
@@ -116,6 +122,13 @@ export class ImmersiveTranslate {
     const blocks = this.collectBlocks();
     if (blocks.length === 0) return;
 
+    // Persistent processing indicator so the bottom of the screen
+    // shows "translating…" the entire time the LLM calls are in flight,
+    // not just for the brief moment between `subtitle.show` re-renders.
+    // Without this the user sees a flash of progress text then nothing
+    // while the slowest batch finishes, and assumes the feature hung.
+    const indicatorLabel = `Translating → ${label ?? targetLang}`;
+    this.dddk?.subtitle.showIndicator('processing', indicatorLabel);
     this.dddk?.subtitle.show({
       text: `Translating → ${label ?? targetLang} (${blocks.length} blocks)`,
       type: 'info',
@@ -134,6 +147,7 @@ export class ImmersiveTranslate {
         text: `Translating ${done}/${blocks.length} → ${label ?? targetLang}`,
         type: 'info',
       });
+      this.dddk?.subtitle.showIndicator('processing', `${indicatorLabel} (${done}/${blocks.length})`);
     };
 
     await Promise.all(batches.map(async (batch) => {
@@ -166,6 +180,7 @@ export class ImmersiveTranslate {
       updateProgress();
     }));
 
+    this.dddk?.subtitle.hideIndicator();
     this.dddk?.subtitle.show({
       text: `Translation complete (${blocks.length} blocks)`,
       type: 'info',

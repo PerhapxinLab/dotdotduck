@@ -318,6 +318,15 @@ export class WebAgent {
           messages,
           tools,
           signal,
+          // Action selection doesn't need reasoning — the agent picks ONE
+          // tool to call from the registry per step. Passing `thinking: 'off'`
+          // tells providers that support reasoning (gpt-5, o-series, Gemini
+          // 3.x) to skip the internal scratchpad pass, which is the single
+          // biggest latency win on a voice → answer flow: 5-8s of reasoning
+          // becomes <1s of straight tool-call generation. Providers that
+          // don't have a reasoning mode (gpt-5.4-mini, gemini-2.x) ignore
+          // this flag, so it's safe to send unconditionally.
+          thinking: this.config.thinking ?? 'off',
         });
 
         const call = response.toolCalls?.[0];
@@ -412,7 +421,22 @@ export class WebAgent {
         }
       }
 
-      if (this.config.confirmEachStep || perActionNeedsConfirm) {
+      // `ask_user` / `ask_user_choice` / `show_subtitle` ARE user-facing
+      // pauses themselves — wrapping them in a second "proceed?" gate
+      // shows the user two prompts back-to-back ("Should I ask you a
+      // question?" → yes → then the actual question). Skip the gate for
+      // these built-ins and let the action's own pause handle the user
+      // turn. Hosts that flagged a specific action with
+      // `requireConfirmation: true` still get gated even for the user-
+      // facing built-ins (rare but legitimate).
+      const isUserFacingBuiltin =
+        actionName === 'ask_user' ||
+        actionName === 'ask_user_choice' ||
+        actionName === 'show_subtitle';
+      const shouldConfirm = perActionNeedsConfirm ||
+        (this.config.confirmEachStep === true && !isUserFacingBuiltin);
+
+      if (shouldConfirm) {
         const customMessage = matched?.confirmationMessage?.(actionParams as never);
         const message = customMessage ?? narrateAction(actionName, actionParams, targetSelector, this.config.locale);
         const approved = await new Promise<boolean>((resolve) => {

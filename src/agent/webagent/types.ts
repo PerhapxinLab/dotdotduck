@@ -195,6 +195,16 @@ export interface WebAgentConfig {
   locale?: string;
   maxSteps?: number;
   maxErrors?: number;
+  /**
+   * Reasoning budget for the per-step LLM call. Default `'off'` — action
+   * selection on a fixed registry doesn't benefit from internal-scratchpad
+   * reasoning, and the latency hit (5-8s extra on reasoning-capable models)
+   * is the single biggest source of "why is the agent so slow" feedback.
+   * Set `'low'` / `'medium'` / `'high'` if your custom actions need the
+   * model to think harder before picking one. Providers without a
+   * reasoning mode (gpt-5.4-mini, gemini-2.x) ignore this flag.
+   */
+  thinking?: 'off' | 'low' | 'medium' | 'high';
 
   /**
    * Full system prompt override. Pass a string to hard-replace the default,

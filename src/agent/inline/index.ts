@@ -278,6 +278,14 @@ export class InlineAgent {
    */
   setLocale(locale: string): void {
     this.cfg.locale = locale;
+    // Menu DOM was painted at mount time with the construction-time locale.
+    // Switching language (e.g. sidebar toggle) without refreshing leaves the
+    // header + row labels in the previous language.
+    if (this.menu) {
+      const header = this.menu.querySelector('.ia-header');
+      if (header) header.textContent = this.t('header');
+    }
+    this.refreshMenu();
   }
 
   private t(key: keyof typeof I18N['en']): string {
