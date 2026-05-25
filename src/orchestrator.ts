@@ -111,6 +111,23 @@ export interface DotDotDuckConfig {
     enabled?: boolean;
   };
 
+  /**
+   * DOM-grounded agent config. Default: `{ enabled: true }` when `llm` is
+   * set; effectively off when `llm` is unset.
+   *
+   * Set `enabled: false` to keep the LLM (for inline AI / voice cleanup /
+   * other roles) but completely disable the agent loop — `startAgent()`
+   * no-ops with an info subtitle, palette plain-text Enter does NOT fire
+   * the agent, and skills that emit `agent` calls log a warning. Use this
+   * when you want dddk's palette / voice / Dwell pieces but explicitly
+   * NOT the autonomous "let the agent click things on the page" pathway.
+   *
+   * Can be flipped at runtime via `dddk.setAgentEnabled(bool)`.
+   */
+  agent?: {
+    enabled?: boolean;
+  };
+
   /** Per-host storage (for clipboard history, recent commands, etc.). Defaults to localStorage. */
   storage?: StorageAdapter;
 
@@ -214,6 +231,7 @@ export class DotDotDuck {
   private pendingSurface: { resolve: (data: Record<string, unknown> | null) => void } | null = null;
   private agentInstance: WebAgent | null = null;
   private voiceEnabled: boolean;
+  private agentEnabled: boolean;
   private currentSelection: SelectionContext | null = null;
 
   constructor(config: DotDotDuckConfig = {}) {
@@ -223,6 +241,7 @@ export class DotDotDuck {
     this.storage = config.storage ?? defaultStorage();
     this.prefs = new PreferenceStore(this.storage);
     this.voiceEnabled = config.voice?.enabled ?? true;
+    this.agentEnabled = config.agent?.enabled ?? true;
 
     this.palette = new CommandPalette({
       initialItems: this.buildPaletteItems(),
@@ -578,6 +597,14 @@ export class DotDotDuck {
       });
       return;
     }
+    if (!this.agentEnabled) {
+      this.subtitle.show({
+        text: this.t('agent.disabled', 'Agent is disabled.'),
+        type: 'info',
+        autoHide: 2000,
+      });
+      return;
+    }
     if (!this.agentInstance) this.agentInstance = this.buildAgent();
     if (this.agentInstance.isRunning()) this.agentInstance.stop();
     // Wipe state from the previous round — borders / pin frames / subtitles
@@ -658,6 +685,24 @@ export class DotDotDuck {
 
   isVoiceEnabled(): boolean {
     return this.voiceEnabled;
+  }
+
+  /**
+   * Runtime toggle for the DOM-grounded agent loop. When `false`,
+   * `startAgent()` no-ops with a subtitle hint, palette plain-text Enter
+   * does NOT fire the agent, and any in-flight run stops cleanly. Other
+   * subsystems that use the LLM router (inline AI, voice cleanup, …)
+   * keep working.
+   */
+  setAgentEnabled(enabled: boolean): void {
+    this.agentEnabled = enabled;
+    if (!enabled && this.agentInstance?.isRunning()) {
+      this.agentInstance.stop();
+    }
+  }
+
+  isAgentEnabled(): boolean {
+    return this.agentEnabled;
   }
 
   /** Access the underlying WebAgent (null until first startAgent call). */
