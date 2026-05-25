@@ -606,8 +606,13 @@ export class CommandPalette {
    * possible so navigation invalidates stale pins.
    */
   get pinnedContext(): { text: string; element?: string; kind: 'dom' | 'text' } {
+    // Agent-facing: NO `<tag.class>` signature prefix. The signature is a
+    // debug affordance for the chip bar; feeding it into selection.text
+    // confuses the LLM (it reads `<section.section>` as a literal HTML
+    // reference and starts inspecting the DOM via tools instead of just
+    // operating on the inner text).
     return {
-      text: this.readPinnedTextLive(),
+      text: this.readPinnedTextLive({ withSignature: false }),
       element: this.pinnedContextElement,
       kind: this.pinnedContextKind,
     };
@@ -617,14 +622,20 @@ export class CommandPalette {
    * Look up the pinned element from the live DOM and return its current
    * text. Returns the cached text fallback for non-DOM pins, or `''`
    * if nothing valid is pinned right now.
+   *
+   * `withSignature: true` prepends a human-readable `<tag#id.classes>`
+   * tag — used by the chip bar so the user sees WHICH element is pinned.
+   * The agent path must use `withSignature: false` so the LLM gets clean
+   * prose to operate on.
    */
-  private readPinnedTextLive(): string {
+  private readPinnedTextLive(opts: { withSignature?: boolean } = {}): string {
     if (!this.pinnedContextElement) return this.pinnedContextText;
     if (typeof document === 'undefined') return this.pinnedContextText;
     let el: Element | null = null;
     try { el = document.querySelector(this.pinnedContextElement); } catch { /* invalid selector */ }
     if (!el || !el.isConnected) return '';
-    if (this.pinnedContextKind === 'dom') {
+    const inner = ((el as HTMLElement).innerText ?? el.textContent ?? '').trim().slice(0, 1000);
+    if (this.pinnedContextKind === 'dom' && opts.withSignature) {
       const tag = el.tagName.toLowerCase();
       const id = (el as HTMLElement).id ? `#${(el as HTMLElement).id}` : '';
       const classList = (el as HTMLElement).classList
@@ -632,10 +643,9 @@ export class CommandPalette {
         : [];
       const cls = classList.length ? '.' + classList.join('.') : '';
       const sig = `<${tag}${id}${cls}>`;
-      const inner = ((el as HTMLElement).innerText ?? el.textContent ?? '').trim().slice(0, 200);
       return inner ? `${sig} ${inner}` : sig;
     }
-    return (el.textContent ?? this.pinnedContextText).trim();
+    return inner || (el.textContent ?? this.pinnedContextText).trim();
   }
 
   private captureContextOnOpen(seed?: string): void {
@@ -653,8 +663,13 @@ export class CommandPalette {
 
     // Source 1 — host-supplied pin. Re-read live from the DOM so a stale
     //            pin from before a route change disappears on its own.
+    //            We pass `withSignature: true` because the captured text
+    //            here is what the chip bar displays — the user wants to
+    //            SEE which element is pinned. The agent-bound copy
+    //            (orchestrator.startAgent → palette.pinnedContext)
+    //            reads with `withSignature: false` for a clean payload.
     if (!text && this.pinnedContextElement) {
-      const liveText = this.readPinnedTextLive();
+      const liveText = this.readPinnedTextLive({ withSignature: true });
       if (liveText) {
         text = liveText;
         elementSel = this.pinnedContextElement;

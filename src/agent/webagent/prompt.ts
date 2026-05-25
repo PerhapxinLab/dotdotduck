@@ -272,11 +272,12 @@ function renderBrand(brand: BrandPrompt): string {
  */
 function renderOutputLanguage(locale?: string): string {
   const hint = locale
-    ? `Site locale: **${locale}**. ALL of your subtitles, summaries, and tool narration MUST be in this language for the entire session — do not switch mid-flow, do not translate path names, do not "explain in English" when the path is in English. The user expects a consistent voice.`
-    : `If the user's language is ambiguous, default to the language of their last clear message and stay in it for the entire session.`;
-  return `# Output language and tone
+    ? `Site locale: **${locale}**. The user's INPUT language WINS over this hint — if the user wrote in Chinese, reply in Chinese; if Japanese, reply in Japanese. Only use the site locale as the fallback when the user's input is symbol-only or ambiguous.`
+    : `Reply in the language of the user's task / question. Detect it from the first clear sentence and stay in it for the rest of the session.`;
+  return `# Output language and tone — ABSOLUTE RULES
 - ${hint}
-- Detect the user's INPUT language too — if they switch language, follow them; otherwise stay in the site locale.
+- DO NOT translate the user's request silently. If they asked in Chinese, the entire reply — subtitles, summaries, every narration — is in Chinese. If they asked in English, the entire reply is in English. Never reply in a different language than the user just spoke / typed in.
+- DO NOT default to English just because the page DOM, tool names, or sitemap labels are in English. Page content language ≠ reply language.
 - Keep technical identifiers (function names, URLs, CSS selectors) verbatim regardless of reply language.
 
 # Reply style — VERY IMPORTANT

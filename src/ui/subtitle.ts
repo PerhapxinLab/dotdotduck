@@ -388,20 +388,50 @@ export class Subtitle {
   invokeAccept(): boolean {
     const cb = this.currentOpts?.onAccept;
     if (!cb) return false;
+    // Acknowledge the tap immediately: hide the gated subtitle + show
+    // a "running" indicator so the user sees their gesture landed. The
+    // next agent step will replace this with its own subtitle. Without
+    // this the previous step's bar lingers for 3-5s of LLM latency and
+    // users assume the Space tap was ignored.
+    this.hide();
+    this.showIndicator('processing', this.resolveRunningLabel());
     cb();
     return true;
   }
   invokeReject(): boolean {
     const cb = this.currentOpts?.onReject;
     if (!cb) return false;
+    this.hide();
+    this.showIndicator('processing', this.resolveRunningLabel());
     cb();
     return true;
   }
   invokeCancel(): boolean {
     const cb = this.currentOpts?.onCancel;
     if (!cb) return false;
+    this.hide();
     cb();
     return true;
+  }
+
+  /**
+   * Override the "running" indicator label shown immediately after the
+   * user taps Space accept / reject. The default is locale-aware
+   * ("處理中…" / "Working…") via `setLocale()`. Hosts that want a
+   * different word ("Thinking…", "Running automation…") set their own.
+   * Pass `null` to fall back to the bundled default.
+   */
+  private runningLabel: string | null = null;
+  setRunningLabel(label: string | null): void {
+    this.runningLabel = label;
+  }
+
+  private resolveRunningLabel(): string | undefined {
+    if (this.runningLabel) return this.runningLabel;
+    // Locale-aware default. Bundled `en` / `zh-TW`; anything else falls
+    // back to English so the indicator never breaks on unknown locales.
+    if (this.locale === 'zh-TW') return 'Agent 執行中…';
+    return 'Agent running…';
   }
 
   showIndicator(state: 'listening' | 'processing', label?: string): void {

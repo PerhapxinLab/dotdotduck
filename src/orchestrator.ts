@@ -157,6 +157,28 @@ export interface DotDotDuckConfig {
   paletteCategories?: import('./triggers/command-palette').PaletteCategory[];
   /** Label for the implicit "All" chip. Defaults to "All". */
   paletteAllCategoriesLabel?: string;
+
+  /**
+   * Override the indicator labels shown in the subtitle bar. All fields
+   * optional — leave undefined to use the bundled locale-aware defaults.
+   *
+   *  - `running`: shown immediately after the user taps Space accept /
+   *    reject on an agent confirm prompt, while the next LLM call is
+   *    in flight. Defaults: `'Agent 執行中…'` (zh-TW) / `'Agent running…'`.
+   *  - `processing`: shown by the SDK's `dddk.subtitle.showIndicator
+   *    ('processing')` calls (immersive-translate progress, voice
+   *    transcription, etc.) when no explicit label is passed.
+   *  - `listening`: STT-active indicator label.
+   *
+   * Pass strings or per-locale records:
+   *   indicators: { running: 'Working on it…' }
+   *   indicators: { running: { en: 'Working…', 'zh-TW': '處理中…' } }
+   */
+  indicators?: {
+    running?: string | Record<string, string>;
+    processing?: string | Record<string, string>;
+    listening?: string | Record<string, string>;
+  };
 }
 
 export class DotDotDuck {
@@ -238,6 +260,18 @@ export class DotDotDuck {
     this.config = config;
     this.skills = new SkillRegistry(config.skills);
     this.subtitle = new Subtitle({ locale: config.locale === 'en' ? 'en' : 'zh-TW' });
+    // Indicator label overrides — host can pass a string OR a
+    // { [locale]: string } map. We resolve to the active locale, falling
+    // back to English if the locale isn't in the map.
+    const resolveIndicator = (
+      v: string | Record<string, string> | undefined,
+    ): string | null => {
+      if (!v) return null;
+      if (typeof v === 'string') return v;
+      return v[String(config.locale ?? 'en')] ?? v.en ?? null;
+    };
+    const running = resolveIndicator(config.indicators?.running);
+    if (running) this.subtitle.setRunningLabel(running);
     this.storage = config.storage ?? defaultStorage();
     this.prefs = new PreferenceStore(this.storage);
     this.voiceEnabled = config.voice?.enabled ?? true;
@@ -915,24 +949,26 @@ export class DotDotDuck {
         this.subtitle.show({
           text: session.summary,
           type: 'info',
-          autoHide: 3000,
+          // 12s so the user has time to actually read the agent's reply —
+          // 3s vanished before the eye finished a single line of zh-TW
+          // text in practice.
+          autoHide: 12000,
         });
       }
-      // Keep the final action's frame visible for a moment so the user can
-      // see where the agent ended up, then clear it. 2.5s lines up with the
-      // summary autoHide above. Webagent overlays (borders the agent drew)
-      // get cleared too — they no longer have a `clear_overlays` tool.
+      // Keep the final action's frame visible until the summary fades so
+      // the user can see where the agent ended up. Webagent overlays
+      // (borders the agent drew) get cleared too.
       setTimeout(() => {
         this.clearHighlight();
         clearWebagentOverlays();
-      }, 2500);
+      }, 12000);
     });
 
     agent.on('error', (err) => {
       this.subtitle.show({
         text: `Agent 錯誤：${err.message}`,
         type: 'info',
-        autoHide: 3500,
+        autoHide: 14000,
       });
       this.clearHighlight();
       clearWebagentOverlays();
