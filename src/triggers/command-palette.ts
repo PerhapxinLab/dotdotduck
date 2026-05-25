@@ -1916,11 +1916,11 @@ function truncate(s: string, max: number): string {
 // ─── helpers ────────────────────────────────────────────────────────
 
 /**
- * Lazy hay-cache: each fuzzy lookup used to re-concat name + description +
- * keywords on every keystroke for every item, which is O(N * L) per char
- * with non-trivial constants on hundreds of items. We stash the lowercased
- * haystack on the item once and reuse it. setItems() invalidates by replacing
- * the item array entirely.
+ * Lazy hay-cache for fuzzy lookup. Concatenating name + description +
+ * keywords on every keystroke for every item is O(N * L) per char with
+ * non-trivial constants on hundreds of items, so we stash the lowercased
+ * haystack on the item once and reuse it. setItems() invalidates by
+ * replacing the item array entirely.
  */
 interface PaletteItemWithHay extends PaletteItem {
   __searchHay?: string;

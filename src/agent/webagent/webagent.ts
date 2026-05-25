@@ -620,9 +620,9 @@ function narrateAction(
   const trim = (s: string, n = 40) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
   const targetSel = targetSelector ?? str('selector') ?? str('target') ?? str('element');
   // Element-friendly label: try the element's visible innerText FIRST
-  // so the confirmation reads "要強調 「Inline AI — 在輸入框裡選文字」" instead
-  // of "要強調 section:nth-child(5)". Falls back to the raw selector only
-  // if the element isn't queryable or has no text.
+  // so the confirmation reads `Highlight "Inline AI — pick text…"` instead
+  // of `Highlight section:nth-child(5)`. Falls back to the raw selector
+  // only if the element isn't queryable or has no text.
   const target = describeElement(targetSel) ?? trim(targetSel, 50);
   // Bundled UI translations. zh-TW gets the localised confirmation; any
   // other locale (or unset) falls back to English. Hosts that want other

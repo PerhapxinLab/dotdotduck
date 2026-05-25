@@ -1,6 +1,6 @@
 /**
  * Spotter — pointer follow + deictic lock + region lasso.
- * 詳細規劃見 ../../docs/04-spotter.md
+ * See ../../docs/04-spotter.md for the full design.
  */
 
 import { inferSelector } from '../utils/selector';

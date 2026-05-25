@@ -1,6 +1,6 @@
 /**
  * Skill type definitions — 4 kinds: Script / Prompt / Action / Surface
- * 詳細規劃見 ../../docs/05-skills-sdk.md
+ * See ../../docs/05-skills-sdk.md for the full design.
  */
 
 export interface ScriptStep {

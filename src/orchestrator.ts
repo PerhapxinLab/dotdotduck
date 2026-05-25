@@ -5,7 +5,7 @@
  * Webagent integration is OPTIONAL — pass a factory and it'll be used for skill
  * agent runs; otherwise dddk works standalone for palette + skills + voice.
  *
- * 詳細規劃見 ./docs/00-overview.md
+ * See ./docs/00-overview.md for the full design.
  */
 
 import {
@@ -70,7 +70,7 @@ export interface DotDotDuckConfig {
   };
 
   /**
-   * Per-entry webagent behavior (2026-05-22).
+   * Per-entry webagent behavior.
    *
    * The same webagent is used from three entry points:
    *   - voice     — push-to-talk / continuous listen
@@ -341,12 +341,9 @@ export class DotDotDuck {
       onEscape: () => {
         this.emitter.emit('gesture_escape', undefined);
         // Esc closes palette / unlocks spotter only. Subtitles are
-        // dismissed via double-tap Space (which routes through onReject
-        // → both the reject callback and the dismiss happen), or via
-        // click / any-key for info-type subtitles. We do NOT call
-        // invokeCancel here any more — the cancel path was redundant
-        // with reject for users (everyone double-tapped Space) and
-        // confusing for hosts (two negative paths to wire up).
+        // dismissed via double-tap Space (routes through onReject →
+        // both the reject callback and the dismiss happen), or via
+        // click / any-key for info-type subtitles.
         this.palette.close();
         this.spotter.unlock();
       },
@@ -467,12 +464,6 @@ export class DotDotDuck {
   // The same visual treatment Dwell uses for its long-press "pinned"
   // element — an outline with the accent color — exposed as a public
   // API so any caller can frame an element to draw the user's eye.
-  //
-  // Used by:
-  //   - SkillTools.highlight/border/spotlight (tutorial scripts)
-  //   - WebAgent `before_action` handler (frame the action target so
-  //     the user sees what the agent is about to touch)
-  //   - Hosts that want to draw attention from their own code
   //
   // Frame style is the same `[data-dddk-dwell-target]` outline defined
   // in dwell/styles.ts. We share the attribute on purpose: only one
@@ -776,14 +767,9 @@ export class DotDotDuck {
     // ONLY for visibility on routine ops — never blocks.
     //
     agent.on('before_action', (payload) => {
-      // The mid-screen "Agent · X" pill used to live here, but it was
-      // redundant with: (1) the per-step border around the target, and
-      // (2) the confirm_action subtitle in interactive mode (which
-      // already narrates). It also tended to STICK because no event
-      // reliably hid it for every action. We rely on the frame +
-      // subtitle for visibility now and skip the pill entirely.
-      //
-      // If a host wants to bring it back they can listen to before_action
+      // No mid-screen pill here — the per-step border around the target
+      // plus the confirm_action subtitle (in interactive mode) carry the
+      // narration. Hosts that want a pill can listen to before_action
       // themselves and call subtitle.showIndicator.
       if (payload.targetSelector) {
         // Frame the action target the same way Dwell frames a long-pressed
@@ -886,7 +872,7 @@ export class DotDotDuck {
       // Forward to dddk's `surface` event — host listens and renders via
       // PieceRenderer. Map webagent's PiecePlacement (`'center' | 'inline'
       // | 'dock'`) to dddk's SurfacePlacement: 'center' → 'modal',
-      // 'inline' → 'subtitle' (placement consolidation 2026-05-22).
+      // 'inline' → 'subtitle'.
       const mapped: import('./skills/types').SurfacePlacement =
         placement === 'inline' ? 'subtitle'
         : placement === 'center' ? 'modal'
@@ -896,21 +882,11 @@ export class DotDotDuck {
 
     agent.on('navigate', ({ path }) => this.navigate(path));
 
-    // First "thinking" indicator stays on screen until the FIRST action
-    // arrives. After that, the subtitle / border / per-step confirmations
-    // carry the visual narrative — re-flashing 思考中 / 執行中 between
-    // every step was just noise that obscured the page underneath.
-    //
-    // The indicator's whole reason for existing was "show the user it's
-    // running on the first turn so they don't think the page is broken."
-    // After step 1 they know it's running.
-    // First "thinking" indicator stays on screen until the FIRST action
-    // arrives. After that, the subtitle / border / per-step confirmations
-    // carry the visual narrative — re-flashing 思考中 / 執行中 between
-    // every step was just noise that obscured the page underneath.
-    //
-    // The flag resets on 'done' / 'error' below so the next run() shows
-    // the indicator once again at the start.
+    // The "thinking" indicator shows once at the start of a run, then
+    // hides until done/error so it can show again on the next run().
+    // After step 1 the subtitle / border / per-step confirmations
+    // carry the visual narrative — re-flashing every step would just
+    // obscure the page underneath.
     let indicatorShownThisRun = false;
     agent.on('status', (status) => {
       if (status === 'thinking' && !indicatorShownThisRun) {
@@ -1031,9 +1007,8 @@ export class DotDotDuck {
       }
       if (step.waitForUser !== false) {
         const outcome = await this.waitForAcceptOrEscape();
-        // Esc OR double-tap space both exit the tour early. Without this
-        // the only way out was the final step — user feedback explicitly
-        // said double-tap should behave like Esc.
+        // Esc OR double-tap space both exit the tour early — double-tap
+        // is the canonical "no/dismiss" gesture and should behave like Esc.
         if (outcome !== 'accept') {
           this.subtitle.hide();
           this.clearHighlight();

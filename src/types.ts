@@ -1,6 +1,6 @@
 /**
  * @perhapxin/dddk — Public types
- * 詳細規劃見 ../docs/01-architecture.md
+ * See ../docs/01-architecture.md for the full design.
  */
 
 /**

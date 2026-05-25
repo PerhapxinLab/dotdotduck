@@ -3,7 +3,7 @@
  *
  * Workflow:
  *  1. Module observes the DOM for <form> + ARIA forms (role=form)
- *  2. Adds a small floating "✨ 幫填" button near each form (toggleable)
+ *  2. Adds a small floating "AI fill" button near each form (toggleable)
  *  3. User clicks → orchestrator starts agent task "fill the form at <selector>
  *     based on: <context>". Webagent's fill_input action handles the rest.
  *

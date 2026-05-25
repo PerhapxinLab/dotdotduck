@@ -1,6 +1,6 @@
 /**
  * GestureManager — unified space-based gesture system.
- * 詳細規劃見 ../../docs/02-space-gesture.md
+ * See ../../docs/02-space-gesture.md for the full design.
  *
  * Detects:
  *   - Single space tap (<150ms hold, 350ms gap) → accept

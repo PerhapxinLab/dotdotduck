@@ -1,6 +1,6 @@
 /**
  * @perhapxin/dddk — Public types
- * 詳細規劃見 ../../docs/01-architecture.md + 02-api.md
+ * See ../../docs/01-architecture.md + 02-api.md for the full design.
  */
 
 import type { ToolDefinition } from '../llm/types';

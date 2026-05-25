@@ -1,16 +1,14 @@
 /**
  * DOM Reader — simplifies the visible page into ~2000 tokens of text for the LLM.
- * 詳細規劃見 ../../docs/01-architecture.md (DOM Reader section)
+ * See ../../docs/01-architecture.md (DOM Reader section) for the full design.
  */
 
 import { inferSelector } from '../../utils/selector';
 
-// Hard cap on the DOM summary fed to the LLM each turn. 6000 chars was
-// adding ~1.5-2k input tokens that the model had to process before
-// emitting the first byte — measurable TTFT regression. 3500 covers
-// 95%+ of "what the user can see on screen" without bloating the prompt.
-// Hosts that want more (large dashboards / canvases) can pass `maxLength`
-// to `readDOM(opts)` directly.
+// Hard cap on the DOM summary fed to the LLM each turn. 3500 chars
+// covers 95%+ of "what the user can see on screen" while keeping
+// input-token cost (and TTFT) low. Hosts with large dashboards /
+// canvases can pass `maxLength` to `readDOM(opts)` directly.
 const MAX_LENGTH = 3500;
 const MAX_TEXT_PER_ITEM = 50;
 

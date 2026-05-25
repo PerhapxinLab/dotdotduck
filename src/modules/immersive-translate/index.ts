@@ -1,7 +1,7 @@
 /**
  * ImmersiveTranslate — page-wide bilingual rendering.
  *
- * UX (mirrors what extensions like ImmersiveTranslate / Mate do):
+ * UX (common pattern for inline page-translation tooling):
  *   1. Host calls `translate.enable('zh-TW')` (usually from a palette command).
  *   2. Module walks the visible DOM, collects translatable text BLOCKS (one
  *      per block-level element — paragraph, heading, list item, etc.).
@@ -10,10 +10,10 @@
  *      not 200.
  *   4. For each translated block, we append a styled inline element AFTER
  *      the original (NOT replacing). Default wrapper is `<font class=
- *      "dddk-imm-translate">` (a deliberate use of the legacy <font> tag —
- *      it's the same convention major translation extensions use because it
- *      survives most rich-text editors and PDF viewers without being styled
- *      away by host CSS).
+ *      "dddk-imm-translate">` — a deliberate use of the legacy <font> tag
+ *      because it survives most rich-text editors and PDF viewers without
+ *      being styled away by host CSS, which is the conventional choice for
+ *      this kind of inline-translation overlay.
  *   5. Cache by content hash so re-enabling the same language is instant.
  *
  * Limitations:

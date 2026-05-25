@@ -1,5 +1,5 @@
 /**
- * InlineAgent — AFFiNE-style inline AI menu for text inside editable surfaces
+ * InlineAgent — inline AI menu for text inside editable surfaces
  * (`<input>`, `<textarea>`, `[contenteditable]`).
  *
  * UX:
@@ -510,9 +510,8 @@ export class InlineAgent {
     // Vertical: anchor at the top of the selection. If that would push
     // the menu below the viewport, anchor at the BOTTOM of the
     // selection and let the menu extend upward instead. This handles
-    // the "selection near the bottom of a tall textarea" case the user
-    // hit — without it, the menu would render below the fold and the
-    // user wouldn't see it at all.
+    // selections near the bottom of a tall textarea — without it the
+    // menu would render below the fold.
     let top = rect.top + window.scrollY;
     if (top + menuH > viewportBottom) {
       top = rect.bottom + window.scrollY - menuH;
@@ -1209,11 +1208,9 @@ export class InlineAgent {
         endCoords.top + endCoords.height,
       );
       // Multi-line selection → anchor the menu at the END of the
-      // selection (where the user's cursor is) with zero width.
-      // Previously this returned `left = 0` which is page-x=0 (far left
-      // of viewport), and when the textarea was on the right side of
-      // the page the menu would flip left and land at viewport edge
-      // instead of next to the selection.
+      // selection (where the user's cursor is) with zero width. A
+      // left=0 fallback here would place the menu at viewport-left for
+      // textareas on the right side of the page, far from the selection.
       const sameLine = Math.abs(endCoords.top - startCoords.top) < startCoords.height * 0.5;
       if (!sameLine) {
         return new DOMRect(endCoords.left, endCoords.top, 0, endCoords.height);

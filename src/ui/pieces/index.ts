@@ -1,6 +1,6 @@
 /**
  * @perhapxin/dddk Pieces — unified UI primitive system.
- * 詳細規劃見 ../../docs/13-pieces.md
+ * See ../../docs/13-pieces.md for the full design.
  */
 
 export type {

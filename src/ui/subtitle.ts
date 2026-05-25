@@ -1,6 +1,6 @@
 /**
  * Subtitle bar — DOM-rendered, CSS-variable themed.
- * 詳細規劃見 ../../docs/07-subtitle-ui.md
+ * See ../../docs/07-subtitle-ui.md for the full design.
  */
 
 import type { SubtitleChoiceOptions, SubtitleShowOptions, SubtitleType } from '../types';

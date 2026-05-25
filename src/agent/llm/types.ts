@@ -1,6 +1,6 @@
 /**
  * LLM Provider interface — implement once, providers slot in.
- * 詳細規劃見 ../../docs/03-llm-providers.md
+ * See ../../docs/03-llm-providers.md for the full design.
  */
 
 export interface LLMProvider {

@@ -14,15 +14,14 @@
  *   - `dddk.tools.unregister(id)` — remove a tool.
  *   - `dddk.tools.list()` — read the current set (for debugging).
  *
- * Design notes — see `notes/nlp-llm-hybrid.md` § "共用 webagent":
+ * Design notes:
  *   - QA / search / recommend are NOT palette panel demos. They are
- *     tools the webagent uses automatically when it reasons. Putting
- *     them in the palette as standalone surfaces forces the user to
- *     pick which tool to use; registering them as agent tools lets
- *     the LLM decide.
- *   - The host can also provide a `contextProvider` on the WebAgent
- *     config to inject per-turn facts (customer profile, current order
- *     ids, etc.) — see `WebAgentConfig.contextProvider`. That's
+ *     tools the agent uses automatically when it reasons. Putting them
+ *     in the palette as standalone surfaces forces the user to pick
+ *     which tool to use; registering them as agent tools lets the LLM
+ *     decide.
+ *   - The host can also provide per-turn context via the WebAgent
+ *     config's `brand` + `appendSystemPrompt` fields — that's
  *     orthogonal to tools.
  */
 
