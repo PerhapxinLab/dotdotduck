@@ -117,16 +117,27 @@ export class ImmersiveTranslate {
     if (blocks.length === 0) return;
 
     this.dddk?.subtitle.show({
-      text: `沉浸式翻譯 → ${label ?? targetLang} (${blocks.length} blocks)`,
+      text: `Translating → ${label ?? targetLang} (${blocks.length} blocks)`,
       type: 'info',
     });
 
-    // Batch the blocks honouring both block-count and char-cap.
+    // Batch the blocks honouring both block-count and char-cap, then
+    // fire every batch IN PARALLEL. Sequential awaits used to walk a
+    // 27-block page through one batch at a time; with parallel fan-out
+    // a typical doc page completes in roughly the slowest single batch's
+    // latency. Each batch independently checks the cache + mounts results
+    // so a slow / failing batch doesn't block the others.
     const batches = this.buildBatches(blocks);
     let done = 0;
-    for (const batch of batches) {
+    const updateProgress = (): void => {
+      this.dddk?.subtitle.show({
+        text: `Translating ${done}/${blocks.length} → ${label ?? targetLang}`,
+        type: 'info',
+      });
+    };
+
+    await Promise.all(batches.map(async (batch) => {
       const inputs = batch.map((b) => b.html);
-      // First check the cache. Skip cached entries from the LLM call.
       const cached: (string | null)[] = inputs.map((html) => this.cacheGet(html, targetLang));
       const need = inputs.map((html, i) => (cached[i] == null ? html : null));
       const needIdxs = need.map((v, i) => (v != null ? i : -1)).filter((i) => i >= 0);
@@ -140,7 +151,6 @@ export class ImmersiveTranslate {
           translations = toSend.map(() => '');
         }
       }
-      // Fan out the results.
       const finalOutputs: string[] = cached.map((c) => c ?? '');
       let tIdx = 0;
       for (const i of needIdxs) {
@@ -148,19 +158,16 @@ export class ImmersiveTranslate {
         if (finalOutputs[i]) this.cacheSet(inputs[i]!, targetLang, finalOutputs[i]!);
         tIdx++;
       }
-      // Mount the translations.
       for (let i = 0; i < batch.length; i++) {
         const out = finalOutputs[i];
         if (out && out !== inputs[i]) this.appendTranslation(batch[i]!.el, out);
       }
       done += batch.length;
-      this.dddk?.subtitle.show({
-        text: `沉浸式翻譯 ${done}/${blocks.length} → ${label ?? targetLang}`,
-        type: 'info',
-      });
-    }
+      updateProgress();
+    }));
+
     this.dddk?.subtitle.show({
-      text: `沉浸式翻譯完成 (${blocks.length} blocks)`,
+      text: `Translation complete (${blocks.length} blocks)`,
       type: 'info',
       autoHide: 2000,
     });

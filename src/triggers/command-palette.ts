@@ -678,12 +678,18 @@ export class CommandPalette {
     if (!text && typeof window !== 'undefined') {
       const sel = window.getSelection?.();
       const fromBrowser = sel?.toString().trim() ?? '';
-      if (fromBrowser) {
-        text = fromBrowser;
-        if (sel && sel.rangeCount > 0) {
-          const node = sel.getRangeAt(0).startContainer;
-          const el = node instanceof Element ? node : node.parentElement;
-          if (el) elementSel = inferSelector(el) || undefined;
+      if (fromBrowser && sel && sel.rangeCount > 0) {
+        const node = sel.getRangeAt(0).startContainer;
+        const anchor = node instanceof Element ? node : node.parentElement;
+        // Reject selections whose anchor element is no longer in the live
+        // DOM — happens after an SPA route change when the previous page's
+        // textarea / paragraph got unmounted but the browser's Selection
+        // object still holds a Range pointing at the detached node. In
+        // that state `sel.toString()` returns the stale text until the
+        // user makes a new selection. Drop it; don't pin a ghost.
+        if (anchor && anchor.isConnected && document.contains(anchor)) {
+          text = fromBrowser;
+          elementSel = inferSelector(anchor) || undefined;
         }
       }
     }

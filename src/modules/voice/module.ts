@@ -47,8 +47,8 @@ export class VoiceModule {
     this.tts = new TTS(config.tts ?? {});
     this.autoSpeakSubtitles = config.autoSpeakSubtitles ?? false;
     this.captureTimeoutMs = config.captureTimeoutMs ?? 30_000;
-    this.listeningLabel = config.listeningLabel ?? '聽取中 — 鬆開結束';
-    this.unsupportedLabel = config.unsupportedLabel ?? '此瀏覽器不支援語音輸入';
+    this.listeningLabel = config.listeningLabel ?? 'Listening — release to send';
+    this.unsupportedLabel = config.unsupportedLabel ?? 'This browser does not support voice input';
   }
 
   /** Helper: capture one utterance, return cleaned text. */

@@ -137,6 +137,7 @@ export class Dwell {
   private dwellTimer: ReturnType<typeof setTimeout> | null = null;
   private pressStartX = 0;
   private pressStartY = 0;
+  private pressStartSelLen = 0;
   private pressedTarget: HTMLElement | null = null;
   private inFlight: AbortController | null = null;
   private popover: HTMLDivElement | null = null;
@@ -209,23 +210,30 @@ export class Dwell {
       this.pressStartX = x;
       this.pressStartY = y;
       this.pressedTarget = target;
+      // Baseline selection length at press start. If the selection GROWS
+      // during the dwell window the user is mid-drag-to-select, not
+      // long-pressing — bail out so Dwell doesn't fight the browser's
+      // text-selection gesture.
+      this.pressStartSelLen = typeof window !== 'undefined'
+        ? (window.getSelection?.()?.toString().length ?? 0)
+        : 0;
       this.dwellTimer = setTimeout(() => {
         this.dwellTimer = null;
-        if (this.pressedTarget) {
-          // Mark the target with `data-dddk-dwell-target` — hosts style it
-          // via --dddk-dwell-frame-* CSS vars. The frame stays on until the
-          // user explicitly dismisses (Esc / click outside / popover close).
-          this.markTarget(this.pressedTarget);
-          // Fire host callback so it can capture the selected DOM for
-          // upcoming palette / voice / agent context.
-          if (this.cfg.onSelect) {
-            this.cfg.onSelect(this.pressedTarget, inferSelector(this.pressedTarget) || undefined);
-          }
-          // LLM annotation is opt-in. Off by default — Dwell is just
-          // "long-press to pin an element".
-          if (this.cfg.annotateOnSelect && this.hasLLM) {
-            this.annotate(this.pressedTarget);
-          }
+        if (!this.pressedTarget) return;
+        const selLenNow = typeof window !== 'undefined'
+          ? (window.getSelection?.()?.toString().length ?? 0)
+          : 0;
+        // User started selecting text mid-press — defer to the browser.
+        if (selLenNow > this.pressStartSelLen) {
+          this.pressedTarget = null;
+          return;
+        }
+        this.markTarget(this.pressedTarget);
+        if (this.cfg.onSelect) {
+          this.cfg.onSelect(this.pressedTarget, inferSelector(this.pressedTarget) || undefined);
+        }
+        if (this.cfg.annotateOnSelect && this.hasLLM) {
+          this.annotate(this.pressedTarget);
         }
       }, this.cfg.dwellMs);
     };
