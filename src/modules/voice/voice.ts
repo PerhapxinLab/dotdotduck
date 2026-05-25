@@ -250,46 +250,106 @@ export class Voice {
     this.listeners.clear();
   }
 
+  /** True once a full warmUp() (device + engine) has completed. Prevents
+   *  redundant warmups on every incidental gesture. */
+  private warmedUp = false;
+
   /**
-   * Pre-warm the mic permission so the FIRST real voice gesture isn't
-   * eaten by the browser's permission prompt.
+   * Pre-warm the entire STT pipeline so the FIRST real voice gesture
+   * isn't eaten by browser cold-start latency. Three things get warm:
    *
-   * Without this, the first `start()` chains:
-   *   getUserMedia() → permission prompt (200-2000ms) → release stream
-   *   → SpeechRecognition.start() → onstart fires
-   * In practice the user holds Space, sees nothing, releases — by the
-   * time `onstart` fires there's no audio to capture and the second
-   * press is the one that actually transcribes.
+   *   1. **Microphone permission**. If state is `prompt` we trigger
+   *      the browser's permission UI here, NOT on the user's first
+   *      Space-hold — so the gesture's critical path stays clean.
+   *   2. **Audio device handle**. We open + immediately close a
+   *      `getUserMedia` stream. The OS-level open is the slowest part
+   *      of `getUserMedia` once permission is granted (300-800ms cold,
+   *      <50ms warm) — touching it here pre-pays the cost.
+   *   3. **SpeechRecognition / Google STT TLS handshake**. We spawn a
+   *      `SpeechRecognition`, call `start()`, and abort it. Even a
+   *      no-speech run establishes the persistent connection to Google's
+   *      STT endpoint that the next real run reuses.
    *
-   * Call this from any incidental user gesture (first pointerdown /
-   * keydown) once permission state is `prompt`. Idempotent — repeated
-   * calls after `granted` skip the prompt. Resolves with the permission
-   * state so the host can stop calling it after success.
+   * Two call points work well:
+   *   - On `onMount` if permission is already `granted` (returning
+   *     visitor) — no gesture required, totally silent.
+   *   - On the first user gesture (`pointerdown` / `keydown`) for the
+   *     `prompt` case — triggers the permission UI off the critical
+   *     path.
+   *
+   * Idempotent. Subsequent calls after a successful warmup are no-ops.
+   * Pass `{ force: true }` to re-warm e.g. after a long idle period.
    */
-  async warmUp(): Promise<'granted' | 'prompt' | 'denied' | 'unavailable'> {
+  async warmUp(
+    opts: { force?: boolean; warmEngine?: boolean } = {},
+  ): Promise<'granted' | 'prompt' | 'denied' | 'unavailable'> {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       return 'unavailable';
     }
-    // Honour explicit Permissions API state if available — granted means
-    // no work, denied means we'd just hit an error.
+    if (this.warmedUp && !opts.force) return 'granted';
+
+    // 1) Permission state. Skip the prompt path on denied — calling
+    //    getUserMedia again on a denied origin just re-fails.
     if (navigator.permissions?.query) {
       try {
         const status = await navigator.permissions.query({ name: 'microphone' as PermissionName });
-        if (status.state === 'granted') return 'granted';
         if (status.state === 'denied') return 'denied';
       } catch {
-        /* Firefox / some embedded webviews don't expose `microphone`
-           in the Permissions API. Fall through to the getUserMedia
-           probe — slightly more invasive but correct on every engine. */
+        /* Some engines (Firefox, embedded webviews) don't expose
+           `microphone` in the Permissions API. Fall through to the
+           getUserMedia probe — slightly more invasive but works
+           everywhere. */
       }
     }
+
+    // 2) Open the audio device. Triggers the permission UI on first
+    //    visit; cheap once granted (OS just hands back a handle).
+    let stream: MediaStream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((t) => t.stop());
-      return 'granted';
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (err) {
       return (err as { name?: string })?.name === 'NotAllowedError' ? 'denied' : 'prompt';
     }
+    // Release immediately — Web Speech will open its own stream when a
+    // real gesture fires. Keeping ours open here would leave the mic
+    // icon lit in the tab bar and look creepy.
+    stream.getTracks().forEach((t) => t.stop());
+
+    // 3) Optionally warm the SpeechRecognition pipeline. The first
+    //    SpeechRecognition.start() on a fresh page does a TLS handshake
+    //    to Google's STT endpoint (200-500ms). Pre-spawn + abort to
+    //    establish that connection. `warmEngine: false` skips this for
+    //    callers that only need the permission warmup (host-supplied
+    //    transcribers, audio-only recording paths, etc.).
+    if (opts.warmEngine !== false && typeof window !== 'undefined') {
+      const Recognition =
+        (window as unknown as { SpeechRecognition?: typeof SpeechRecognition }).SpeechRecognition ??
+        (window as unknown as { webkitSpeechRecognition?: typeof SpeechRecognition }).webkitSpeechRecognition;
+      if (Recognition) {
+        try {
+          const rec = new Recognition();
+          rec.lang = this.config.language;
+          rec.continuous = false;
+          rec.interimResults = false;
+          // Tear it down the instant the engine is live — we just
+          // wanted the handshake.
+          rec.onstart = () => { try { rec.abort(); } catch { /* ignore */ } };
+          rec.onerror = () => { /* swallow — warmup must never surface */ };
+          rec.start();
+          // Backstop: if onstart never fires (e.g. engine choked
+          // because nothing has user gesture activation yet), bail
+          // after 800ms so we don't leak the recognition forever.
+          setTimeout(() => { try { rec.abort(); } catch { /* ignore */ } }, 800);
+        } catch {
+          /* Some browsers throw `start() can only be called from a
+             user gesture` on the warmup path. Silent fail — the real
+             gesture will spawn a fresh recognition anyway. */
+        }
+      }
+    }
+
+    this.warmedUp = true;
+    return 'granted';
   }
 
   // ─── Web Speech path ─────────────────────────────────────────────
