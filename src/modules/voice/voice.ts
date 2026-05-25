@@ -327,62 +327,23 @@ export class Voice {
     // icon lit in the tab bar and look creepy.
     stream.getTracks().forEach((t) => t.stop());
 
-    // 3) Optionally warm the SpeechRecognition pipeline. The first
-    //    SpeechRecognition.start() on a fresh page does a TLS handshake
-    //    to Google's STT endpoint (200-500ms). Pre-spawn + abort to
-    //    establish that connection. `warmEngine: false` skips this for
-    //    callers that only need the permission warmup (host-supplied
-    //    transcribers, audio-only recording paths, etc.).
-    if (opts.warmEngine !== false && typeof window !== 'undefined') {
-      const Recognition =
-        (window as unknown as { SpeechRecognition?: typeof SpeechRecognition }).SpeechRecognition ??
-        (window as unknown as { webkitSpeechRecognition?: typeof SpeechRecognition }).webkitSpeechRecognition;
-      if (Recognition) {
-        // If a previous warmup recognition is somehow still alive (rapid
-        // refresh, double warmup call), abort it before spawning a new
-        // one — Web Speech rejects concurrent `start()` with
-        // InvalidStateError.
-        this.abortWarmup();
-        try {
-          const rec = new Recognition();
-          this.warmupRecognition = rec;
-          rec.lang = this.config.language;
-          rec.continuous = false;
-          rec.interimResults = false;
-          const clear = () => {
-            if (this.warmupRecognition === rec) this.warmupRecognition = null;
-          };
-          rec.onstart = () => {
-            try { rec.abort(); } catch { /* ignore */ }
-            clear();
-          };
-          rec.onerror = () => { clear(); /* swallow — warmup must never surface */ };
-          rec.onend = clear;
-          rec.start();
-          // Backstop: if onstart never fires (engine choked, no audio
-          // gesture activation yet), bail after 800ms so a stuck
-          // warmup can't block a real voice gesture spawning its own.
-          setTimeout(() => {
-            if (this.warmupRecognition === rec) {
-              try { rec.abort(); } catch { /* ignore */ }
-              clear();
-            }
-          }, 800);
-        } catch {
-          /* Some browsers throw `start() can only be called from a
-             user gesture` on the warmup path. Silent fail — the real
-             gesture will spawn a fresh recognition anyway. */
-          this.warmupRecognition = null;
-        }
-      }
-    }
+    // We deliberately do NOT pre-spawn a SpeechRecognition here. The
+    // first real `start()` will do its own TLS handshake to Google's
+    // STT endpoint — that 200-500ms ramp-up lands well inside the
+    // user's first long-press hold (typically 1-2s). Spawning a
+    // recognition for warmup risks colliding with the real one (Web
+    // Speech rejects concurrent `start()` with InvalidStateError)
+    // and the symptom is identical to "voice did nothing" — exactly
+    // the bug we were trying to prevent.
+    void opts.warmEngine; // accepted-but-ignored for API stability
 
     this.warmedUp = true;
     return 'granted';
   }
 
-  /** Abort any in-flight warmup recognition. Called by `start()` so the
-   *  real voice gesture isn't blocked by a still-handshaking warmup. */
+  /** Abort any in-flight warmup recognition. Defensive no-op now that
+   *  warmUp() doesn't spawn one, but kept on the class so call-sites
+   *  (e.g. start()) don't need to know whether engine warmup happened. */
   private abortWarmup(): void {
     if (!this.warmupRecognition) return;
     try { this.warmupRecognition.abort(); } catch { /* ignore */ }

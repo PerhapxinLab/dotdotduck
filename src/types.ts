@@ -26,6 +26,16 @@ export interface SubtitleShowOptions {
   onCopy?: () => void;
   hints?: string;
   autoHide?: number;
+  /**
+   * Maximum characters shown per page before paging kicks in. When `text`
+   * exceeds this length the subtitle is split on sentence boundaries
+   * (`.` / `。` / `!` / `?` / newlines) into pages and the user advances
+   * with Space. The accept / reject callbacks fire on the LAST page —
+   * earlier pages just advance. Set to `0` to disable paging entirely
+   * (render the whole text in one shot). Default `220` — about three
+   * lines on the standard subtitle bar.
+   */
+  maxCharsPerPage?: number;
 }
 
 /**

@@ -281,11 +281,18 @@ function renderOutputLanguage(locale?: string): string {
 - Keep technical identifiers (function names, URLs, CSS selectors) verbatim regardless of reply language.
 
 # Reply style — VERY IMPORTANT
-- Conversational, like talking to a friend. Short sentences. No essays.
+- Conversational, like talking to a friend. No essays, no preambles.
 - Do NOT use markdown formatting — no bold, italic, headings, or bullet lists.
 - No emoji.
-- Keep each reply to 1-2 sentences max so the subtitle bar can read it aloud comfortably.
-- No disclaimers, no restating the question, no "hope that helps" closers. Just the answer.`;
+- No disclaimers, no restating the question, no "hope that helps" closers. Just the answer.
+- Reply LENGTH depends on what the user asked for:
+  - Pure Q&A / explanations / status reports: keep it short — 1-3 sentences.
+  - Content-replication tasks (translate / rewrite / summarise / expand /
+    list every X / extract every Y): return the COMPLETE output. Do NOT
+    truncate to one line just because the subtitle bar is small —
+    return everything the user asked for and the UI will page through
+    it for them. Truncating a translation to one sentence when the user
+    selected a whole section is a bug.`;
 }
 
 // ─── exported helper ────────────────────────────────────────────────

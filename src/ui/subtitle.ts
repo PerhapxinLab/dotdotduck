@@ -58,6 +58,12 @@ export class Subtitle {
     this.ttsProvider = fn ?? undefined;
   }
 
+  /** Multi-page state for a single `show()` call. When the caller's text
+   *  exceeds maxCharsPerPage we paginate; Space advances. The final
+   *  page's accept callback fires the original onAccept. */
+  private pages: string[] | null = null;
+  private pageIdx = 0;
+
   show(opts: SubtitleShowOptions): void {
     if (typeof document === 'undefined') return;
     ensureStyles();
@@ -80,15 +86,21 @@ export class Subtitle {
     }
     if (!wasVisible) this.onVisibilityChange?.(true);
 
-    this.currentOpts = opts;
-    this.el.setAttribute('data-dddk-bar-type', opts.type);
-    this.el.innerHTML = `
-      <div ${UI_ATTR}="bar-text">${renderInlineMarkdown(opts.text)}</div>
-      ${this.renderHints(opts)}
-      ${this.renderButtons(opts)}
-    `;
+    // Paginate long content. Translations / rewrites / summaries can
+    // return prose that doesn't fit comfortably in three lines; rather
+    // than render a tiny scrollable bar (loses Space-tap context) we
+    // split on sentence boundaries and let the user advance with Space.
+    const maxPerPage = opts.maxCharsPerPage ?? 220;
+    if (maxPerPage > 0 && opts.text.length > maxPerPage) {
+      this.pages = splitIntoPages(opts.text, maxPerPage);
+      this.pageIdx = 0;
+    } else {
+      this.pages = null;
+      this.pageIdx = 0;
+    }
 
-    this.wireButtons(opts);
+    this.currentOpts = opts;
+    this.renderCurrentPage();
     document.body.dataset.dddkActive = 'true';
 
     // Fire-and-forget TTS — host wires this up; if not, no-op. We pass
@@ -158,6 +170,14 @@ export class Subtitle {
         // first (onAccept / onReject / onEscape) and would double-fire
         // here. The gesture manager calls hide() itself when needed.
         if (e.key === ' ' || e.key === 'Spacebar' || e.key === 'Escape') return;
+        // Paged / action subtitles must NOT dismiss on arbitrary key
+        // presses — that would close a multi-page translation in the
+        // middle when the user touched any key. Only pure info
+        // subtitles (no paging, no accept/reject) auto-dismiss on
+        // any-key.
+        const isPaged = this.pages !== null && this.pages.length > 1;
+        const hasAction = !!(this.currentOpts?.onAccept || this.currentOpts?.onReject);
+        if (isPaged || hasAction) return;
         this.hide();
       };
       document.addEventListener('click', onClick, true);
@@ -386,8 +406,28 @@ export class Subtitle {
    * No-ops when no subtitle is currently shown.
    */
   invokeAccept(): boolean {
+    // Paged subtitle: Space advances to the next page until we run out;
+    // only the FINAL page's accept fires the caller's onAccept. The
+    // intermediate pages have no callback — Space is just "next".
+    if (this.pages && this.pageIdx < this.pages.length - 1) {
+      this.pageIdx += 1;
+      this.renderCurrentPage();
+      return true;
+    }
     const cb = this.currentOpts?.onAccept;
-    if (!cb) return false;
+    if (!cb) {
+      // Paged read-only content (info/agent reply with no accept gate):
+      // last-page Space dismisses cleanly. Non-paged info subtitles are
+      // dismissed by the keydown listener in installInteractionDismiss
+      // — leaving them alone here means nothing routes through this
+      // invokeAccept path for them, so the previous "any key dismisses
+      // info" behaviour is preserved.
+      if (this.pages) {
+        this.hide();
+        return true;
+      }
+      return false;
+    }
     // Acknowledge the tap immediately: hide the gated subtitle + show
     // a "running" indicator so the user sees their gesture landed. The
     // next agent step will replace this with its own subtitle. Without
@@ -459,6 +499,55 @@ export class Subtitle {
   }
 
   // ─── private ────────────────────────────────────────────────────
+
+  /**
+   * Render whichever page of `pages` we're on right now into the bar.
+   * When pages is null we just render the original opts.text. Each
+   * intermediate page hides the accept-callback presence so wireButtons
+   * doesn't double-fire; the final page restores it. We also append a
+   * `(n/N · space →)` paging hint so the user knows there's more.
+   */
+  private renderCurrentPage(): void {
+    if (!this.el || !this.currentOpts) return;
+    const opts = this.currentOpts;
+    const isPaged = this.pages !== null;
+    const isLastPage = !isPaged || this.pageIdx === this.pages!.length - 1;
+    const pageText = isPaged ? this.pages![this.pageIdx]! : opts.text;
+
+    // For intermediate pages we strip onAccept/onReject from the
+    // wireButtons render so the buttons disappear (no accidental
+    // "accept on page 2 of 5"). We restore the original opts after
+    // the last page so the normal flow continues.
+    const effectiveOpts: SubtitleShowOptions = isLastPage
+      ? opts
+      : { ...opts, onAccept: undefined, onReject: undefined, onCopy: undefined };
+
+    const pageHint = isPaged
+      ? this.formatPageHint(this.pageIdx + 1, this.pages!.length, isLastPage)
+      : '';
+    const hints = pageHint
+      || (isLastPage ? this.renderHints(effectiveOpts) : '');
+
+    this.el.setAttribute('data-dddk-bar-type', opts.type);
+    this.el.innerHTML = `
+      <div ${UI_ATTR}="bar-text">${renderInlineMarkdown(pageText)}</div>
+      ${hints.startsWith(`<div ${UI_ATTR}="bar-hints"`) ? hints : (hints ? `<div ${UI_ATTR}="bar-hints">${escapeHtml(hints)}</div>` : '')}
+      ${this.renderButtons(effectiveOpts)}
+    `;
+    this.wireButtons(effectiveOpts);
+  }
+
+  private formatPageHint(idx: number, total: number, isLast: boolean): string {
+    const zh = this.locale === 'zh-TW';
+    if (isLast) {
+      return zh
+        ? `${idx}/${total} ｜ space 同意 ｜ 雙擊 space 拒絕`
+        : `${idx}/${total} · space accept · double-tap reject`;
+    }
+    return zh
+      ? `${idx}/${total} ｜ space → 下一段`
+      : `${idx}/${total} · space → next page`;
+  }
 
   private renderHints(opts: SubtitleShowOptions): string {
     if (opts.hints) return `<div ${UI_ATTR}="bar-hints">${escapeHtml(opts.hints)}</div>`;
@@ -638,6 +727,42 @@ export class Subtitle {
 // that way. All other markdown (headings, blockquotes, tables, images)
 // is silently passed through as text — subtitles shouldn't carry those.
 //
+/**
+ * Split a long block of subtitle text into chunks no larger than
+ * `maxChars`, broken on natural sentence boundaries
+ * (`. ! ? 。 ！ ？`) and double newlines. Each returned page is
+ * trimmed; no empty pages. Falls back to a hard-cut at maxChars
+ * when no breakable boundary exists inside the window (e.g. a
+ * single very long sentence). The end result reads well aloud and
+ * keeps the bar's three-line layout intact while Space-paged.
+ */
+function splitIntoPages(text: string, maxChars: number): string[] {
+  const out: string[] = [];
+  let remaining = text.trim();
+  while (remaining.length > maxChars) {
+    // Look for the latest sentence-end inside the window.
+    const window = remaining.slice(0, maxChars);
+    // Try paragraph break first (best read-aloud rhythm).
+    let cut = window.lastIndexOf('\n\n');
+    if (cut < maxChars * 0.3) {
+      // Then sentence terminators. Iterate over candidate marks and
+      // take the latest hit within the window.
+      const marks = ['. ', '! ', '? ', '。', '！', '？', '\n'];
+      for (const m of marks) {
+        const idx = window.lastIndexOf(m);
+        if (idx > cut) cut = idx + m.length;
+      }
+    } else {
+      cut += 2; // consume the paragraph break
+    }
+    if (cut < maxChars * 0.3) cut = maxChars; // hard cut — no boundary
+    out.push(remaining.slice(0, cut).trim());
+    remaining = remaining.slice(cut).trim();
+  }
+  if (remaining) out.push(remaining);
+  return out.length > 0 ? out : [text];
+}
+
 // Order of operations matters: we escape FIRST, then run pattern
 // substitutions on the escaped string. That way user-supplied `<script>`
 // can't sneak in via the markdown patterns.
