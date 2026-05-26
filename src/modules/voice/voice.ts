@@ -117,15 +117,6 @@ export class Voice {
 
   // State for managing the active session
   private userStopped = false;
-  /**
-   * One-shot retry budget for transient `network` errors. Chromium's
-   * webkitSpeechRecognition routinely fires `network` on a clean first
-   * attempt — the audio pipe to Google's STT server has a known race
-   * around the mic stream opening. A 400ms retry clears it most of the
-   * time; if the second attempt also fails it's a genuine block (VPN /
-   * firewall / no internet) and we surface the error to the user.
-   */
-  private networkRetryUsed = false;
   private mediaRecorder: MediaRecorder | null = null;
   private mediaStream: MediaStream | null = null;
   private mediaChunks: Blob[] = [];
@@ -190,7 +181,6 @@ export class Voice {
 
   start(): void {
     this.userStopped = false;
-    this.networkRetryUsed = false;
     this.finalText = '';
     this.interimText = '';
     this.mediaChunks = [];
@@ -372,12 +362,27 @@ export class Voice {
       this.emit('final', '');
       return;
     }
-    // Spawn recognition directly. We previously called getUserMedia first
-    // to surface permission state cleanly, but releasing that stream
-    // immediately before spawnRecognition created a race with Chromium's
-    // internal audio capture — the very `network` error the probe was
-    // meant to avoid. Letting Web Speech ask its own permission is more
-    // reliable; we still translate `not-allowed` correctly downstream.
+    // Pre-prompt for mic via getUserMedia, then immediately close the
+    // stream. Web Speech's implicit permission ask is flakier than
+    // getUserMedia — Edge/Chrome sometimes fire a fast `network` error
+    // when the mic permission was never asked. Explicit ask makes the
+    // permission state clear before recognition starts.
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
+      navigator.mediaDevices
+        .getUserMedia({ audio: true })
+        .then((stream) => {
+          // Release immediately — Web Speech will open its own stream.
+          stream.getTracks().forEach((t) => t.stop());
+          this.spawnRecognition(Recognition);
+        })
+        .catch((err) => {
+          const code = (err as { name?: string })?.name === 'NotAllowedError'
+            ? 'not-allowed' : 'audio-capture';
+          this.emit('error', { code, message: 'microphone permission needed' });
+          this.emit('final', '');
+        });
+      return;
+    }
     this.spawnRecognition(Recognition);
   }
 
@@ -412,26 +417,6 @@ export class Voice {
 
     rec.onerror = (e: Event) => {
       const errCode = (e as unknown as { error?: string }).error;
-
-      // `network` on the FIRST attempt is usually a transient race in
-      // Chromium's audio pipe to Google's STT — schedule one retry and
-      // swallow the error. If the user is still holding the gesture, the
-      // retry recognition takes over and the user never sees a glitch.
-      // Only surface to the user on the SECOND failure (real block).
-      if (errCode === 'network' && !this.networkRetryUsed && !this.userStopped) {
-        this.networkRetryUsed = true;
-        this.recognition = null;
-        setTimeout(() => {
-          if (this.userStopped) return;
-          try {
-            this.spawnRecognition(Ctor);
-          } catch (err) {
-            this.emit('error', err instanceof Error ? err : new Error(String(err)));
-          }
-        }, 400);
-        return;
-      }
-
       const friendly =
         errCode === 'not-allowed'    ? 'microphone permission denied' :
         errCode === 'no-speech'      ? 'no speech detected' :
@@ -441,10 +426,12 @@ export class Voice {
         errCode === 'not-supported'  ? 'language not supported' :
         errCode ?? 'unknown speech recognition error';
       this.emit('error', { code: errCode, message: friendly, raw: e });
-      // Stop the auto-restart loop on fatal errors. `network` reaches this
-      // branch only when the retry above already failed — at that point
-      // the upstream really is blocked (firewall / VPN / no internet),
-      // restarting just hits the same wall.
+      // Stop the auto-restart loop on fatal errors. `network` is included
+      // because Web Speech sends audio to Google's STT servers — if that
+      // network path is blocked (firewall / VPN / no internet), restarting
+      // just hits the same wall in a loop and spams the user with the
+      // same error subtitle. Treat the first network failure as fatal
+      // for THIS gesture; the user can try again later.
       if (
         errCode === 'not-allowed' ||
         errCode === 'audio-capture' ||

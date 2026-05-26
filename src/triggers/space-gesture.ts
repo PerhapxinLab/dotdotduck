@@ -56,6 +56,8 @@ export class GestureManager {
   private tapTimer: ReturnType<typeof setTimeout> | null = null;
   private lastTapAt = 0;
   private isHolding = false;
+  /** Pre-captured selection — refreshed on every selectionchange/mouseup. */
+  private lastSelection = '';
   /**
    * Set on space-keydown inside an input field. If user releases before the
    * hold threshold, we insert the missing space character manually (since we
@@ -80,17 +82,12 @@ export class GestureManager {
   start(): void {
     if (typeof document === 'undefined') return;
 
-    // Build marker — lets the host verify which version of the gesture
-    // manager is actually live in the browser. Bump on any non-trivial
-    // change so a stale cache can be spotted with one console glance.
-    // Remove once we have proper version reporting plumbed through.
-    if (typeof console !== 'undefined') {
-      // eslint-disable-next-line no-console
-      console.log('[dddk] GestureManager v3 (ime-guard-skip-repeat, build 2026-05-26b)');
-    }
-
     const onKeyDown = (e: KeyboardEvent) => this.handleKeyDown(e);
     const onKeyUp = (e: KeyboardEvent) => this.handleKeyUp(e);
+    const onSelectionChange = () => {
+      const s = this.readSelection();
+      if (s) this.lastSelection = s;
+    };
 
     // Use capture phase for keys so we get Ctrl+K BEFORE the browser's
     // own search-bar focus shortcut. Without capture, some browsers (Chrome
@@ -98,10 +95,14 @@ export class GestureManager {
     // level before our bubble-phase listener runs.
     document.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('keyup', onKeyUp, true);
+    document.addEventListener('selectionchange', onSelectionChange);
+    document.addEventListener('mouseup', onSelectionChange);
 
     this.cleanups.push(
       () => document.removeEventListener('keydown', onKeyDown, true),
       () => document.removeEventListener('keyup', onKeyUp, true),
+      () => document.removeEventListener('selectionchange', onSelectionChange),
+      () => document.removeEventListener('mouseup', onSelectionChange)
     );
   }
 
@@ -112,13 +113,13 @@ export class GestureManager {
     this.cleanups = [];
   }
 
-  /**
-   * Read currently selected text (live, from DOM/input). Always queried at
-   * the moment of the gesture — no cached state. If the user has clicked
-   * away between selecting and pressing Ctrl+K / holding space, the browser
-   * has already collapsed `window.getSelection()`, so we correctly get ''.
-   */
+  /** Read currently selected text (live, from DOM/input). */
   captureSelection(): string {
+    if (this.lastSelection) {
+      const s = this.lastSelection;
+      this.lastSelection = '';
+      return s;
+    }
     return this.readSelection();
   }
 
@@ -141,16 +142,7 @@ export class GestureManager {
     // keydown's `e.isComposing` is true and `e.keyCode === 229`. Space
     // pressed during composition is committing the candidate, NOT a
     // voice gesture. Bail entirely so the IME owns the keystroke.
-    //
-    // ONLY apply this guard to the FIRST keystroke (e.repeat === false).
-    // A real IME commit is a single tap — it never autorepeats. So if we
-    // see e.repeat === true, the user is holding the key down (voice
-    // gesture) and we MUST preventDefault below, no matter what the IME
-    // state happens to be reporting. Without this gate Edge + Microsoft
-    // Bopomofo IME can flag autorepeat keydowns as `isComposing: true`
-    // and the user gets a stream of spaces inserted while holding space
-    // in an input.
-    if (!e.repeat && (e.isComposing || (e as KeyboardEvent & { keyCode?: number }).keyCode === 229)) {
+    if (e.isComposing || (e as KeyboardEvent & { keyCode?: number }).keyCode === 229) {
       return;
     }
 
@@ -208,10 +200,9 @@ export class GestureManager {
     //   3. If keyup before threshold → insert space manually (it was a normal tap)
     //   4. If hold threshold fires → trigger voice (no stray space)
     //
-    // IME 一聲 / Japanese kana commit: handled by the IME guard at the top
-    // of this function (`!e.repeat && (e.isComposing || keyCode 229)`).
-    // While composing, we return WITHOUT preventDefault so the IME owns the
-    // space. Only when isComposing is false does this branch run.
+    // This preserves "long-press to dictate" even when typing in the palette
+    // input / textarea / contenteditable, while keeping normal space typing
+    // smooth (imperceptible 150ms delay).
     if (this.gestureKey === 'space' && inInput) {
       e.preventDefault();
       if (e.repeat || this.holdTimer) return;
@@ -275,7 +266,7 @@ export class GestureManager {
     this.pendingSpaceInput = null;
 
     if (!this.isHolding) {
-      // Tap outside an input — check single-tap accept vs double-tap reject.
+      // Tap (no voice). Check double-tap window.
       const now = Date.now();
       if (now - this.lastTapAt < DOUBLE_TAP_WINDOW_MS) {
         if (this.tapTimer) {
