@@ -315,7 +315,8 @@ export class DotDotDuck {
 
     this.palette = new CommandPalette({
       initialItems: this.buildPaletteItems(),
-      placeholder: this.t('palette.placeholder', 'Search commands or page…'),
+      locale: config.locale,
+      placeholder: this.t('palette.placeholder', sdkString(config.locale, 'palette.placeholder')),
       searchPage: (q) => searchPageText(q),
       // Camera button is OFF unless the host passes a `camera` config — the SDK
       // ships zero defaults. Hosts who want the screenshot button wire it up
@@ -365,6 +366,7 @@ export class DotDotDuck {
   setLocale(locale: Locale): void {
     this.config.locale = locale;
     this.subtitle.setLocale(locale);
+    try { this.palette.setLocale(locale); } catch { /* palette torn down */ }
   }
 
   // ─── lifecycle ──────────────────────────────────────────────────

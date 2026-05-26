@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="https://dddk.perhapxin.com/icon.png" alt="" width="40" align="absmiddle" />
+  <img src="./media/logo.png" alt="" width="56" align="absmiddle" />
   &nbsp;dotdotduck
 </h1>
 
@@ -8,10 +8,6 @@
 <p align="center">
   Command palette + voice + long-press selection + inline AI + DOM-grounded agent in one SDK.
   The opposite of a chatbot widget — your product's verbs sit where users already work, not in a corner bubble.
-</p>
-
-<p align="center">
-  <img src="./media/readme/dddk-palette.png" alt="dotdotduck command palette open, with host commands, skills, and the Ask AI box mixed in one list" width="780" />
 </p>
 
 <p align="center">
@@ -25,44 +21,66 @@
 
 ## 01 · Command palette — every feature, behind one panel
 
-<img src="./media/readme/dddk-palette.png" alt="Cmd+K palette open: /introduce, /theme, /language, /immersive_translate, #find-on-page, docs: search, Go to entries — all in one list" width="780" />
+<table>
+<tr>
+<td width="55%" valign="top">
+  <img src="./media/readme/dddk-palette.png" alt="Cmd+K palette open: /introduce, /theme, /language, /immersive_translate, #find-on-page, docs: search, Go to entries — all in one list" />
+</td>
+<td width="45%" valign="top">
 
-`Ctrl/⌘+K` opens it. Your registered commands — switch theme, change language, open billing, find a customer — sit alongside Ask AI in the same list. Prefix routing (`/command`, `@entity`, `order:`) gives the user **one convenient entry point that solves whatever they're stuck on, no matter where they are in the product**.
+- **Ctrl/⌘+K opens it.** Your registered commands sit alongside Ask AI in the same list.
+- **Prefix routing** — `/command`, `@entity`, `order:`, `#tag` — drill in without leaving the keyboard.
+- **One convenient entry point** no matter where the user is in the product.
+- **Three customisation layers**: CSS-variable theming, Skill SDK (Script / Prompt / Action / Surface / Panel), or drop-in palette items.
+- **Zero built-in commands.** What shows up in the palette is entirely yours to decide.
 
-Three customisation layers stack:
-
-1. **Theme** via CSS variables — `--dddk-accent`, `--dddk-radius`, `--dddk-font`, etc.
-2. **Skill SDK** — declarative Script / Prompt / Action / Surface / Panel units the agent (and the user) can invoke.
-3. **Drop-in palette items** — register what your product already does as palette rows.
-
-The SDK ships with **zero built-in commands**. What shows up in the palette is entirely yours to decide.
+</td>
+</tr>
+</table>
 
 ---
 
-## 02 · WebAgent — an agent that operates the page, not a sidebar chatbot
+## 02 · WebAgent — operates the page, not a sidebar chatbot
 
-<img src="./media/readme/dddk-webagent.png" alt="agent narrating its next step in the subtitle bar with space-continue / double-tap-exit / esc-cancel hint and confirm buttons" width="780" />
+<table>
+<tr>
+<td width="55%" valign="top">
+  <img src="./media/readme/dddk-webagent.png" alt="agent narrating its next step in the subtitle bar with space-continue / double-tap-exit / esc-cancel hint and confirm buttons" />
+</td>
+<td width="45%" valign="top">
 
-`WebAgent` is the engine inside dotdotduck — DOM-grounded, runs in the user's tab. Nineteen built-in actions (`navigate` / `click` / `fill_input` / `scroll` / `screenshot` / `ask_user` …) compose into multi-step tasks.
+- **DOM-grounded autonomous loop.** Reads the visible page, picks a tool, narrates each step.
+- **19 built-in actions** — `navigate` · `click` · `fill_input` · `scroll` · `screenshot` · `ask_user` · `ask_user_choice` · `show_subtitle` · `wait` · `border` · `highlight` · `set_text` · `select_option` · `submit_form` · etc.
+- **Gated by Space** — single tap accept · double-tap reject · Esc cancel. Every step is visible before it runs.
+- **Asks back** when ambiguous — `ask_user_choice` for 2-4 options, `ask_user` for free text.
+- **Voice as an entry point** — hold Space, transcript flows into the same agent. Optional LLM cleanup pass.
+- **Bring your own LLM** — OpenAI, Google AI Studio, or `ProxyProvider` that hides keys server-side.
 
-- LLM picks one action at a time.
-- Subtitle bar **narrates each step** in the user's language.
-- The agent **asks back** when a decision is needed (`ask_user_choice` for 2-4 options, `ask_user` for free text).
-- Single-tap Space accepts, double-tap rejects, Esc cancels. Every step is gated.
-
-Voice is the other entry point: hold Space for Web Speech STT, the transcript gets an optional LLM cleanup pass, then the agent runs. Provider is your call — OpenAI, Google AI Studio, or `ProxyProvider` that hides keys behind your server.
+</td>
+</tr>
+</table>
 
 ---
 
 ## 03 · Inline Agent — select text, AI without leaving the input
 
-<img src="./media/readme/dddk-inline.png" alt="floating Edit with AI menu next to a textarea selection: Translate / Improve writing / Fix spelling & grammar / Make shorter / Make longer / Change to professional tone / Explain this" width="780" />
+<table>
+<tr>
+<td width="55%" valign="top">
+  <img src="./media/readme/dddk-inline.png" alt="floating Edit with AI menu next to a textarea selection: Translate / Improve writing / Fix spelling & grammar / Make shorter / Make longer / Change to professional tone / Explain this" />
+</td>
+<td width="45%" valign="top">
 
-Highlight any text in any `<input>` / `<textarea>` / `[contenteditable]` — a floating toolbar appears next to your selection: **Translate, Improve writing, Fix grammar, Make shorter / longer, Change to professional tone, Explain**. Pick one, the result streams back in place of the selection.
+- **Highlight any text** in any `<input>` / `<textarea>` / `[contenteditable]` — a floating toolbar appears below the selection.
+- **Seven default actions** — Translate · Improve writing · Fix spelling & grammar · Make shorter · Make longer · Change to professional tone · Explain this.
+- **Result streams back in place** of the selection.
+- **Custom actions** — drop the defaults, add your own (`/translate-with-glossary`, etc.).
+- **Two-column layout** option for editor hosts; optional keyboard shortcuts (e.g. `Ctrl+Shift+R` to rewrite).
+- **IME-composition-aware** — Chinese / Japanese / Korean candidate typing never accidentally triggers the toolbar.
 
-- Actions are **customisable** — drop the defaults, add your own (`/bold-on-rewrite`, `/translate-with-glossary`).
-- Layout supports two-column, optional keyboard shortcuts (`Ctrl+Shift+R` to rewrite, etc.).
-- **IME-composition-aware** — typing Chinese / Japanese / Korean candidates never accidentally triggers the toolbar.
+</td>
+</tr>
+</table>
 
 ---
 
@@ -72,69 +90,92 @@ Four physical ways to send context into dddk. No new vocabulary to learn.
 
 <table>
 <tr>
-<td width="50%" valign="top">
+<td width="55%" valign="top">
   <img src="./media/readme/dddk-voice.png" alt="long-press space, subtitle bar shows live 'Listening — release to send' indicator" />
-  <br /><strong>A · Hold Space — voice in</strong>
-  <br /><em>Press and hold Space anywhere. The subtitle bar shows "Listening — release to send." Release to send. Focused inside an input → transcript fills it. Anywhere else → goes to the agent as a question.</em>
 </td>
-<td width="50%" valign="top">
-  <img src="./media/readme/dddk-dwell.png" alt="long-press a DOM element ~1s and a frame pins around it" />
-  <br /><strong>B · Long-press anything — Dwell</strong>
-  <br /><em>Dwell: long-press any element for ~1s and a frame pins around it. Next Ctrl+K opens the palette with that element as context. Visual elements (charts, images) ship with an auto-screenshot.</em>
+<td width="45%" valign="top">
+
+**A · Hold Space — voice in**
+
+- Press and hold Space anywhere. Subtitle bar shows "Listening — release to send".
+- Release to send. Focused in an input → fills the input. Anywhere else → goes to the agent.
+- Web Speech for STT; optional LLM cleanup pass removes fillers + fixes punctuation.
+
 </td>
 </tr>
 <tr>
-<td width="50%" valign="top">
-  <strong>C · /introduce — guided tour</strong>
-  <br /><em>Script Skills are declarative tours: a list of `page` + `subtitle` + `action(tools)`, Space to advance. Write your onboarding / feature tour once, replay any time the user types <code>/introduce</code>.</em>
+<td width="55%" valign="top">
+  <img src="./media/readme/dddk-dwell.png" alt="long-press a DOM element ~1s and a frame pins around it" />
 </td>
-<td width="50%" valign="top">
-  <strong>D · Drag a screenshot</strong>
-  <br /><em>Click the camera in the palette and drag a rectangle anywhere on the page — the captured region is attached to your next Ask AI / agent question. Charts, dashboards, maps — show the AI exactly what you mean instead of describing it.</em>
+<td width="45%" valign="top">
+
+**B · Long-press anything — Dwell**
+
+- Long-press any element for ~1s. A frame pins around it.
+- Next `Ctrl+K` opens the palette with that element as context.
+- Visual elements (charts, images) ship with an **auto-screenshot** so the agent can see what you mean.
+
+</td>
+</tr>
+<tr>
+<td width="55%" valign="top">
+  <img src="./media/readme/dddk-drag.png" alt="drag a rectangle anywhere on the page — the captured region is attached to your next Ask AI / agent question" />
+</td>
+<td width="45%" valign="top">
+
+**C · Drag a screenshot**
+
+- Click the camera in the palette and drag a rectangle anywhere on the page.
+- The captured region attaches to your next Ask AI / agent question.
+- Charts, dashboards, maps — show the AI exactly what you mean instead of describing it.
+
+</td>
+</tr>
+</table>
+
+**D · `/introduce` — guided tour** — Script Skills are declarative tours: a list of `page` + `subtitle` + `action(tools)`, Space to advance. Write your onboarding / feature tour once, replay any time the user types `/introduce` (or runs it from a palette command, or fires it as a proactive prompt).
+
+---
+
+## 05 · Proactive — read the signal, ask the right question
+
+<table>
+<tr>
+<td width="55%" valign="top">
+  <img src="./media/readme/dddk-proactive.png" alt="subtitle bar showing yes/no prompt 'Your Monday order just shipped — want me to pull the tracking?' and multi-choice 'How should I handle this return?' with Open an RMA / Check order status / Escalate to a human / Other options" />
+</td>
+<td width="45%" valign="top">
+
+- **Subscribes to page signals** — scroll, dwell, time-on-page, last interaction.
+- **Yes / no** resolves with Space (accept) / double-tap (reject).
+- **Multi-choice** picks with `1-9` plus a trailing **Other** slot for free text.
+- **Stays in the subtitle bar** — no popup chrome, no layout shift.
+- **Every response emits an intent** (`proactive_accepted` / `agent_choice`) so you measure what lands.
+- **Typical customer-service plays** — order just shipped → "Want me to pull the tracking?"; user lingers on returns → list three common actions.
+
 </td>
 </tr>
 </table>
 
 ---
 
-## 05 · Proactive — read the signal, ask the right question
-
-The agent subscribes to page signals (scroll, dwell, time-on-page, last interaction) and surfaces an offer in the subtitle bar when conditions match.
-
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│  Your Monday order just shipped — want me to pull the tracking?      │
-│                                                                      │
-│  [ Space  yes ]  [ Space×2  no ]                                     │
-└──────────────────────────────────────────────────────────────────────┘
-→ intent: proactive_accepted, action: 'track_order', via: 'voice'
-```
-
-- **Yes / No** resolves with Space (accept) / double-tap (reject).
-- **Multi-choice** uses `1-9` number keys + a trailing **Other** slot that always accepts free text.
-- The whole exchange stays in the subtitle bar — no popup chrome, no layout shift.
-
-Typical customer-service plays: order just shipped → "Want me to pull the tracking?"; user lingers on the returns page → list three common actions.
-
----
-
 ## 06 · Intent stream — every yes / no is a signal, the dashboard writes itself
 
-<img src="./media/readme/dddk-dashboard.png" alt="dotdotduck dashboard: 3 sessions, 2 visitors, 577 events, 118 palette opens, geography panel, top palette items table" width="780" />
+<table>
+<tr>
+<td width="55%" valign="top">
+  <img src="./media/readme/dddk-dashboard.png" alt="dotdotduck dashboard: 3 sessions, 2 visitors, 577 events, 118 palette opens, geography panel, top palette items table" />
+</td>
+<td width="45%" valign="top">
 
-Every accept, reject, multi-choice pick, voice transcript, and Dwell pin emits a typed event:
+- **Every interaction emits a typed event** — palette opens, voice transcripts, agent answers, accept / reject gestures, Dwell pins, multi-choice picks.
+- **Built-in event types**: `palette_activated` · `voice_attempt` · `proactive_accepted` · `agent_choice` · `agent_feedback` · `dwell_pinned` · `inline_ai_applied`.
+- **Clean behavioural data** — direct asking and recorded answers, not big-data fishing.
+- **Bundled dashboard route** turns the stream into charts, or pipe it to Mixpanel / Amplitude / your own BI.
 
-| Event | What it tells you |
-|---|---|
-| `palette_activated` | Which command was opened |
-| `voice_attempt` | Voice attempt succeeded or failed |
-| `proactive_accepted` | Proactive offer accepted / rejected |
-| `agent_choice` | Which multi-choice option was picked |
-| `agent_feedback` | Did the user accept the agent's final answer |
-| `dwell_pinned` | Which element was pinned |
-| `inline_ai_applied` | Which inline-AI action was applied |
-
-Subscribe once and you have **clean behavioural data** — who wanted a refund, who wanted to upgrade, which proactive offers land, which agent actions get rejected. Not big-data fishing — direct asking and recorded answers. The built-in dashboard route turns the stream into charts, or pipe it to Mixpanel / Amplitude / your own BI.
+</td>
+</tr>
+</table>
 
 ---
 

@@ -5,6 +5,7 @@
 import { inferSelector } from '../utils/selector';
 import { escapeHtml } from '../utils/dom';
 import { genId } from '../utils/id';
+import { sdkString } from '../utils/sdk-i18n';
 import { ensurePaletteStyles, UI_ATTR } from './command-palette/styles';
 
 /**
@@ -377,6 +378,11 @@ export interface CameraOptions {
 
 export interface CommandPaletteOptions {
   initialItems?: PaletteItem[];
+  /** Locale for the bundled chrome strings (placeholder, footer hints).
+   *  `en` / `zh-TW` ship bundled — anything else falls back to `en`.
+   *  Hosts wanting native labels in another language pass `placeholder`
+   *  explicitly or override via `setLocale()` at runtime. */
+  locale?: string;
   placeholder?: string;
   /** Optional page-text search; returns elements to jump to. */
   searchPage?: (query: string) => Array<{ text: string; element: HTMLElement }>;
@@ -437,6 +443,10 @@ export class CommandPalette {
   private items: PaletteItem[];
   private subMenuStack: PaletteItem[][] = [];
   private placeholder: string;
+  /** Locale for the bundled chrome strings. Read at construction; can
+   *  be flipped at runtime via `setLocale()` — the next render picks
+   *  up the new strings (footer hints + placeholder). */
+  private locale: string | undefined;
   private searchPage?: CommandPaletteOptions['searchPage'];
   private contextPromotesFallback = true;
 
@@ -473,7 +483,8 @@ export class CommandPalette {
   constructor(opts: CommandPaletteOptions = {}) {
     this.rootItems = opts.initialItems ?? [];
     this.items = this.rootItems.slice();
-    this.placeholder = opts.placeholder ?? 'Type a command…';
+    this.locale = opts.locale;
+    this.placeholder = opts.placeholder ?? sdkString(this.locale, 'palette.placeholder');
     this.searchPage = opts.searchPage;
     this.heatRank = opts.heatRank;
     this.pieceCatalog = opts.pieceCatalog;
@@ -505,6 +516,31 @@ export class CommandPalette {
 
   isOpen(): boolean {
     return this.root !== null;
+  }
+
+  /** Update the locale for the bundled chrome strings (placeholder,
+   *  footer hints). Next palette open picks up the new strings. The
+   *  open-right-now palette is patched in place too. */
+  setLocale(locale: string): void {
+    this.locale = locale;
+    this.placeholder = sdkString(locale, 'palette.placeholder');
+    if (this.input) this.input.placeholder = this.placeholder;
+    if (this.root) {
+      const footer = this.root.querySelector<HTMLElement>(`[${UI_ATTR}="palette-footer"]`);
+      if (footer) {
+        footer.innerHTML = `
+          <span data-dddk-ui="palette-footer-group">
+            <kbd>↑</kbd><kbd>↓</kbd> <span>${escapeHtml(sdkString(this.locale, 'palette.footer.navigate'))}</span>
+          </span>
+          <span data-dddk-ui="palette-footer-group">
+            <kbd>↵</kbd> <span>${escapeHtml(sdkString(this.locale, 'palette.footer.select'))}</span>
+          </span>
+          <span data-dddk-ui="palette-footer-group">
+            <kbd>esc</kbd> <span>${escapeHtml(sdkString(this.locale, 'palette.footer.close'))}</span>
+          </span>
+        `;
+      }
+    }
   }
 
   toggle(initialSelection?: string): void {
@@ -1004,13 +1040,13 @@ export class CommandPalette {
     footerEl.setAttribute(UI_ATTR, 'palette-footer');
     footerEl.innerHTML = `
       <span data-dddk-ui="palette-footer-group">
-        <kbd>↑</kbd><kbd>↓</kbd> <span>to navigate</span>
+        <kbd>↑</kbd><kbd>↓</kbd> <span>${escapeHtml(sdkString(this.locale, 'palette.footer.navigate'))}</span>
       </span>
       <span data-dddk-ui="palette-footer-group">
-        <kbd>↵</kbd> <span>to select</span>
+        <kbd>↵</kbd> <span>${escapeHtml(sdkString(this.locale, 'palette.footer.select'))}</span>
       </span>
       <span data-dddk-ui="palette-footer-group">
-        <kbd>esc</kbd> <span>to close</span>
+        <kbd>esc</kbd> <span>${escapeHtml(sdkString(this.locale, 'palette.footer.close'))}</span>
       </span>
     `;
 
