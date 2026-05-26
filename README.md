@@ -28,13 +28,10 @@
 </td>
 <td width="45%" valign="top">
 
-**Open** &nbsp; `Ctrl/⌘+K`. Your commands sit next to Ask AI in one list.
-
-**Prefix routing** &nbsp; `/command`, `@entity`, `order:`, `#tag` — drill in from the keyboard.
-
-**Customisation** &nbsp; three layers — CSS variables for theme · Skill SDK for behaviour (Script / Prompt / Action / Surface / Panel) · drop in existing host actions as palette items.
-
-**Zero built-ins** &nbsp; what shows in the palette is 100% yours to decide.
+- **Ctrl/⌘+K opens it.** Your registered commands sit alongside Ask AI in the same list — switch theme, change language, open billing, find a customer, all addressable from one place.
+- **Prefix routing** — `/command`, `@entity`, `order:`, `#tag` — gives the user one convenient entry point that solves whatever they're stuck on, no matter where they are in the product.
+- **Three customisation layers** stack: CSS-variable theming, Skill SDK (Script / Prompt / Action / Surface / Panel), or wire your existing host features straight in as palette items.
+- **Zero built-in commands** — what shows up in the palette is entirely yours to decide. The SDK ships infrastructure, you ship the vocabulary.
 
 </td>
 </tr>
@@ -51,15 +48,11 @@
 </td>
 <td width="45%" valign="top">
 
-**Loop** &nbsp; DOM-grounded · reads the visible page · picks a tool · narrates each step.
-
-**19 built-in actions** &nbsp; `navigate` · `click` · `fill_input` · `scroll` · `screenshot` · `ask_user` · `ask_user_choice` · `show_subtitle` · `wait` · `border` · `highlight` · …
-
-**Space-gated** &nbsp; single tap accept · double-tap reject · Esc cancel. Every step is visible before it runs.
-
-**Asks back** &nbsp; `ask_user_choice` for 2-4 options, `ask_user` for free text. No silent decisions.
-
-**BYO LLM** &nbsp; OpenAI · Google AI Studio · `ProxyProvider` that hides keys server-side.
+- **DOM-grounded autonomous loop.** Reads the visible page, picks one tool at a time, narrates each step in the subtitle bar before it runs.
+- **19 built-in actions** — `navigate` · `click` · `fill_input` · `scroll` · `screenshot` · `ask_user` · `ask_user_choice` · `show_subtitle` · `wait` · `border` · `highlight` · `set_text` · `select_option` · `submit_form` · etc. Add your own domain actions; the LLM picks them.
+- **Space-gated every step.** Single tap accept · double-tap reject · Esc cancel. Users see what's about to happen *before* it happens.
+- **Asks back when ambiguous.** `ask_user_choice` for 2-4 options, `ask_user` for free text. No silent decisions, no guessing.
+- **Bring your own LLM.** OpenAI, Google AI Studio, or `ProxyProvider` that hides keys behind your server. Per-role routing so a cheap model handles voice cleanup while the flagship handles the agent loop.
 
 </td>
 </tr>
@@ -76,15 +69,10 @@
 </td>
 <td width="45%" valign="top">
 
-**Trigger** &nbsp; highlight any text in any `<input>` / `<textarea>` / `[contenteditable]` → floating toolbar below the selection.
-
-**7 default actions** &nbsp; Translate · Improve · Fix grammar · Shorter · Longer · Professional tone · Explain.
-
-**Result** &nbsp; streams back in place of the selection. No leaving the field.
-
-**Customise** &nbsp; drop defaults, add your own · two-column layout option · optional keyboard shortcuts.
-
-**IME-safe** &nbsp; CJK candidate typing never accidentally triggers.
+- **Highlight any text** in any `<input>` / `<textarea>` / `[contenteditable]` — a floating toolbar appears below the selection. Pick an action, the result streams back in place of the selection.
+- **Seven default actions** — Translate, Improve writing, Fix spelling & grammar, Make shorter, Make longer, Change to professional tone, Explain this. Drop the defaults, add your own (`/translate-with-glossary`, `/rewrite-as-email`).
+- **Two-column layout** option for editor hosts that want a `Format` column next to an `AI` column. Optional keyboard shortcuts (e.g. `Ctrl+Shift+R` to rewrite without opening the menu).
+- **IME-composition-aware** — typing Chinese / Japanese / Korean candidate characters never accidentally triggers the toolbar. Critical for CJK users; nothing else handles this right.
 
 </td>
 </tr>
@@ -161,18 +149,15 @@ Four physical ways to send context into dddk. No new vocabulary to learn.
 
 <table>
 <tr>
-<td width="55%" valign="top">
-  <img src="./media/readme/dddk-mobile.png" alt="mobile portrait view: dotdotduck FAB at bottom-right corner, 'Listening — release to send' indicator shown above the FAB while voice is active" />
+<td width="35%" valign="top" align="center">
+  <img src="./media/readme/dddk-mobile.png" alt="mobile portrait view: dotdotduck FAB at bottom-right corner, 'Listening — release to send' indicator shown above the FAB while voice is active" width="260" />
 </td>
-<td width="45%" valign="top">
+<td width="65%" valign="top">
 
-**Floating action button** &nbsp; ships out of the box on mobile breakpoints — tap to open palette, long-press to hold-talk.
-
-**Touch gestures** &nbsp; the same Space-hold / long-press / multi-choice patterns work via touch — `tap → palette`, `long-press → voice`, digits → option pick.
-
-**Your own button** &nbsp; replace the duck FAB with any host element. Pass a selector or HTMLElement; dddk wires the open / hold-talk handlers onto it so the FAB lives wherever your design wants — header bar, side rail, your own brand asset.
-
-**Responsive chrome** &nbsp; subtitle bar auto-offsets above the on-screen keyboard · palette becomes full-width below 640px.
+- **Floating action button.** Ships out of the box on mobile breakpoints — tap to open the palette, long-press to hold-talk into the agent.
+- **Touch gestures.** The same Space-hold / long-press / multi-choice patterns work via touch — tap → palette, long-press → voice, digit keys → option pick.
+- **Your own button.** Replace the duck FAB with any host element. Pass a selector or `HTMLElement` and dddk wires the open / hold-talk handlers onto it — the FAB lives wherever your design wants it (header bar, side rail, brand asset, etc.).
+- **Responsive chrome.** Subtitle bar auto-offsets above the on-screen keyboard; palette becomes full-width below 640px; tap targets respect the 44×44 touch-spec.
 
 </td>
 </tr>
@@ -189,15 +174,11 @@ Four physical ways to send context into dddk. No new vocabulary to learn.
 </td>
 <td width="45%" valign="top">
 
-**Subscribes** &nbsp; scroll · dwell · time-on-page · last interaction.
-
-**Yes / no** &nbsp; Space accepts · double-Space rejects.
-
-**Multi-choice** &nbsp; `1-9` to pick · always a trailing **Other** slot for free text.
-
-**Stays in the subtitle bar** &nbsp; no popup chrome · no layout shift.
-
-**Emits intents** &nbsp; `proactive_accepted` / `agent_choice` so you measure what lands — not big-data fishing, direct asking + recorded answers.
+- **The agent subscribes to page signals** — scroll depth, Dwell time, time-on-page, last interaction — and surfaces an offer in the subtitle bar when conditions match.
+- **Yes / no resolves with Space.** Single tap accepts, double-tap rejects. No popup chrome, no layout shift — the whole exchange stays in the subtitle bar.
+- **Multi-choice with 1-9 number keys** plus a trailing **Other** slot that always accepts free text. The user gets out without typing if your options covered it; if not, they can still answer.
+- **Every response emits a typed intent** (`proactive_accepted` / `agent_choice` with the picked value) so you measure what lands. Not big-data fishing — direct asking and recorded answers.
+- **Customer-service plays out of the box** — order just shipped → "Want me to pull the tracking?"; user lingers on the returns page → list three common actions.
 
 </td>
 </tr>
@@ -214,13 +195,10 @@ Four physical ways to send context into dddk. No new vocabulary to learn.
 </td>
 <td width="45%" valign="top">
 
-**Every interaction emits a typed event** &nbsp; palette opens, voice transcripts, agent answers, accept / reject gestures, Dwell pins, multi-choice picks.
-
-**Event types** &nbsp; `palette_activated` · `voice_attempt` · `proactive_accepted` · `agent_choice` · `agent_feedback` · `dwell_pinned` · `inline_ai_applied`.
-
-**Clean behavioural data** &nbsp; direct asking, recorded answers.
-
-**Bundled dashboard** &nbsp; turns the stream into charts, or pipe it to Mixpanel · Amplitude · your own BI.
+- **Every interaction emits a typed event.** Palette opens, voice transcripts, agent answers, accept / reject gestures, Dwell pins, multi-choice picks — all flow through one structured stream.
+- **Event types** include `palette_activated` · `voice_attempt` · `proactive_accepted` · `agent_choice` · `agent_feedback` · `dwell_pinned` · `inline_ai_applied`. Add your own and they ride the same channel.
+- **Clean behavioural data, no big-data fishing.** You learn what users want from what they actually asked + answered, not from inferring through clickstreams.
+- **Bundled dashboard route** turns the stream into charts out of the box, or subscribe in code and pipe to Mixpanel / Amplitude / your own BI.
 
 </td>
 </tr>
