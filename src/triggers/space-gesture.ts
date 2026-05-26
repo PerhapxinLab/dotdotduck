@@ -138,11 +138,19 @@ export class GestureManager {
   // ─── private ────────────────────────────────────────────────────
 
   private handleKeyDown(e: KeyboardEvent): void {
-    // IME composition guard. When a CJK user is composing a character,
-    // keydown's `e.isComposing` is true and `e.keyCode === 229`. Space
-    // pressed during composition is committing the candidate, NOT a
-    // voice gesture. Bail entirely so the IME owns the keystroke.
-    if (e.isComposing || (e as KeyboardEvent & { keyCode?: number }).keyCode === 229) {
+    // IME composition guard. When a CJK user is actively composing a
+    // character, `e.isComposing` is true; space pressed in that state
+    // is committing the candidate, NOT a voice gesture. Bail so the
+    // IME owns the keystroke.
+    //
+    // We intentionally DO NOT also check `keyCode === 229`: on Edge
+    // with Bopomofo / Microsoft Pinyin IME selected, *every* keydown
+    // (including autorepeat space outside composition) reports
+    // keyCode 229. Returning on that signal blocks our preventDefault
+    // and the OS leaks a stream of literal spaces into the focused
+    // input when the user holds space for voice. `isComposing` alone
+    // is the reliable per-keystroke "this is composition" signal.
+    if (e.isComposing) {
       return;
     }
 
