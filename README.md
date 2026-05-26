@@ -28,11 +28,13 @@
 </td>
 <td width="45%" valign="top">
 
-- **Ctrl/⌘+K opens it.** Your registered commands sit alongside Ask AI in the same list.
-- **Prefix routing** — `/command`, `@entity`, `order:`, `#tag` — drill in without leaving the keyboard.
-- **One convenient entry point** no matter where the user is in the product.
-- **Three customisation layers**: CSS-variable theming, Skill SDK (Script / Prompt / Action / Surface / Panel), or drop-in palette items.
-- **Zero built-in commands.** What shows up in the palette is entirely yours to decide.
+**Open** &nbsp; `Ctrl/⌘+K`. Your commands sit next to Ask AI in one list.
+
+**Prefix routing** &nbsp; `/command`, `@entity`, `order:`, `#tag` — drill in from the keyboard.
+
+**Customisation** &nbsp; three layers — CSS variables for theme · Skill SDK for behaviour (Script / Prompt / Action / Surface / Panel) · drop in existing host actions as palette items.
+
+**Zero built-ins** &nbsp; what shows in the palette is 100% yours to decide.
 
 </td>
 </tr>
@@ -49,12 +51,15 @@
 </td>
 <td width="45%" valign="top">
 
-- **DOM-grounded autonomous loop.** Reads the visible page, picks a tool, narrates each step.
-- **19 built-in actions** — `navigate` · `click` · `fill_input` · `scroll` · `screenshot` · `ask_user` · `ask_user_choice` · `show_subtitle` · `wait` · `border` · `highlight` · `set_text` · `select_option` · `submit_form` · etc.
-- **Gated by Space** — single tap accept · double-tap reject · Esc cancel. Every step is visible before it runs.
-- **Asks back** when ambiguous — `ask_user_choice` for 2-4 options, `ask_user` for free text.
-- **Voice as an entry point** — hold Space, transcript flows into the same agent. Optional LLM cleanup pass.
-- **Bring your own LLM** — OpenAI, Google AI Studio, or `ProxyProvider` that hides keys server-side.
+**Loop** &nbsp; DOM-grounded · reads the visible page · picks a tool · narrates each step.
+
+**19 built-in actions** &nbsp; `navigate` · `click` · `fill_input` · `scroll` · `screenshot` · `ask_user` · `ask_user_choice` · `show_subtitle` · `wait` · `border` · `highlight` · …
+
+**Space-gated** &nbsp; single tap accept · double-tap reject · Esc cancel. Every step is visible before it runs.
+
+**Asks back** &nbsp; `ask_user_choice` for 2-4 options, `ask_user` for free text. No silent decisions.
+
+**BYO LLM** &nbsp; OpenAI · Google AI Studio · `ProxyProvider` that hides keys server-side.
 
 </td>
 </tr>
@@ -71,12 +76,15 @@
 </td>
 <td width="45%" valign="top">
 
-- **Highlight any text** in any `<input>` / `<textarea>` / `[contenteditable]` — a floating toolbar appears below the selection.
-- **Seven default actions** — Translate · Improve writing · Fix spelling & grammar · Make shorter · Make longer · Change to professional tone · Explain this.
-- **Result streams back in place** of the selection.
-- **Custom actions** — drop the defaults, add your own (`/translate-with-glossary`, etc.).
-- **Two-column layout** option for editor hosts; optional keyboard shortcuts (e.g. `Ctrl+Shift+R` to rewrite).
-- **IME-composition-aware** — Chinese / Japanese / Korean candidate typing never accidentally triggers the toolbar.
+**Trigger** &nbsp; highlight any text in any `<input>` / `<textarea>` / `[contenteditable]` → floating toolbar below the selection.
+
+**7 default actions** &nbsp; Translate · Improve · Fix grammar · Shorter · Longer · Professional tone · Explain.
+
+**Result** &nbsp; streams back in place of the selection. No leaving the field.
+
+**Customise** &nbsp; drop defaults, add your own · two-column layout option · optional keyboard shortcuts.
+
+**IME-safe** &nbsp; CJK candidate typing never accidentally triggers.
 
 </td>
 </tr>
@@ -97,9 +105,9 @@ Four physical ways to send context into dddk. No new vocabulary to learn.
 
 **A · Hold Space — voice in**
 
-- Press and hold Space anywhere. Subtitle bar shows "Listening — release to send".
-- Release to send. Focused in an input → fills the input. Anywhere else → goes to the agent.
-- Web Speech for STT; optional LLM cleanup pass removes fillers + fixes punctuation.
+- Subtitle shows *"Listening — release to send"*. Release to commit.
+- Focus inside an input → fills the input. Anywhere else → goes to the agent.
+- Web Speech for STT + optional LLM cleanup pass.
 
 </td>
 </tr>
@@ -111,9 +119,9 @@ Four physical ways to send context into dddk. No new vocabulary to learn.
 
 **B · Long-press anything — Dwell**
 
-- Long-press any element for ~1s. A frame pins around it.
+- Long-press any element for ~1s → frame pins around it.
 - Next `Ctrl+K` opens the palette with that element as context.
-- Visual elements (charts, images) ship with an **auto-screenshot** so the agent can see what you mean.
+- Visual elements (charts, images) ship an **auto-screenshot**.
 
 </td>
 </tr>
@@ -125,33 +133,46 @@ Four physical ways to send context into dddk. No new vocabulary to learn.
 
 **C · Drag a screenshot**
 
-- Click the camera in the palette and drag a rectangle anywhere on the page.
-- The captured region attaches to your next Ask AI / agent question.
-- Charts, dashboards, maps — show the AI exactly what you mean instead of describing it.
+- Click the camera in the palette → drag a rectangle on the page.
+- Captured region attaches to your next Ask AI / agent question.
+- Charts, dashboards, maps — show the AI exactly what you mean.
+
+</td>
+</tr>
+<tr>
+<td width="55%" valign="top">
+  <img src="./media/readme/dddk-introduce.png" alt="/introduce running: subtitle bar narrates Feature 1 · Command palette with step counter 1/2 + space → next page hint, page section framed in purple" />
+</td>
+<td width="45%" valign="top">
+
+**D · `/introduce` — guided tour**
+
+- Declarative tours — list of `page` + `subtitle` + `action(tools)` steps.
+- Space advances · Esc / double-Space exits. User reads at their pace.
+- Write your onboarding / feature tour once · replay any time (palette command, proactive prompt, or programmatic).
 
 </td>
 </tr>
 </table>
 
-**D · `/introduce` — guided tour** — Script Skills are declarative tours: a list of `page` + `subtitle` + `action(tools)`, Space to advance. Write your onboarding / feature tour once, replay any time the user types `/introduce` (or runs it from a palette command, or fires it as a proactive prompt).
-
 ---
 
-## 05 · Proactive — read the signal, ask the right question
+## 05 · Mobile — FAB + your own buttons
 
 <table>
 <tr>
 <td width="55%" valign="top">
-  <img src="./media/readme/dddk-proactive.png" alt="subtitle bar showing yes/no prompt 'Your Monday order just shipped — want me to pull the tracking?' and multi-choice 'How should I handle this return?' with Open an RMA / Check order status / Escalate to a human / Other options" />
+  <img src="./media/readme/dddk-mobile.png" alt="mobile portrait view: dotdotduck FAB at bottom-right corner, 'Listening — release to send' indicator shown above the FAB while voice is active" />
 </td>
 <td width="45%" valign="top">
 
-- **Subscribes to page signals** — scroll, dwell, time-on-page, last interaction.
-- **Yes / no** resolves with Space (accept) / double-tap (reject).
-- **Multi-choice** picks with `1-9` plus a trailing **Other** slot for free text.
-- **Stays in the subtitle bar** — no popup chrome, no layout shift.
-- **Every response emits an intent** (`proactive_accepted` / `agent_choice`) so you measure what lands.
-- **Typical customer-service plays** — order just shipped → "Want me to pull the tracking?"; user lingers on returns → list three common actions.
+**Floating action button** &nbsp; ships out of the box on mobile breakpoints — tap to open palette, long-press to hold-talk.
+
+**Touch gestures** &nbsp; the same Space-hold / long-press / multi-choice patterns work via touch — `tap → palette`, `long-press → voice`, digits → option pick.
+
+**Your own button** &nbsp; replace the duck FAB with any host element. Pass a selector or HTMLElement; dddk wires the open / hold-talk handlers onto it so the FAB lives wherever your design wants — header bar, side rail, your own brand asset.
+
+**Responsive chrome** &nbsp; subtitle bar auto-offsets above the on-screen keyboard · palette becomes full-width below 640px.
 
 </td>
 </tr>
@@ -159,7 +180,32 @@ Four physical ways to send context into dddk. No new vocabulary to learn.
 
 ---
 
-## 06 · Intent stream — every yes / no is a signal, the dashboard writes itself
+## 06 · Proactive — read the signal, ask the right question
+
+<table>
+<tr>
+<td width="55%" valign="top">
+  <img src="./media/readme/dddk-proactive.png" alt="subtitle bar showing yes/no prompt 'Your Monday order just shipped — want me to pull the tracking?' and multi-choice 'How should I handle this return?' with options" />
+</td>
+<td width="45%" valign="top">
+
+**Subscribes** &nbsp; scroll · dwell · time-on-page · last interaction.
+
+**Yes / no** &nbsp; Space accepts · double-Space rejects.
+
+**Multi-choice** &nbsp; `1-9` to pick · always a trailing **Other** slot for free text.
+
+**Stays in the subtitle bar** &nbsp; no popup chrome · no layout shift.
+
+**Emits intents** &nbsp; `proactive_accepted` / `agent_choice` so you measure what lands — not big-data fishing, direct asking + recorded answers.
+
+</td>
+</tr>
+</table>
+
+---
+
+## 07 · Intent stream — every yes / no is a signal, the dashboard writes itself
 
 <table>
 <tr>
@@ -168,16 +214,37 @@ Four physical ways to send context into dddk. No new vocabulary to learn.
 </td>
 <td width="45%" valign="top">
 
-- **Every interaction emits a typed event** — palette opens, voice transcripts, agent answers, accept / reject gestures, Dwell pins, multi-choice picks.
-- **Built-in event types**: `palette_activated` · `voice_attempt` · `proactive_accepted` · `agent_choice` · `agent_feedback` · `dwell_pinned` · `inline_ai_applied`.
-- **Clean behavioural data** — direct asking and recorded answers, not big-data fishing.
-- **Bundled dashboard route** turns the stream into charts, or pipe it to Mixpanel / Amplitude / your own BI.
+**Every interaction emits a typed event** &nbsp; palette opens, voice transcripts, agent answers, accept / reject gestures, Dwell pins, multi-choice picks.
+
+**Event types** &nbsp; `palette_activated` · `voice_attempt` · `proactive_accepted` · `agent_choice` · `agent_feedback` · `dwell_pinned` · `inline_ai_applied`.
+
+**Clean behavioural data** &nbsp; direct asking, recorded answers.
+
+**Bundled dashboard** &nbsp; turns the stream into charts, or pipe it to Mixpanel · Amplitude · your own BI.
 
 </td>
 </tr>
 </table>
 
 ---
+
+## Status — early stage, read before evaluating
+
+dotdotduck is in active development. It works, but expect rough edges. A few things up front:
+
+- **Clone the repo to evaluate properly.** The bundled docs are useful as a map, but the source is the source of truth. `git clone https://github.com/PerhapxinLab/dotdotduck` into your project directory and read the code alongside the [online docs](https://dddk.perhapxin.com/docs) — that's the recommended way to understand what's actually implemented.
+- **The docs are AI-drafted.** They're written and maintained with Claude Code. They stay close to the code by convention, but if something looks wrong, grep the repo before assuming the docs are right.
+- **Found a bug or unclear behaviour?** Open an issue at [github.com/PerhapxinLab/dotdotduck/issues](https://github.com/PerhapxinLab/dotdotduck/issues) — one-liners help shape the roadmap.
+
+## Documentation
+
+- **Full docs** → [dddk.perhapxin.com/docs](https://dddk.perhapxin.com/docs/v0.1.0/dddk/overview)
+- **Agent** (DOM-grounded loop + InlineAgent + sitemap + Memory) → [/dddk/agent](https://dddk.perhapxin.com/docs/v0.1.0/dddk/agent/overview)
+- **LLM** providers + router + adapter registry → [/dddk/llm](https://dddk.perhapxin.com/docs/v0.1.0/dddk/llm/providers)
+- **Skills** system + evals → [/dddk/skills](https://dddk.perhapxin.com/docs/v0.1.0/dddk/skills/overview)
+- **Modules** (voice / Dwell / inline / immersive translate / proactive / analytics) → [/dddk/modules](https://dddk.perhapxin.com/docs/v0.1.0/dddk/modules/overview)
+- **Toolbox** (search + recommend) → [/dddk/toolbox](https://dddk.perhapxin.com/docs/v0.1.0/dddk/toolbox/overview)
+- **Theming** → [/dddk/theming](https://dddk.perhapxin.com/docs/v0.1.0/dddk/theming)
 
 ## Install
 
@@ -228,27 +295,35 @@ Everything visual reads from CSS custom properties — `--dddk-bg`, `--dddk-acce
 
 Dark mode is automatic: `[data-theme="dark"]` anywhere up the tree, OR `@media (prefers-color-scheme: dark)` — whichever fires first. Custom modes (sepia, high-contrast, brand-specific) work by overriding the same variables under a new selector.
 
-## Documentation
-
-- **Full docs** → [dddk.perhapxin.com/docs](https://dddk.perhapxin.com/docs/v0.1.0/dddk/overview)
-- **Agent** (DOM-grounded loop + InlineAgent + sitemap + Memory) → [/dddk/agent](https://dddk.perhapxin.com/docs/v0.1.0/dddk/agent/overview)
-- **LLM** providers + router + adapter registry → [/dddk/llm](https://dddk.perhapxin.com/docs/v0.1.0/dddk/llm/providers)
-- **Skills** system + evals → [/dddk/skills](https://dddk.perhapxin.com/docs/v0.1.0/dddk/skills/overview)
-- **Modules** (voice / Dwell / inline / immersive translate / proactive / analytics) → [/dddk/modules](https://dddk.perhapxin.com/docs/v0.1.0/dddk/modules/overview)
-- **Toolbox** (search + recommend) → [/dddk/toolbox](https://dddk.perhapxin.com/docs/v0.1.0/dddk/toolbox/overview)
-- **Theming** → [/dddk/theming](https://dddk.perhapxin.com/docs/v0.1.0/dddk/theming)
-
-## Status — early stage, read before evaluating
-
-dotdotduck is in active development. It works, but expect rough edges. A few things up front:
-
-- **Clone the repo to evaluate properly.** The bundled docs are useful as a map, but the source is the source of truth. `git clone https://github.com/PerhapxinLab/dotdotduck` into your project directory and read the code alongside the [online docs](https://dddk.perhapxin.com/docs) — that's the recommended way to understand what's actually implemented.
-- **The docs are AI-drafted.** They're written and maintained with Claude Code. They stay close to the code by convention, but if something looks wrong, grep the repo before assuming the docs are right.
-- **Found a bug or unclear behaviour?** Open an issue at [github.com/PerhapxinLab/dotdotduck/issues](https://github.com/PerhapxinLab/dotdotduck/issues) — one-liners help shape the roadmap.
-
 ## License
 
-**AGPL-3.0-or-later** for open-source use — internal tools, personal projects, anything AGPL-compatible. **Commercial licenses** are available for closed-source / SaaS deployments that need to stay free of AGPL's network-copyleft obligations — see [LICENSE](./LICENSE) or reach the maintainer through the repo.
+<table>
+<tr>
+<th width="50%" align="left">AGPL-3.0-or-later — free</th>
+<th width="50%" align="left">Commercial — paid</th>
+</tr>
+<tr>
+<td valign="top">
+
+✓ Open-source projects
+<br />✓ Internal tools
+<br />✓ Personal projects
+<br />✓ Anything AGPL-compatible
+<br /><br />
+Use it, modify it, ship it — publish your modifications under AGPL.
+
+</td>
+<td valign="top">
+
+✓ Closed-source products
+<br />✓ Commercial SaaS
+<br />✓ Anything that can't satisfy AGPL's network-copyleft clause
+<br /><br />
+See [LICENSE](./LICENSE) for the full text or reach the maintainer through the repo.
+
+</td>
+</tr>
+</table>
 
 ---
 
