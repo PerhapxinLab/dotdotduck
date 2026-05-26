@@ -56,8 +56,6 @@ export class GestureManager {
   private tapTimer: ReturnType<typeof setTimeout> | null = null;
   private lastTapAt = 0;
   private isHolding = false;
-  /** Pre-captured selection — refreshed on every selectionchange/mouseup. */
-  private lastSelection = '';
   /**
    * Set on space-keydown inside an input field. If user releases before the
    * hold threshold, we insert the missing space character manually (since we
@@ -84,10 +82,6 @@ export class GestureManager {
 
     const onKeyDown = (e: KeyboardEvent) => this.handleKeyDown(e);
     const onKeyUp = (e: KeyboardEvent) => this.handleKeyUp(e);
-    const onSelectionChange = () => {
-      const s = this.readSelection();
-      if (s) this.lastSelection = s;
-    };
 
     // Use capture phase for keys so we get Ctrl+K BEFORE the browser's
     // own search-bar focus shortcut. Without capture, some browsers (Chrome
@@ -95,14 +89,10 @@ export class GestureManager {
     // level before our bubble-phase listener runs.
     document.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('keyup', onKeyUp, true);
-    document.addEventListener('selectionchange', onSelectionChange);
-    document.addEventListener('mouseup', onSelectionChange);
 
     this.cleanups.push(
       () => document.removeEventListener('keydown', onKeyDown, true),
       () => document.removeEventListener('keyup', onKeyUp, true),
-      () => document.removeEventListener('selectionchange', onSelectionChange),
-      () => document.removeEventListener('mouseup', onSelectionChange)
     );
   }
 
@@ -113,13 +103,13 @@ export class GestureManager {
     this.cleanups = [];
   }
 
-  /** Read currently selected text (live, from DOM/input). */
+  /**
+   * Read currently selected text (live, from DOM/input). Always queried at
+   * the moment of the gesture — no cached state. If the user has clicked
+   * away between selecting and pressing Ctrl+K / holding space, the browser
+   * has already collapsed `window.getSelection()`, so we correctly get ''.
+   */
   captureSelection(): string {
-    if (this.lastSelection) {
-      const s = this.lastSelection;
-      this.lastSelection = '';
-      return s;
-    }
     return this.readSelection();
   }
 

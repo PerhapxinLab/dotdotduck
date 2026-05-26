@@ -76,7 +76,7 @@ import {
   clearSession,
   DEFAULT_SESSION_KEY,
 } from './session';
-import { assembleSystemPrompt } from './prompt';
+import { assembleSystemPrompt, renderSitemap, renderSelectionBlock, renderPageStateBlock } from './prompt';
 import { builtinActions } from './actions';
 import { readDOM } from './dom-reader';
 import { setupCrossTabSync, publishCrossTab } from './cross-tab';
@@ -505,6 +505,10 @@ export class WebAgent {
     if (!this.session) return [];
 
     const pageContext = readDOM();
+
+    // Layer 1 — system prompt: lean behavioural guide only. No sitemap,
+    // no selection text, no DOM, no tool listing here. Stable across the
+    // session so the model's KV-cache reuses it.
     const systemPrompt = assembleSystemPrompt({
       locale: this.config.locale,
       agentName: this.config.agentName,
@@ -520,16 +524,22 @@ export class WebAgent {
       interactiveMode: this.config.confirmEachStep ?? false,
     });
 
-    const selectionBlock = this.currentSelection ? renderSelection(this.currentSelection) : '';
-    const userText =
-      `Task: ${this.session.task}\n\n` +
-      `Current page: ${this.session.currentPage}\n\n` +
-      (selectionBlock ? `User selection at invocation:\n${selectionBlock}\n\n` : '') +
-      `Page context:\n${pageContext}`;
+    // Layer 2 + 3 — user message: task + dev-supplied context (sitemap)
+    // + user selection block + current page state (URL / time / DOM).
+    // Sent fresh each turn because the DOM changes; the rest is cheap to
+    // re-send and keeps the messages array shape uniform.
+    const parts: string[] = [`# Task\n${this.session.task}`];
+    if (this.config.sitemap) parts.push(renderSitemap(this.config.sitemap));
+    if (this.currentSelection) parts.push(renderSelectionBlock(this.currentSelection));
+    parts.push(renderPageStateBlock({
+      currentPage: this.session.currentPage,
+      previousUrl: this.previousPageUrl ?? undefined,
+      pageContext,
+    }));
+    const userText = parts.join('\n\n');
 
-    // If the host attached image(s) via `selection.images` (typically a
-    // dwell-element screenshot), build the user content as a multi-part
-    // array so the bytes actually reach the LLM.
+    // Dwell / spotter screenshot — ride the user message as multi-part
+    // content so the bytes reach the LLM. Text-only content otherwise.
     const images = this.currentSelection?.images ?? [];
     const userContent = images.length > 0
       ? [
@@ -540,23 +550,18 @@ export class WebAgent {
 
     const messages: LLMMessage[] = [
       { role: 'system', content: systemPrompt },
-      {
-        role: 'user',
-        content: userContent,
-      },
+      { role: 'user', content: userContent },
     ];
 
-    // Recent steps as compact assistant + tool messages. Cap is the
-    // memory window the model sees of THIS task's tool calls — too low
-    // and the agent forgets what it did 5 steps ago in the same task;
-    // too high and prompts bloat. 12 fits most tour-length tasks; the
-    // host can override via `maxSteps` (run cap) but the slice itself
-    // is internal.
-    const recent = this.session.steps.slice(-12);
-    const baseIdx = this.session.steps.length - recent.length;
-    for (let i = 0; i < recent.length; i++) {
-      const step = recent[i]!;
-      const id = step.toolCallId ?? `step_${baseIdx + i}_${step.timestamp}`;
+    // Layer 4 — tool history. EVERY step in this run is included; dddk's
+    // session memory model is "accumulate within a run, fresh between
+    // runs" (each `run()` call creates a new session, prior history is
+    // gone). No slice cap — if a single task burns through 50 steps the
+    // model needs to see all 50 to avoid re-doing work. The hard ceiling
+    // is `config.maxSteps` (default 20) so this stays bounded.
+    for (let i = 0; i < this.session.steps.length; i++) {
+      const step = this.session.steps[i]!;
+      const id = step.toolCallId ?? `step_${i}_${step.timestamp}`;
       messages.push({
         role: 'assistant',
         content: '',
@@ -598,15 +603,6 @@ export class WebAgent {
 }
 
 // ─── helpers ────────────────────────────────────────────────────────
-
-function renderSelection(sel: SelectionContext): string {
-  const parts: string[] = [];
-  if (sel.text) parts.push(`Text: "${sel.text}"`);
-  if (sel.elements?.length) parts.push(`Elements: ${sel.elements.join(', ')}`);
-  if (sel.bbox) parts.push(`Bounding box: ${JSON.stringify(sel.bbox)}`);
-  if (sel.images?.length) parts.push(`Images: ${sel.images.length} attached`);
-  return parts.join('\n');
-}
 
 /**
  * Best-effort extraction of a CSS selector from action params, so visual

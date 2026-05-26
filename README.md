@@ -235,6 +235,16 @@ dotdotduck is in active development. It works, but expect rough edges. A few thi
 - **The docs are AI-drafted.** They're written and maintained with Claude Code. They stay close to the code by convention, but if something looks wrong, grep the repo before assuming the docs are right.
 - **Found a bug or unclear behaviour?** Open an issue at [github.com/PerhapxinLab/dotdotduck/issues](https://github.com/PerhapxinLab/dotdotduck/issues) — one-liners help shape the roadmap.
 
+### What the live demo runs (not bundled with the package)
+
+[dddk.perhapxin.com](https://dddk.perhapxin.com) wires the SDK to a specific provider stack. None of these are baked into `@perhapxin/dddk` — they're the demo site's choices, picked because they happen to fit Perhapxin's workload:
+
+- **WebAgent** loop → OpenAI `gpt-5.4`
+- **InlineAgent** + voice transcript cleanup → OpenAI `gpt-5.4-mini`
+- **Speech-to-text** → Deepgram Nova-3 multilingual (browser's Web Speech remains the SDK default when no `transcribe` callback is wired)
+
+The package itself ships LLM provider adapters (OpenAI / Google / proxy) and a `transcribe(audio)` extension point. Bring your own keys, models, and ASR vendor — the SDK doesn't lock you in.
+
 ## Documentation
 
 - **Full docs** → [dddk.perhapxin.com/docs](https://dddk.perhapxin.com/docs/v0.1.0/dddk/overview)

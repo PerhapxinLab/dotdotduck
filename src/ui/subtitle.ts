@@ -25,7 +25,7 @@ export class Subtitle {
    *  visible. Materialises when the subtitle hides — that way an
    *  agent loop's 'thinking' indicator gets queued behind the current
    *  subtitle instead of stacking on top of it. */
-  private pendingIndicator: { state: 'listening' | 'processing'; label?: string } | null = null;
+  private pendingIndicator: { state: 'listening' | 'processing' | 'done'; label?: string } | null = null;
 
   constructor(opts: { locale?: string } = {}) {
     this.locale = opts.locale ?? 'en';
@@ -79,7 +79,7 @@ export class Subtitle {
     // away (it'll re-materialise when this subtitle hides).
     if (this.indicator) {
       // Remember what the indicator was showing so we can restore it.
-      const state = (this.indicator.getAttribute('data-state') as 'listening' | 'processing') ?? 'processing';
+      const state = (this.indicator.getAttribute('data-state') as 'listening' | 'processing' | 'done') ?? 'processing';
       const labelEl = this.indicator.querySelector<HTMLElement>(`[${UI_ATTR}="indicator-label"]`);
       this.pendingIndicator = { state, label: labelEl?.textContent ?? undefined };
       this.indicator.remove();
@@ -502,7 +502,7 @@ export class Subtitle {
     return 'Agent running…';
   }
 
-  showIndicator(state: 'listening' | 'processing', label?: string): void {
+  showIndicator(state: 'listening' | 'processing' | 'done', label?: string): void {
     // Subtitle takes priority — if one is visible, queue this indicator
     // and let `hide()` materialise it later. Stacking a "thinking…" pip
     // on top of an actionable subtitle bar was the bug the user kept
@@ -522,10 +522,13 @@ export class Subtitle {
       document.body.appendChild(this.indicator);
     }
     this.indicator.setAttribute('data-state', state);
+    // Done state replaces the bouncing dots with a static checkmark — no
+    // motion implies "finished, not waiting on anything".
+    const visual = state === 'done'
+      ? `<div ${UI_ATTR}="indicator-check">✓</div>`
+      : `<div ${UI_ATTR}="indicator-dots"><span></span><span></span><span></span></div>`;
     this.indicator.innerHTML = `
-      <div ${UI_ATTR}="indicator-dots">
-        <span></span><span></span><span></span>
-      </div>
+      ${visual}
       ${label ? `<div ${UI_ATTR}="indicator-label">${escapeHtml(label)}</div>` : ''}
     `;
   }
@@ -601,14 +604,14 @@ export class Subtitle {
       'zh-TW': {
         voice: 'Tab 一行 ｜ space 同意 ｜ 雙擊 space 拒絕',
         selection: 'space 接受 ｜ 雙擊 space 拒絕',
-        agent: 'space 繼續 ｜ 雙擊 space 結束 ｜ esc 取消',
+        agent: 'space 繼續 ｜ 雙擊 space 結束',
         post: 'space 接受 ｜ 雙擊 space 拒絕',
         info: '',
       },
       en: {
         voice: 'Tab line · space accept · double-tap reject',
         selection: 'space accept · double-tap reject',
-        agent: 'space continue · double-tap exit · esc cancel',
+        agent: 'space continue · double-tap exit',
         post: 'space accept · double-tap reject',
         info: '',
       },
@@ -1040,6 +1043,12 @@ function ensureStyles(): void {
     }
     [${UI_ATTR}="indicator"][data-state="listening"] {
       animation: dddk-indicator-pulse 1.4s ease-in-out infinite;
+    }
+    [${UI_ATTR}="indicator"][data-state="done"] {
+      background: var(--dddk-success, #16a34a);
+    }
+    [${UI_ATTR}="indicator-check"] {
+      font-size: 16px; line-height: 1;
     }
     [${UI_ATTR}="indicator-dots"] {
       display: inline-flex; gap: 4px;

@@ -981,21 +981,46 @@ export class DotDotDuck {
     const thinkingLabel =
       this.resolveIndicatorOverride('processing')
       ?? sdkString(this.config.locale, 'agent.thinking');
+
+    // Watchdog — while a "thinking" indicator is up we periodically check
+    // `agent.isRunning()` directly. If the agent stopped without emitting
+    // a terminal status (interrupted, callback never fired, page changed
+    // mid-loop), the indicator clears on its own. Same principle as the
+    // selection fix: query live state instead of trusting cached
+    // notifications. See [[feedback-selection-no-cache]].
+    let watchdog: ReturnType<typeof setInterval> | null = null;
+    const startWatchdog = () => {
+      if (watchdog) return;
+      watchdog = setInterval(() => {
+        if (!agent.isRunning()) {
+          stopWatchdog();
+          this.subtitle.hideIndicator();
+          indicatorShownThisRun = false;
+        }
+      }, 600);
+    };
+    const stopWatchdog = () => {
+      if (watchdog) { clearInterval(watchdog); watchdog = null; }
+    };
+
     agent.on('status', (status) => {
       if (status === 'thinking' && !indicatorShownThisRun) {
         this.subtitle.showIndicator('processing', thinkingLabel);
         indicatorShownThisRun = true;
+        startWatchdog();
       } else if (status === 'thinking') {
         // Subsequent thinking turns — silently. The user already knows.
       } else if (status === 'executing') {
         // Executing has its own UI (border frame + confirm subtitle in
         // interactive mode). No indicator needed.
         this.subtitle.hideIndicator();
+        stopWatchdog();
       } else {
         // idle / done / failed / waiting — hide the indicator. Reset the
         // flag only when the run truly ended (done/failed), so a brief
         // "waiting" status (between confirm prompts) doesn't re-arm.
         this.subtitle.hideIndicator();
+        stopWatchdog();
         if (status === 'done' || status === 'failed') {
           indicatorShownThisRun = false;
         }
@@ -1007,7 +1032,17 @@ export class DotDotDuck {
     const gated = this.config.gateAgentSubtitles === true;
 
     agent.on('done', (session: AgentSession) => {
+      stopWatchdog();
       this.subtitle.hideIndicator();
+      if (!session.summary) {
+        // Silent completion — surface a brief "✓ 執行完畢" pip so the
+        // user sees the run ended (otherwise the spinner just vanishes
+        // mid-air with no closure). 2s feels long enough to register
+        // without nagging.
+        const doneLabel = sdkString(this.config.locale, 'agent.done');
+        this.subtitle.showIndicator('done', doneLabel);
+        setTimeout(() => this.subtitle.hideIndicator(), 2000);
+      }
       if (session.summary) {
         // Two delivery modes:
         //  - Plain `info` (default): the user dismisses by clicking
@@ -1055,6 +1090,8 @@ export class DotDotDuck {
     });
 
     agent.on('error', (err) => {
+      stopWatchdog();
+      this.subtitle.hideIndicator();
       this.subtitle.show({
         text: `Agent 錯誤：${err.message}`,
         type: gated ? 'agent' : 'info',
