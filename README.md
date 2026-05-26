@@ -206,6 +206,27 @@ Four physical ways to send context into dddk. No new vocabulary to learn.
 
 ---
 
+## Why adopt — eight concrete plays
+
+1. **Most customer-service tickets are page-solvable.** "How do I X" / "where do I Y" / "track my order" / "change my plan" — the answers all live on your site already; the gap is discoverability. A DOM-grounded agent that *operates the page* closes that gap. Deflect the easy 70% before they reach a human queue.
+
+2. **Proactive offers convert.** Watching scroll · Dwell · time-on-page · last interaction lets the agent ask *"want me to pull the tracking?"* / *"want a recommendation based on what you're looking at?"* before the user thinks to ask. Subtitle-bar yes/no resolves in one keystroke — friction is the lowest physically possible. Same surface for cross-sell and upsell plays.
+
+3. **The palette is a UI surface, not just a text list.** Each row's detail pane (and PanelSkills inside the palette) can render any **Pieces** tree — charts, tables, forms, mini-dashboards. That makes the palette a real productivity surface, not just a launcher:
+   - **Finance** — `AAPL` in the palette pulls a live price card + sparkline alongside the row.
+   - **Customer service** — type a question; the palette shows the matching FAQ entry with formatted answer inline, not a link to click.
+   - **Tool-type SaaS** — pack utilities (regex tester, JSON formatter, unit converter, internal lookup) straight into the palette so users never tab out. Same `Ctrl+K`, different verbs per product.
+
+4. **Long-press beats "screenshot + describe".** With Dwell, the user holds an element, the agent gets selector + auto-screenshot in one gesture — chart, dashboard panel, table row, whatever. Users stop interrupting themselves to take a screenshot, paste it into chat, and write a paragraph explaining what they meant. Intent flows straight from finger to LLM.
+
+5. **Break the language wall with one palette command.** Built-in immersive translate renders every paragraph of the current page bilingually side by side — one keystroke turns your English-only docs / knowledge base / product copy into a Chinese / Japanese / Korean / Spanish-readable surface. Batched into a handful of LLM calls per page (a 200-paragraph article costs ~7 calls). For cross-border SaaS, content platforms, or any product serving multiple regions, that's one fewer translation-engineering project on the roadmap.
+
+6. **One SDK instead of stitching six vendors.** Palette + agent + inline AI + voice + Dwell + proactive + analytics + immersive translate ship as one install. The conventional alternative is Algolia for search, Intercom for chat, Mixpanel for analytics, Whisper for voice, plus the brittle glue code between them. dddk is one dependency, one theme system, one intent stream.
+
+7. **Yes / no / multi-choice = free RL labels.** Every Space-accept and double-Space-reject is a clean, intentional signal — what the user actually wanted vs didn't, said by the user, recorded with the original prompt. No more inferring from clickstream noise. The training set for whatever you fine-tune or evaluate next is already collected.
+
+8. **Voice doesn't stop at the browser.** The same `Voice` + `voiceCleanup` shape powers IoT panels, kiosk terminals, service machines, and accessibility-first surfaces for elderly users or anyone who'd rather not type. One mental model across every device that has a microphone.
+
 ## Status — early stage, read before evaluating
 
 dotdotduck is in active development. It works, but expect rough edges. A few things up front:
