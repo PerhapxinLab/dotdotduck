@@ -132,7 +132,16 @@ export class GestureManager {
     // keydown's `e.isComposing` is true and `e.keyCode === 229`. Space
     // pressed during composition is committing the candidate, NOT a
     // voice gesture. Bail entirely so the IME owns the keystroke.
-    if (e.isComposing || (e as KeyboardEvent & { keyCode?: number }).keyCode === 229) {
+    //
+    // ONLY apply this guard to the FIRST keystroke (e.repeat === false).
+    // A real IME commit is a single tap — it never autorepeats. So if we
+    // see e.repeat === true, the user is holding the key down (voice
+    // gesture) and we MUST preventDefault below, no matter what the IME
+    // state happens to be reporting. Without this gate Edge + Microsoft
+    // Bopomofo IME can flag autorepeat keydowns as `isComposing: true`
+    // and the user gets a stream of spaces inserted while holding space
+    // in an input.
+    if (!e.repeat && (e.isComposing || (e as KeyboardEvent & { keyCode?: number }).keyCode === 229)) {
       return;
     }
 
