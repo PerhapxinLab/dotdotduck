@@ -11,95 +11,134 @@
 </p>
 
 <p align="center">
+  <img src="./media/readme/dddk-palette.png" alt="dotdotduck command palette open, with host commands, skills, and the Ask AI box mixed in one list" width="780" />
+</p>
+
+<p align="center">
   <a href="https://www.npmjs.com/package/@perhapxin/dddk"><img src="https://img.shields.io/npm/v/@perhapxin/dddk.svg?style=flat-square" alt="npm" /></a>
   <a href="https://www.npmjs.com/package/@perhapxin/dddk"><img src="https://img.shields.io/npm/dm/@perhapxin/dddk.svg?style=flat-square" alt="downloads" /></a>
   <a href="https://github.com/PerhapxinLab/dotdotduck/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue?style=flat-square" alt="license" /></a>
   <a href="https://dddk.perhapxin.com/docs/v0.1.0/dddk/overview"><img src="https://img.shields.io/badge/docs-online-blue?style=flat-square" alt="docs" /></a>
-  <a href="https://github.com/PerhapxinLab/dotdotduck/stargazers"><img src="https://img.shields.io/github/stars/PerhapxinLab/dotdotduck?style=flat-square" alt="stars" /></a>
 </p>
 
-## Status — early stage, read before evaluating
+---
 
-dotdotduck is in active development. It works, but expect rough edges. A few things up front:
+## 01 · Command palette — every feature, behind one panel
 
-- **Clone the repo to evaluate properly.** The bundled docs are useful as a map, but the source is the source of truth. `git clone https://github.com/PerhapxinLab/dotdotduck` into your project directory and read the code alongside the [online docs](https://dddk.perhapxin.com/docs) — that's the recommended way to understand what's actually implemented.
-- **The docs are AI-drafted.** They're written and maintained with Claude Code. They stay close to the code by convention, but if something looks wrong, grep the repo before assuming the docs are right.
-- **Found a bug or unclear behaviour?** Open an issue at [github.com/PerhapxinLab/dotdotduck/issues](https://github.com/PerhapxinLab/dotdotduck/issues) — one-liners help shape the roadmap.
+<img src="./media/readme/dddk-palette.png" alt="Cmd+K palette open: /introduce, /theme, /language, /immersive_translate, #find-on-page, docs: search, Go to entries — all in one list" width="780" />
 
-## What it does
+`Ctrl/⌘+K` opens it. Your registered commands — switch theme, change language, open billing, find a customer — sit alongside Ask AI in the same list. Prefix routing (`/command`, `@entity`, `order:`) gives the user **one convenient entry point that solves whatever they're stuck on, no matter where they are in the product**.
 
-`@perhapxin/dddk` (pronounced *dot-dot-duck*) is the SDK behind every "press Cmd+K to do anything" experience you wish your product had. One import wires together a command palette, voice input, on-page selection, inline AI for any text field, and a DOM-grounded agent that can actually carry out tasks — all themed with plain CSS variables, all locale-neutral by default.
+Three customisation layers stack:
 
-The opposite of a chatbot. There is no bubble in the corner waiting to be opened. The user keeps doing what they were doing and AI shows up exactly where they already are: as a row in the palette they just opened, as a popover next to the textarea they're typing in, as a frame under the paragraph they just long-pressed. Each surface is grounded in the page and the user's intent, not in an out-of-context chat thread.
+1. **Theme** via CSS variables — `--dddk-accent`, `--dddk-radius`, `--dddk-font`, etc.
+2. **Skill SDK** — declarative Script / Prompt / Action / Surface / Panel units the agent (and the user) can invoke.
+3. **Drop-in palette items** — register what your product already does as palette rows.
 
-You declare what your product can do as **skills** — small declarative units that come in five shapes (Scripts, Prompts, Actions, Surfaces, Panels). dddk handles palette discovery, voice routing, accessibility, theming, persistence, and analytics. You write the verbs your product already speaks.
+The SDK ships with **zero built-in commands**. What shows up in the palette is entirely yours to decide.
 
-## How it shows up in your product
+---
 
-The same skill registry surfaces in six places so users find AI exactly where they already are:
+## 02 · WebAgent — an agent that operates the page, not a sidebar chatbot
+
+<img src="./media/readme/dddk-webagent.png" alt="agent narrating its next step in the subtitle bar with space-continue / double-tap-exit / esc-cancel hint and confirm buttons" width="780" />
+
+`WebAgent` is the engine inside dotdotduck — DOM-grounded, runs in the user's tab. Nineteen built-in actions (`navigate` / `click` / `fill_input` / `scroll` / `screenshot` / `ask_user` …) compose into multi-step tasks.
+
+- LLM picks one action at a time.
+- Subtitle bar **narrates each step** in the user's language.
+- The agent **asks back** when a decision is needed (`ask_user_choice` for 2-4 options, `ask_user` for free text).
+- Single-tap Space accepts, double-tap rejects, Esc cancels. Every step is gated.
+
+Voice is the other entry point: hold Space for Web Speech STT, the transcript gets an optional LLM cleanup pass, then the agent runs. Provider is your call — OpenAI, Google AI Studio, or `ProxyProvider` that hides keys behind your server.
+
+---
+
+## 03 · Inline Agent — select text, AI without leaving the input
+
+<img src="./media/readme/dddk-inline.png" alt="floating Edit with AI menu next to a textarea selection: Translate / Improve writing / Fix spelling & grammar / Make shorter / Make longer / Change to professional tone / Explain this" width="780" />
+
+Highlight any text in any `<input>` / `<textarea>` / `[contenteditable]` — a floating toolbar appears next to your selection: **Translate, Improve writing, Fix grammar, Make shorter / longer, Change to professional tone, Explain**. Pick one, the result streams back in place of the selection.
+
+- Actions are **customisable** — drop the defaults, add your own (`/bold-on-rewrite`, `/translate-with-glossary`).
+- Layout supports two-column, optional keyboard shortcuts (`Ctrl+Shift+R` to rewrite, etc.).
+- **IME-composition-aware** — typing Chinese / Japanese / Korean candidates never accidentally triggers the toolbar.
+
+---
+
+## 04 · Direct manipulation — gestures you already know
+
+Four physical ways to send context into dddk. No new vocabulary to learn.
 
 <table>
 <tr>
-<td width="33%" align="center">
-  <img src="https://dddk.perhapxin.com/readme/dddk-palette.png" alt="Cmd+K palette open, with host commands, skills, and the AI ask box mixed in one list" />
-  <br /><strong>Command palette</strong>
-  <br /><em>Ctrl/⌘+K. Host commands sit next to skills, agent tools, and the AI ask box. Prefix routing (<code>/</code>, <code>?</code>, <code>&gt;</code>), grouped sections, multi-step Panel skills, attachments.</em>
+<td width="50%" valign="top">
+  <img src="./media/readme/dddk-voice.png" alt="long-press space, subtitle bar shows live 'Listening — release to send' indicator" />
+  <br /><strong>A · Hold Space — voice in</strong>
+  <br /><em>Press and hold Space anywhere. The subtitle bar shows "Listening — release to send." Release to send. Focused inside an input → transcript fills it. Anywhere else → goes to the agent as a question.</em>
 </td>
-<td width="33%" align="center">
-  <img src="https://dddk.perhapxin.com/readme/dddk-dwell.png" alt="long-press a DOM element → multi-choice picker: Explain / Summarize / Translate / Other" />
-  <br /><strong>Dwell long-press</strong>
-  <br /><em>Hold any element ~500ms → a frame pins on it + a multi-choice picker pops up. Esc keeps the frame for the next palette / voice action.</em>
-</td>
-<td width="33%" align="center">
-  <img src="https://dddk.perhapxin.com/readme/dddk-webagent.png" alt="agent narrating its next step in the subtitle bar with a yes/no confirmation gate" />
-  <br /><strong>WebAgent</strong>
-  <br /><em>DOM-grounded autonomous agent. Reads the page, picks a tool, narrates each step in the subtitle bar with a single-tap confirmation gate. The user sees what's about to happen — and stays in control.</em>
+<td width="50%" valign="top">
+  <img src="./media/readme/dddk-dwell.png" alt="long-press a DOM element ~1s and a frame pins around it" />
+  <br /><strong>B · Long-press anything — Dwell</strong>
+  <br /><em>Dwell: long-press any element for ~1s and a frame pins around it. Next Ctrl+K opens the palette with that element as context. Visual elements (charts, images) ship with an auto-screenshot.</em>
 </td>
 </tr>
 <tr>
-<td width="33%" align="center">
-  <img src="https://dddk.perhapxin.com/readme/dddk-inline.png" alt="inline AI popover floating next to a textarea selection with Translate / Improve / Fix actions" />
-  <br /><strong>Inline Agent</strong>
-  <br /><em>Floating popover next to any <code>&lt;textarea&gt;</code> / <code>contenteditable</code> selection. Translate, Improve, Fix grammar, Tone, Explain — without leaving the field.</em>
+<td width="50%" valign="top">
+  <strong>C · /introduce — guided tour</strong>
+  <br /><em>Script Skills are declarative tours: a list of `page` + `subtitle` + `action(tools)`, Space to advance. Write your onboarding / feature tour once, replay any time the user types <code>/introduce</code>.</em>
 </td>
-<td width="33%" align="center">
-  <img src="https://dddk.perhapxin.com/readme/dddk-voice.png" alt="long-press space, subtitle bar shows live 'listening' indicator" />
-  <br /><strong>Voice in</strong>
-  <br /><em>Long-press Space anywhere. The subtitle bar shows the live listening indicator. Transcript lands in the palette as text or as an agent task — depending on what's open.</em>
-</td>
-<td width="33%" align="center">
-  <img src="https://dddk.perhapxin.com/readme/dddk-dashboard.png" alt="behaviour analytics dashboard showing intent stream + skill adoption rates" />
-  <br /><strong>Dashboard</strong>
-  <br /><em>Every intent (palette open, skill activate, agent answered, voice attempt) flows into a unified stream. See which skills land and which don't, in real time.</em>
+<td width="50%" valign="top">
+  <strong>D · Drag a screenshot</strong>
+  <br /><em>Click the camera in the palette and drag a rectangle anywhere on the page — the captured region is attached to your next Ask AI / agent question. Charts, dashboards, maps — show the AI exactly what you mean instead of describing it.</em>
 </td>
 </tr>
 </table>
 
-## Features
+---
 
-- **Command palette** — Ctrl/⌘+K. Prefix routing, grouped sections, fuzzy + BM25 hybrid match, attachments (text / image), multi-step Panel skills.
-- **WebAgent** — DOM-grounded autonomous loop. Reads the visible page, picks a tool, narrates with a yes/no gate before each step. Disable cleanly with `agent: { enabled: false }` if you only want the palette.
-- **Inline Agent** — popover-based text editing in any input or contenteditable. Hosts add their own actions; built-ins are translate / improve / fix / shorter / longer / tone / explain.
-- **Voice in** — hold-Space STT through the Web Speech API. Routes the transcript to the palette OR to the agent task, depending on what's open. Optional LLM cleanup pass to remove fillers.
-- **Dwell** — long-press anything to pin it. The pinned element becomes context for the next palette query / voice utterance / agent task.
-- **Skills** — five skill types (Script / Prompt / Action / Surface / Panel) share one registry and one discovery surface (the palette).
-- **Proactive prompts** — `@perhapxin/dddk/modules/proactive` watches signals (idle, dwell, scroll, exit-intent) and surfaces a suggestion in the subtitle bar at the right moment.
-- **Analytics** — `@perhapxin/dddk/modules/analytics` emits structured intent events so you can see which skills land.
-- **Toolbox** — `@perhapxin/dddk/toolbox/search` (per-field BM25 + learn-to-rank from clicks + sync-from-DB connector) and `@perhapxin/dddk/toolbox/recommend` (preference-aware, catalog-agnostic).
-- **No language borders** — a Unicode-aware universal tokeniser handles 200+ languages (CJK, Thai / Lao / Khmer / Burmese, whitespace scripts) out of the box. Hosts plug in a domain-specific tokeniser only if they need one.
-- **CSS variable theming** — every visual surface reads from `--dddk-*` vars. Light + dark modes ship out of the box; custom modes (sepia, high-contrast, brand) work with a one-selector override.
+## 05 · Proactive — read the signal, ask the right question
 
-## Documentation
+The agent subscribes to page signals (scroll, dwell, time-on-page, last interaction) and surfaces an offer in the subtitle bar when conditions match.
 
-- **Full docs** → [dddk.perhapxin.com/docs](https://dddk.perhapxin.com/docs/v0.1.0/dddk/overview)
-- **Agent (DOM-grounded loop + InlineAgent + sitemap + Memory)** → [/dddk/agent](https://dddk.perhapxin.com/docs/v0.1.0/dddk/agent/overview)
-- **LLM providers + router + adapter registry** → [/dddk/llm](https://dddk.perhapxin.com/docs/v0.1.0/dddk/llm/providers)
-- **Skills system + evals** → [/dddk/skills](https://dddk.perhapxin.com/docs/v0.1.0/dddk/skills/overview)
-- **Modules (voice / Dwell / inline / immersive translate / proactive / analytics)** → [/dddk/modules](https://dddk.perhapxin.com/docs/v0.1.0/dddk/modules/overview)
-- **Toolbox (search + recommend)** → [/dddk/toolbox](https://dddk.perhapxin.com/docs/v0.1.0/dddk/toolbox/overview)
-- **Theming** → [/dddk/theming](https://dddk.perhapxin.com/docs/v0.1.0/dddk/theming)
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  Your Monday order just shipped — want me to pull the tracking?      │
+│                                                                      │
+│  [ Space  yes ]  [ Space×2  no ]                                     │
+└──────────────────────────────────────────────────────────────────────┘
+→ intent: proactive_accepted, action: 'track_order', via: 'voice'
+```
 
-## Quick start
+- **Yes / No** resolves with Space (accept) / double-tap (reject).
+- **Multi-choice** uses `1-9` number keys + a trailing **Other** slot that always accepts free text.
+- The whole exchange stays in the subtitle bar — no popup chrome, no layout shift.
+
+Typical customer-service plays: order just shipped → "Want me to pull the tracking?"; user lingers on the returns page → list three common actions.
+
+---
+
+## 06 · Intent stream — every yes / no is a signal, the dashboard writes itself
+
+<img src="./media/readme/dddk-dashboard.png" alt="dotdotduck dashboard: 3 sessions, 2 visitors, 577 events, 118 palette opens, geography panel, top palette items table" width="780" />
+
+Every accept, reject, multi-choice pick, voice transcript, and Dwell pin emits a typed event:
+
+| Event | What it tells you |
+|---|---|
+| `palette_activated` | Which command was opened |
+| `voice_attempt` | Voice attempt succeeded or failed |
+| `proactive_accepted` | Proactive offer accepted / rejected |
+| `agent_choice` | Which multi-choice option was picked |
+| `agent_feedback` | Did the user accept the agent's final answer |
+| `dwell_pinned` | Which element was pinned |
+| `inline_ai_applied` | Which inline-AI action was applied |
+
+Subscribe once and you have **clean behavioural data** — who wanted a refund, who wanted to upgrade, which proactive offers land, which agent actions get rejected. Not big-data fishing — direct asking and recorded answers. The built-in dashboard route turns the stream into charts, or pipe it to Mixpanel / Amplitude / your own BI.
+
+---
+
+## Install
 
 ```bash
 pnpm add @perhapxin/dddk
@@ -146,23 +185,25 @@ Everything visual reads from CSS custom properties — `--dddk-bg`, `--dddk-acce
 }
 ```
 
-Dark mode is automatic: `[data-theme="dark"]` anywhere up the tree, OR `@media (prefers-color-scheme: dark)` — whichever fires first. Custom modes (sepia, high-contrast, brand-specific) work by overriding the same variables under a new selector. Full token list → [src/styles/tokens.css](./src/styles/tokens.css).
+Dark mode is automatic: `[data-theme="dark"]` anywhere up the tree, OR `@media (prefers-color-scheme: dark)` — whichever fires first. Custom modes (sepia, high-contrast, brand-specific) work by overriding the same variables under a new selector.
 
-## Tree-shake-friendly subpaths
+## Documentation
 
-| Subpath | What it covers |
-|---|---|
-| `@perhapxin/dddk` | Root re-exports — `DotDotDuck` orchestrator + everything below |
-| `@perhapxin/dddk/agent` | WebAgent + InlineAgent + AgentCursor + sitemap + Memory + LLM types |
-| `@perhapxin/dddk/llm` | Providers (OpenAI / Google / Proxy), router, adapter registry |
-| `@perhapxin/dddk/ui` | Subtitle bar + Pieces system + placement helpers |
-| `@perhapxin/dddk/skills` | Skill types + registry + eval helpers |
-| `@perhapxin/dddk/toolbox/search` | Per-field BM25 + learn-to-rank + DB sync |
-| `@perhapxin/dddk/toolbox/recommend` | Preference-aware, catalog-agnostic recommender |
-| `@perhapxin/dddk/modules/analytics` | Structured intent-event tracker |
-| `@perhapxin/dddk/modules/proactive` | Signal-watcher → subtitle prompt |
-| `@perhapxin/dddk/styles.css` | Bundled tokens + chrome |
-| `@perhapxin/dddk/styles/tokens.css` | Just the CSS custom properties (host owns the chrome) |
+- **Full docs** → [dddk.perhapxin.com/docs](https://dddk.perhapxin.com/docs/v0.1.0/dddk/overview)
+- **Agent** (DOM-grounded loop + InlineAgent + sitemap + Memory) → [/dddk/agent](https://dddk.perhapxin.com/docs/v0.1.0/dddk/agent/overview)
+- **LLM** providers + router + adapter registry → [/dddk/llm](https://dddk.perhapxin.com/docs/v0.1.0/dddk/llm/providers)
+- **Skills** system + evals → [/dddk/skills](https://dddk.perhapxin.com/docs/v0.1.0/dddk/skills/overview)
+- **Modules** (voice / Dwell / inline / immersive translate / proactive / analytics) → [/dddk/modules](https://dddk.perhapxin.com/docs/v0.1.0/dddk/modules/overview)
+- **Toolbox** (search + recommend) → [/dddk/toolbox](https://dddk.perhapxin.com/docs/v0.1.0/dddk/toolbox/overview)
+- **Theming** → [/dddk/theming](https://dddk.perhapxin.com/docs/v0.1.0/dddk/theming)
+
+## Status — early stage, read before evaluating
+
+dotdotduck is in active development. It works, but expect rough edges. A few things up front:
+
+- **Clone the repo to evaluate properly.** The bundled docs are useful as a map, but the source is the source of truth. `git clone https://github.com/PerhapxinLab/dotdotduck` into your project directory and read the code alongside the [online docs](https://dddk.perhapxin.com/docs) — that's the recommended way to understand what's actually implemented.
+- **The docs are AI-drafted.** They're written and maintained with Claude Code. They stay close to the code by convention, but if something looks wrong, grep the repo before assuming the docs are right.
+- **Found a bug or unclear behaviour?** Open an issue at [github.com/PerhapxinLab/dotdotduck/issues](https://github.com/PerhapxinLab/dotdotduck/issues) — one-liners help shape the roadmap.
 
 ## License
 
@@ -170,4 +211,4 @@ Dark mode is automatic: `[data-theme="dark"]` anywhere up the tree, OR `@media (
 
 ---
 
-<p align="center">Built by <a href="https://github.com/PerhapxinLab">Perhapxin Lab</a></p>
+<p align="center">Built by Perhapxin Team</p>
