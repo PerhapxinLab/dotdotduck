@@ -80,6 +80,15 @@ export class GestureManager {
   start(): void {
     if (typeof document === 'undefined') return;
 
+    // Build marker — lets the host verify which version of the gesture
+    // manager is actually live in the browser. Bump on any non-trivial
+    // change so a stale cache can be spotted with one console glance.
+    // Remove once we have proper version reporting plumbed through.
+    if (typeof console !== 'undefined') {
+      // eslint-disable-next-line no-console
+      console.log('[dddk] GestureManager v3 (ime-guard-skip-repeat, build 2026-05-26b)');
+    }
+
     const onKeyDown = (e: KeyboardEvent) => this.handleKeyDown(e);
     const onKeyUp = (e: KeyboardEvent) => this.handleKeyUp(e);
 
@@ -199,9 +208,10 @@ export class GestureManager {
     //   3. If keyup before threshold → insert space manually (it was a normal tap)
     //   4. If hold threshold fires → trigger voice (no stray space)
     //
-    // This preserves "long-press to dictate" even when typing in the palette
-    // input / textarea / contenteditable, while keeping normal space typing
-    // smooth (imperceptible 150ms delay).
+    // IME 一聲 / Japanese kana commit: handled by the IME guard at the top
+    // of this function (`!e.repeat && (e.isComposing || keyCode 229)`).
+    // While composing, we return WITHOUT preventDefault so the IME owns the
+    // space. Only when isComposing is false does this branch run.
     if (this.gestureKey === 'space' && inInput) {
       e.preventDefault();
       if (e.repeat || this.holdTimer) return;
@@ -265,7 +275,7 @@ export class GestureManager {
     this.pendingSpaceInput = null;
 
     if (!this.isHolding) {
-      // Tap (no voice). Check double-tap window.
+      // Tap outside an input — check single-tap accept vs double-tap reject.
       const now = Date.now();
       if (now - this.lastTapAt < DOUBLE_TAP_WINDOW_MS) {
         if (this.tapTimer) {
