@@ -52,8 +52,7 @@
 - **19 built-in actions** — `navigate` · `click` · `fill_input` · `scroll` · `screenshot` · `ask_user` · `ask_user_choice` · `show_subtitle` · `wait` · `border` · `highlight` · `set_text` · `select_option` · `submit_form` · etc. Add your own domain actions; the LLM picks them.
 - **Space-gated every step.** Single tap accept · double-tap reject · Esc cancel. Users see what's about to happen *before* it happens.
 - **Asks back when ambiguous.** `ask_user_choice` for 2-4 options, `ask_user` for free text. No silent decisions, no guessing.
-- **Bring your own LLM.** OpenAI, Google AI Studio, or `ProxyProvider` that hides keys behind your server. Per-role routing so a cheap model handles voice cleanup while the flagship handles the agent loop.
-- **Bring your own ASR.** Voice defaults to the browser's Web Speech API (a browser-vendor service, no SLA) — swap to OpenAI Whisper, Google Cloud Speech, Azure, or a self-hosted Whisper deployment via one `transcribe(audio)` callback. See section 04 below.
+- **Bring your own keys.** LLM (OpenAI · Google AI Studio · `ProxyProvider` that hides keys server-side, with per-role routing so a cheap model handles voice cleanup while the flagship runs the loop) and STT (defaults to the browser's Web Speech API for zero-setup; swap to Whisper · Google Cloud Speech · Azure · Deepgram · self-hosted via one `transcribe(audio)` callback).
 
 </td>
 </tr>
@@ -94,11 +93,9 @@ Four physical ways to send context into dddk. No new vocabulary to learn.
 
 **A · Hold Space — voice in**
 
-- Subtitle shows *"Listening — release to send"*. Release to commit.
 - Focus inside an input → fills the input. Anywhere else → goes to the agent.
-- Optional LLM cleanup pass — strips fillers, fixes punctuation, normalises punctuation.
-- **Default STT is the browser's own Web Speech API** (Chrome/Edge send audio to Google's STT endpoint; Safari handles it on-device on newer macOS/iOS; Firefox has no support). This is a browser-vendor service, **not dddk's** — no SLA, free-tier availability, vendor can change behaviour at any time.
-- **Swap in your own ASR** with one config option — `VoiceConfig.transcribe` is a callback that receives the recorded audio Blob and returns the transcript. Drop in **OpenAI Whisper · Google Cloud Speech · Azure Speech · Deepgram · AssemblyAI · self-hosted whisper.cpp** — anything that takes audio in, returns text. `transcribeMode: 'always'` skips Web Speech entirely; `'fallback'` (default when `transcribe` is set) only uses your callback where Web Speech isn't available.
+- Optional LLM cleanup pass — fillers + punctuation in one shot.
+- **STT swappable** — defaults to the browser's Web Speech API (no SLA, Firefox unsupported). One `VoiceConfig.transcribe` callback swaps in Whisper / Google Cloud Speech / Azure / Deepgram / self-hosted.
 
 </td>
 </tr>
