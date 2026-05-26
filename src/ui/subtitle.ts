@@ -21,6 +21,11 @@ export class Subtitle {
   /** Click-anywhere / any-key dismiss teardown for info subtitles. */
   private dismissTeardown: (() => void) | null = null;
   private locale: string;
+  /** Indicator request that was suppressed because a subtitle was
+   *  visible. Materialises when the subtitle hides — that way an
+   *  agent loop's 'thinking' indicator gets queued behind the current
+   *  subtitle instead of stacking on top of it. */
+  private pendingIndicator: { state: 'listening' | 'processing'; label?: string } | null = null;
 
   constructor(opts: { locale?: string } = {}) {
     this.locale = opts.locale ?? 'en';
@@ -67,6 +72,19 @@ export class Subtitle {
   show(opts: SubtitleShowOptions): void {
     if (typeof document === 'undefined') return;
     ensureStyles();
+
+    // Subtitle and indicator are mutually exclusive — the indicator
+    // is a "loading dots" pip that should NOT cover an actionable
+    // subtitle bar. If an indicator is currently visible, tuck it
+    // away (it'll re-materialise when this subtitle hides).
+    if (this.indicator) {
+      // Remember what the indicator was showing so we can restore it.
+      const state = (this.indicator.getAttribute('data-state') as 'listening' | 'processing') ?? 'processing';
+      const labelEl = this.indicator.querySelector<HTMLElement>(`[${UI_ATTR}="indicator-label"]`);
+      this.pendingIndicator = { state, label: labelEl?.textContent ?? undefined };
+      this.indicator.remove();
+      this.indicator = null;
+    }
 
     if (this.autoHideTimer) {
       clearTimeout(this.autoHideTimer);
@@ -390,6 +408,16 @@ export class Subtitle {
       this.autoHideTimer = null;
     }
     if (wasVisible) this.onVisibilityChange?.(false);
+    // Subtitle is gone — if an indicator was queued behind it (e.g.
+    // agent loop fired 'thinking' while a subtitle was up), surface
+    // it now. This makes the indicator and subtitle behave like two
+    // priority slots: subtitle wins while visible, indicator takes
+    // over the moment the subtitle goes away.
+    if (this.pendingIndicator) {
+      const p = this.pendingIndicator;
+      this.pendingIndicator = null;
+      this.showIndicator(p.state, p.label);
+    }
   }
 
   isVisible(): boolean {
@@ -475,6 +503,15 @@ export class Subtitle {
   }
 
   showIndicator(state: 'listening' | 'processing', label?: string): void {
+    // Subtitle takes priority — if one is visible, queue this indicator
+    // and let `hide()` materialise it later. Stacking a "thinking…" pip
+    // on top of an actionable subtitle bar was the bug the user kept
+    // hitting (indicator drawn over the agent's reply they were
+    // reading).
+    if (this.el) {
+      this.pendingIndicator = { state, label };
+      return;
+    }
     ensureStyles();
     if (!this.indicator) {
       this.indicator = document.createElement('div');
@@ -496,6 +533,10 @@ export class Subtitle {
   hideIndicator(): void {
     this.indicator?.remove();
     this.indicator = null;
+    // An explicit hideIndicator from the host means "STOP showing it",
+    // not "tuck it away" — drop the pending buffer too so the next
+    // subtitle hide doesn't accidentally re-summon a stale indicator.
+    this.pendingIndicator = null;
   }
 
   // ─── private ────────────────────────────────────────────────────

@@ -14,7 +14,7 @@
   <a href="https://www.npmjs.com/package/@perhapxin/dddk"><img src="https://img.shields.io/npm/v/@perhapxin/dddk.svg?style=flat-square" alt="npm" /></a>
   <a href="https://www.npmjs.com/package/@perhapxin/dddk"><img src="https://img.shields.io/npm/dm/@perhapxin/dddk.svg?style=flat-square" alt="downloads" /></a>
   <a href="https://github.com/PerhapxinLab/dotdotduck/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue?style=flat-square" alt="license" /></a>
-  <a href="https://dddk.perhapxin.com/docs/v0.1.0/dddk/00-overview"><img src="https://img.shields.io/badge/docs-online-blue?style=flat-square" alt="docs" /></a>
+  <a href="https://dddk.perhapxin.com/docs/v0.1.0/dddk/overview"><img src="https://img.shields.io/badge/docs-online-blue?style=flat-square" alt="docs" /></a>
   <a href="https://github.com/PerhapxinLab/dotdotduck/stargazers"><img src="https://img.shields.io/github/stars/PerhapxinLab/dotdotduck?style=flat-square" alt="stars" /></a>
 </p>
 
@@ -29,6 +29,14 @@
     <img src="https://dddk.perhapxin.com/readme/walkthrough.gif" alt="dotdotduck walkthrough" width="780" />
   </video>
 </p>
+
+## Status — early stage, read before evaluating
+
+dotdotduck is in active development. It works, but expect rough edges. A few things up front:
+
+- **Clone the repo to evaluate properly.** The bundled docs are useful as a map, but the source is the source of truth. `git clone https://github.com/PerhapxinLab/dotdotduck` into your project directory and read the code alongside the [online docs](https://dddk.perhapxin.com/docs) — that's the recommended way to understand what's actually implemented.
+- **The docs are AI-drafted.** They're written and maintained with Claude Code. They stay close to the code by convention, but if something looks wrong, grep the repo before assuming the docs are right.
+- **Found a bug or unclear behaviour?** Open an issue at [github.com/PerhapxinLab/dotdotduck/issues](https://github.com/PerhapxinLab/dotdotduck/issues) — one-liners help shape the roadmap.
 
 ## What it does
 
@@ -95,13 +103,13 @@ The same skill registry surfaces in six places so users find AI exactly where th
 
 ## Documentation
 
-- **Full docs** → [dddk.perhapxin.com/docs](https://dddk.perhapxin.com/docs/v0.1.0/dddk/00-overview)
-- **Agent (DOM-grounded loop + InlineAgent + sitemap + Memory)** → [/dddk/agent](https://dddk.perhapxin.com/docs/v0.1.0/dddk/agent/00-overview)
-- **LLM providers + router + adapter registry** → [/dddk/llm](https://dddk.perhapxin.com/docs/v0.1.0/dddk/llm/00-providers)
-- **Skills system + evals** → [/dddk/skills](https://dddk.perhapxin.com/docs/v0.1.0/dddk/skills/00-overview)
-- **Modules (voice / Dwell / inline / immersive translate / proactive / analytics)** → [/dddk/modules](https://dddk.perhapxin.com/docs/v0.1.0/dddk/modules/00-overview)
-- **Toolbox (search + recommend)** → [/dddk/toolbox](https://dddk.perhapxin.com/docs/v0.1.0/dddk/toolbox/00-overview)
-- **Theming** → [/dddk/11-theming](https://dddk.perhapxin.com/docs/v0.1.0/dddk/11-theming)
+- **Full docs** → [dddk.perhapxin.com/docs](https://dddk.perhapxin.com/docs/v0.1.0/dddk/overview)
+- **Agent (DOM-grounded loop + InlineAgent + sitemap + Memory)** → [/dddk/agent](https://dddk.perhapxin.com/docs/v0.1.0/dddk/agent/overview)
+- **LLM providers + router + adapter registry** → [/dddk/llm](https://dddk.perhapxin.com/docs/v0.1.0/dddk/llm/providers)
+- **Skills system + evals** → [/dddk/skills](https://dddk.perhapxin.com/docs/v0.1.0/dddk/skills/overview)
+- **Modules (voice / Dwell / inline / immersive translate / proactive / analytics)** → [/dddk/modules](https://dddk.perhapxin.com/docs/v0.1.0/dddk/modules/overview)
+- **Toolbox (search + recommend)** → [/dddk/toolbox](https://dddk.perhapxin.com/docs/v0.1.0/dddk/toolbox/overview)
+- **Theming** → [/dddk/theming](https://dddk.perhapxin.com/docs/v0.1.0/dddk/theming)
 
 ## Quick start
 
@@ -136,7 +144,7 @@ const dddk = new DotDotDuck({
 dddk.mount();
 ```
 
-Press `Ctrl/⌘+K`, type `/introduce`, watch it run. The full [quickstart guide](https://dddk.perhapxin.com/docs/v0.1.0/dddk/01-quickstart-frameworks) covers React / Vue / Svelte / Solid wiring.
+Press `Ctrl/⌘+K`, type `/introduce`, watch it run. The full [quickstart guide](https://dddk.perhapxin.com/docs/v0.1.0/dddk/quickstart-frameworks) covers React / Vue / Svelte / Solid wiring.
 
 ## Theming
 

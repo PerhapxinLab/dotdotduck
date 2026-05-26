@@ -179,6 +179,20 @@ export interface DotDotDuckConfig {
     processing?: string | Record<string, string>;
     listening?: string | Record<string, string>;
   };
+
+  /**
+   * Auto-hide policy for SDK-emitted agent summary / error subtitles
+   * (the ones the orchestrator's built-in `agent.on('done')` and
+   * `agent.on('error')` handlers surface). Pass:
+   *  - `0` or omit (default) — sticky; user dismisses on their own pace
+   *  - milliseconds — auto-hide after this many ms
+   *
+   * Hosts that want different behaviour per type (e.g. error sticky,
+   * summary auto-hide) pass an object. Hosts that subscribe to the
+   * underlying agent events themselves and render their own subtitle
+   * can skip this entirely.
+   */
+  agentSubtitleAutoHideMs?: number | { summary?: number; error?: number };
 }
 
 export class DotDotDuck {
@@ -756,6 +770,15 @@ export class DotDotDuck {
 
   // ─── webagent integration ──────────────────────────────────────
 
+  /** Pull the auto-hide ms for agent summary / error subtitles out of
+   *  config. Returns 0 (sticky) when the host didn't configure it. */
+  private resolveAgentAutoHide(kind: 'summary' | 'error'): number {
+    const v = this.config.agentSubtitleAutoHideMs;
+    if (v === undefined) return 0;
+    if (typeof v === 'number') return v;
+    return v[kind] ?? 0;
+  }
+
   private buildAgent(): WebAgent {
     // Collect opted-in palette commands → expose as webagent custom actions.
     // This is the "palette as agent tool" mechanism. Items are exposed only
@@ -943,32 +966,36 @@ export class DotDotDuck {
       }
     });
 
+    const summaryHideMs = this.resolveAgentAutoHide('summary');
+    const errorHideMs = this.resolveAgentAutoHide('error');
+
     agent.on('done', (session: AgentSession) => {
       this.subtitle.hideIndicator();
       if (session.summary) {
+        // Default: no autoHide — user dismisses at their own pace.
+        // Hosts opt back into auto-hide via `agentSubtitleAutoHideMs`.
         this.subtitle.show({
           text: session.summary,
           type: 'info',
-          // 12s so the user has time to actually read the agent's reply —
-          // 3s vanished before the eye finished a single line of zh-TW
-          // text in practice.
-          autoHide: 12000,
+          ...(summaryHideMs > 0 ? { autoHide: summaryHideMs } : {}),
         });
       }
-      // Keep the final action's frame visible until the summary fades so
-      // the user can see where the agent ended up. Webagent overlays
-      // (borders the agent drew) get cleared too.
-      setTimeout(() => {
-        this.clearHighlight();
-        clearWebagentOverlays();
-      }, 12000);
+      // If the host configured auto-hide, also clear the highlight /
+      // overlays at the same time so the agent's framing doesn't
+      // outlive its summary.
+      if (summaryHideMs > 0) {
+        setTimeout(() => {
+          this.clearHighlight();
+          clearWebagentOverlays();
+        }, summaryHideMs);
+      }
     });
 
     agent.on('error', (err) => {
       this.subtitle.show({
         text: `Agent 錯誤：${err.message}`,
         type: 'info',
-        autoHide: 14000,
+        ...(errorHideMs > 0 ? { autoHide: errorHideMs } : {}),
       });
       this.clearHighlight();
       clearWebagentOverlays();

@@ -272,12 +272,22 @@ function renderBrand(brand: BrandPrompt): string {
  */
 function renderOutputLanguage(locale?: string): string {
   const hint = locale
-    ? `Site locale: **${locale}**. The user's INPUT language WINS over this hint — if the user wrote in Chinese, reply in Chinese; if Japanese, reply in Japanese. Only use the site locale as the fallback when the user's input is symbol-only or ambiguous.`
+    ? `Site locale: **${locale}**. The user's INPUT language WINS over this hint when the user is having a conversation. Use the site locale only as the fallback when the user's input is symbol-only or ambiguous.`
     : `Reply in the language of the user's task / question. Detect it from the first clear sentence and stay in it for the rest of the session.`;
   return `# Output language and tone — ABSOLUTE RULES
+
+There are TWO language axes — keep them separate:
+
+**Reply language** (the wrapper / narration / confirmations / status updates)
 - ${hint}
-- DO NOT translate the user's request silently. If they asked in Chinese, the entire reply — subtitles, summaries, every narration — is in Chinese. If they asked in English, the entire reply is in English. Never reply in a different language than the user just spoke / typed in.
+- If the user wrote in Chinese, your subtitles and tool narration are in Chinese. If they wrote in Japanese, narrate in Japanese.
 - DO NOT default to English just because the page DOM, tool names, or sitemap labels are in English. Page content language ≠ reply language.
+
+**Content language** (the actual payload of a content-replication task)
+- When the user EXPLICITLY names a target language ("translate this to French", "rewrite in Japanese", "回覆用日文", "answer in Spanish"), the OUTPUT CONTENT must be in THAT language, even if it differs from the reply language. The wrapper narration ("Here's the translation:" / "翻譯如下：") can still be in the reply language, but the translated / rewritten payload is in the user-requested target language.
+- If the user asks to translate to a language and you reply in their input language instead, that's a bug.
+- If no target language is specified for a content task, default the content language to the reply language.
+
 - Keep technical identifiers (function names, URLs, CSS selectors) verbatim regardless of reply language.
 
 # Reply style — VERY IMPORTANT

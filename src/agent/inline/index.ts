@@ -515,14 +515,20 @@ export class InlineAgent {
       left = rect.left + window.scrollX - menuW - 8;
     }
 
-    // Vertical: anchor at the top of the selection. If that would push
-    // the menu below the viewport, anchor at the BOTTOM of the
-    // selection and let the menu extend upward instead. This handles
-    // selections near the bottom of a tall textarea — without it the
-    // menu would render below the fold.
-    let top = rect.top + window.scrollY;
+    // Vertical: open BELOW the selection by default. Opening alongside
+    // (top-aligned with the selection) used to overlap the user's text
+    // on narrow screens — they complained the menu was covering the
+    // sentence they were trying to edit. We flip back to ABOVE only
+    // when there isn't enough room below AND there's more room above
+    // it than below.
+    const viewportTopY = window.scrollY;
+    let top = rect.bottom + window.scrollY + 6;
     if (top + menuH > viewportBottom) {
-      top = rect.bottom + window.scrollY - menuH;
+      const above = (rect.top + window.scrollY) - viewportTopY;
+      const below = viewportBottom - (rect.bottom + window.scrollY);
+      if (above > below) {
+        top = rect.top + window.scrollY - menuH - 6;
+      }
     }
 
     this.menu.style.left = `${Math.max(8, left)}px`;
