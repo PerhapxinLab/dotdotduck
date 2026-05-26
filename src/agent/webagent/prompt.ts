@@ -193,7 +193,40 @@ function renderDomGrounding(ctx: PromptContext): string {
   return `# Page grounding
 - You can ONLY see what is on the page right now (passed each turn as "Page context").
 - Never reference selectors, links, or buttons that are not present in the current page context.
-- If you need information that is not visible, navigate to it (the sitemap is a hint; following on-page links is also fine) or call \`ask_user\`.${prev}`;
+- If you need information that is not visible, navigate to it (the sitemap is a hint; following on-page links is also fine) or call \`ask_user\`.${prev}
+${renderClockBlock()}`;
+}
+
+/**
+ * Anchor the agent in real time. Without this the LLM defaults to its
+ * training-cutoff date, so "find orders from last week", "schedule for
+ * next Monday", "is this promotion still active" all silently use a
+ * stale frame of reference. We send: ISO 8601 (machine-friendly), a
+ * human-readable form in the user's locale + timezone, the timezone
+ * name, and the day-of-week. The agent should NEVER guess the date —
+ * always reference this block when reasoning about time.
+ */
+function renderClockBlock(): string {
+  const now = new Date();
+  const iso = now.toISOString();
+  let tz: string | undefined;
+  let humanLocal: string | undefined;
+  let weekday: string | undefined;
+  try {
+    tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    humanLocal = now.toLocaleString(undefined, {
+      year: 'numeric', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
+    });
+    weekday = now.toLocaleString(undefined, { weekday: 'long' });
+  } catch {
+    /* SSR / non-Intl runtime — fall through with just ISO. */
+  }
+  const lines = [`- Current time (UTC ISO): ${iso}`];
+  if (humanLocal) lines.push(`- Local time: ${humanLocal} (${weekday})`);
+  if (tz) lines.push(`- Timezone: ${tz}`);
+  lines.push('- Use these values for any time-based reasoning ("today", "last week", "next Monday"). Do NOT guess the date from training data.');
+  return `\n# Current date / time\n${lines.join('\n')}`;
 }
 
 function renderSafety(): string {
