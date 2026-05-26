@@ -49,10 +49,10 @@
 <td width="45%" valign="top">
 
 - **DOM-grounded autonomous loop.** Reads the visible page, picks one tool at a time, narrates each step in the subtitle bar before it runs.
-- **19 built-in actions** — `navigate` · `click` · `fill_input` · `scroll` · `screenshot` · `ask_user` · `ask_user_choice` · `show_subtitle` · `wait` · `border` · `highlight` · `set_text` · `select_option` · `submit_form` · etc. Add your own domain actions; the LLM picks them.
+- **19 built-in actions** — `navigate`, `click`, `fill_input`, `ask_user_choice`, and friends. Add your own; the LLM picks them.
 - **Space-gated every step.** Single tap accept · double-tap reject · Esc cancel. Users see what's about to happen *before* it happens.
 - **Asks back when ambiguous.** `ask_user_choice` for 2-4 options, `ask_user` for free text. No silent decisions, no guessing.
-- **Bring your own keys.** LLM (OpenAI · Google AI Studio · `ProxyProvider` that hides keys server-side, with per-role routing so a cheap model handles voice cleanup while the flagship runs the loop) and STT (defaults to the browser's Web Speech API for zero-setup; swap to Whisper · Google Cloud Speech · Azure · Deepgram · self-hosted via one `transcribe(audio)` callback).
+- **Bring your own keys.** LLM via OpenAI, Google AI Studio, or a server-side `ProxyProvider`; per-role routing keeps cheap models on cleanup and the flagship on the agent loop. STT defaults to the browser's Web Speech for zero-setup; swap to Whisper or any vendor via one `transcribe(audio)` callback.
 
 </td>
 </tr>
@@ -95,7 +95,7 @@ Four physical ways to send context into dddk. No new vocabulary to learn.
 
 - Focus inside an input → fills the input. Anywhere else → goes to the agent.
 - Optional LLM cleanup pass — fillers + punctuation in one shot.
-- **STT swappable** — defaults to the browser's Web Speech API (no SLA, Firefox unsupported). One `VoiceConfig.transcribe` callback swaps in Whisper / Google Cloud Speech / Azure / Deepgram / self-hosted.
+- **STT swappable** — defaults to the browser's Web Speech (no SLA, Firefox unsupported). One `VoiceConfig.transcribe` callback swaps in Whisper or any vendor.
 
 </td>
 </tr>
