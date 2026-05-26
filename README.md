@@ -18,18 +18,6 @@
   <a href="https://github.com/PerhapxinLab/dotdotduck/stargazers"><img src="https://img.shields.io/github/stars/PerhapxinLab/dotdotduck?style=flat-square" alt="stars" /></a>
 </p>
 
-<!--
-  Replace the src below with an MP4 dragged into a GitHub issue / PR comment.
-  GitHub turns that into a `https://github.com/user-attachments/assets/<uuid>` URL
-  that plays inline (controls, mute, autoplay all work). Until that URL exists,
-  the GIF fallback below keeps the README looking right.
--->
-<p align="center">
-  <video src="https://github.com/user-attachments/assets/REPLACE-WITH-UPLOADED-VIDEO" controls muted playsinline width="780">
-    <img src="https://dddk.perhapxin.com/readme/walkthrough.gif" alt="dotdotduck walkthrough" width="780" />
-  </video>
-</p>
-
 ## Status — early stage, read before evaluating
 
 dotdotduck is in active development. It works, but expect rough edges. A few things up front:
