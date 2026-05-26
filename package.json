@@ -69,10 +69,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/PerhapxinLab/dddk.git"
+    "url": "git+https://github.com/PerhapxinLab/dotdotduck.git"
   },
   "bugs": {
-    "url": "https://github.com/PerhapxinLab/dddk/issues"
+    "url": "https://github.com/PerhapxinLab/dotdotduck/issues"
   },
   "homepage": "https://dddk.perhapxin.com",
   "keywords": [
