@@ -179,6 +179,11 @@ export function ensurePaletteStyles(): void {
     [${UI_ATTR}="palette-footer-group"] {
       display: inline-flex; align-items: center; gap: 6px;
     }
+    /* Push the last footer group (esc to close) to the far right.
+       The first two (↑↓ navigate, ↵ select) stay grouped on the left. */
+    [${UI_ATTR}="palette-footer-group"]:last-child {
+      margin-left: auto;
+    }
     /* Borderless, lower-contrast kbd chips — a subtle filled tile
        rather than a button-with-border so the row of hints reads as
        ambient help, not a toolbar. */

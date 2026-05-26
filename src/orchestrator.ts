@@ -138,6 +138,24 @@ export interface DotDotDuckConfig {
   /** Override gesture key (legacy 'ctrl' for migration). Default 'space'. */
   gestureKey?: 'space' | 'ctrl';
 
+  /**
+   * How long the user must hold the gesture key before voice triggers.
+   * Default 250ms — snappy enough that the gesture feels live, clear of
+   * the natural fast-typing space-tap range (~80-200ms). Bump if your
+   * audience types prose fast and hits accidental voice triggers; lower
+   * if you want the gesture to feel even more instant.
+   */
+  holdThresholdMs?: number;
+
+  /**
+   * Window for "second tap counts as double-tap reject" detection.
+   * Default 350ms. Two space taps inside this window → onReject;
+   * outside → second tap is just a fresh single-tap. Useful to tune for
+   * users with slower fingers (raise) or to fire reject more eagerly
+   * (lower).
+   */
+  doubleTapWindowMs?: number;
+
   /** Locale dictionary override. */
   i18n?: I18nDict;
 
@@ -424,6 +442,8 @@ export class DotDotDuck {
     this.gestures = new GestureManager({
       callbacks,
       gestureKey: this.config.gestureKey,
+      holdThresholdMs: this.config.holdThresholdMs,
+      doubleTapWindowMs: this.config.doubleTapWindowMs,
       shouldIntercept: () => this.subtitle.isVisible() || this.palette.isOpen(),
     });
     this.gestures.start();

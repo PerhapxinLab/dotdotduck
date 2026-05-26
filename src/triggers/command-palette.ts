@@ -582,12 +582,19 @@ export class CommandPalette {
 
   /**
    * Host-supplied pinned context. Set by `setPinnedContext()` and consumed
-   * on the next `open()`. Used by modules like Dwell that select an element
+   * on each `open()`. Used by modules like Dwell that pin an element
    * BEFORE the palette opens — when the palette eventually opens, this is
-   * what its chipbar surfaces, so the user sees "context: <selection>".
+   * what its chipbar surfaces.
+   *
+   * `pinnedContextEl` stores the ELEMENT REFERENCE directly (not a CSS
+   * selector). At open time we check `el.isConnected && document.contains(el)`
+   * — if the element has been unmounted (SPA route change, list virtualised,
+   * etc.) the pin is auto-invalidated WITHOUT having to trust any selector
+   * lookup. Structural selectors (`body>main>section:nth-child(3)`) match
+   * different content on different pages; element references can't.
    */
+  private pinnedContextEl: Element | null = null;
   private pinnedContextText = '';
-  private pinnedContextElement?: string;
   private pinnedContextKind: 'dom' | 'text' = 'text';
 
   /**
@@ -616,22 +623,38 @@ export class CommandPalette {
    */
   setPinnedContext(
     text: string,
-    selector?: string,
+    elementOrSelector?: Element | string | null,
     opts?: { kind?: 'dom' | 'text' },
   ): void {
-    this.pinnedContextElement = selector;
     this.pinnedContextKind = opts?.kind ?? 'text';
+
+    // Resolve to an element REFERENCE. If host passes an Element we
+    // store it directly (no selector indirection). If they pass a
+    // selector string, resolve it NOW — the selector is only a
+    // bootstrapping hint, not stored. Anything else → no element pin.
+    if (elementOrSelector instanceof Element) {
+      this.pinnedContextEl = elementOrSelector;
+    } else if (typeof elementOrSelector === 'string' && elementOrSelector.length > 0) {
+      try { this.pinnedContextEl = document.querySelector(elementOrSelector); }
+      catch { this.pinnedContextEl = null; }
+    } else {
+      this.pinnedContextEl = null;
+    }
+
     // Text fallback only for non-DOM pins. DOM pins always re-read from
-    // the live element at open time so navigation can invalidate them.
+    // the live element at open time so navigation auto-invalidates them.
     this.pinnedContextText = this.pinnedContextKind === 'dom' ? '' : text;
+
+    // Pinning is a deliberate "this is the context now" — clear any
+    // earlier text selection so the two don't coexist.
     if (typeof window !== 'undefined') {
       try { window.getSelection?.()?.removeAllRanges(); } catch { /* cross-origin / SSR */ }
     }
   }
 
   clearPinnedContext(): void {
+    this.pinnedContextEl = null;
     this.pinnedContextText = '';
-    this.pinnedContextElement = undefined;
     this.pinnedContextKind = 'text';
   }
 
@@ -649,15 +672,16 @@ export class CommandPalette {
     // operating on the inner text).
     return {
       text: this.readPinnedTextLive({ withSignature: false }),
-      element: this.pinnedContextElement,
+      element: this.pinnedContextEl ? inferSelector(this.pinnedContextEl) || undefined : undefined,
       kind: this.pinnedContextKind,
     };
   }
 
   /**
-   * Look up the pinned element from the live DOM and return its current
-   * text. Returns the cached text fallback for non-DOM pins, or `''`
-   * if nothing valid is pinned right now.
+   * Read the current text of the pinned element AT THIS MOMENT. Returns
+   * '' if the pinned element has been unmounted (SPA route change, list
+   * virtualised, etc.) — no caching, no selector re-matching across
+   * pages, just "is this exact element still in the document".
    *
    * `withSignature: true` prepends a human-readable `<tag#id.classes>`
    * tag — used by the chip bar so the user sees WHICH element is pinned.
@@ -665,11 +689,10 @@ export class CommandPalette {
    * prose to operate on.
    */
   private readPinnedTextLive(opts: { withSignature?: boolean } = {}): string {
-    if (!this.pinnedContextElement) return this.pinnedContextText;
+    const el = this.pinnedContextEl;
+    if (!el) return this.pinnedContextText;
     if (typeof document === 'undefined') return this.pinnedContextText;
-    let el: Element | null = null;
-    try { el = document.querySelector(this.pinnedContextElement); } catch { /* invalid selector */ }
-    if (!el || !el.isConnected) return '';
+    if (!el.isConnected || !document.contains(el)) return '';
     const inner = ((el as HTMLElement).innerText ?? el.textContent ?? '').trim().slice(0, 1000);
     if (this.pinnedContextKind === 'dom' && opts.withSignature) {
       const tag = el.tagName.toLowerCase();
@@ -687,62 +710,70 @@ export class CommandPalette {
   private captureContextOnOpen(seed?: string): void {
     let text = (seed ?? '').trim();
     let elementSel: string | undefined;
-    // Kind defaults to 'text' for live window selections; only the pinned
-    // path (Dwell-style element pick) carries 'dom'.
+    // Kind defaults to 'text' for live window selections; the dwell
+    // pathway carries 'dom'.
     let kind: 'dom' | 'text' = 'text';
 
-    // Both sources are DETECTED at open time — we don't trust any cached
-    // trajectory. Navigation, scroll, virtualised lists, programmatic DOM
-    // removal — anything that takes the element off-screen automatically
-    // invalidates the context. The host doesn't need to call any "clear"
-    // method for the common path.
+    // Pure live scan. NO trust in any cached state. Every open
+    // re-queries the document for "what is selected RIGHT NOW" and
+    // "what element carries the Dwell marker RIGHT NOW". Stored vars
+    // are only consulted as a last-resort legacy fallback for hosts
+    // that pin programmatically without using the Dwell module.
 
-    // Source 1 — host-supplied pin. Re-read live from the DOM so a stale
-    //            pin from before a route change disappears on its own.
-    //            We pass `withSignature: true` because the captured text
-    //            here is what the chip bar displays — the user wants to
-    //            SEE which element is pinned. The agent-bound copy
-    //            (orchestrator.startAgent → palette.pinnedContext)
-    //            reads with `withSignature: false` for a clean payload.
-    if (!text && this.pinnedContextElement) {
-      const liveText = this.readPinnedTextLive({ withSignature: true });
-      if (liveText) {
-        text = liveText;
-        elementSel = this.pinnedContextElement;
-        kind = this.pinnedContextKind;
-      } else {
-        // Selector no longer resolves — drop the dangling pin entirely.
-        this.clearPinnedContext();
-      }
-    }
-
-    // Source 2 — non-DOM pin with cached text (rare; `setPinnedContext`
-    //            without a selector). Kept only because some hosts pass
-    //            free-form strings.
-    if (!text && this.pinnedContextText && !this.pinnedContextElement) {
-      text = this.pinnedContextText;
-      kind = this.pinnedContextKind;
-    }
-
-    // Source 3 — LIVE window selection (whatever is highlighted right now
-    //            on the page). Only used when there is no pin.
+    // 1) LIVE window text selection.
     if (!text && typeof window !== 'undefined') {
       const sel = window.getSelection?.();
       const fromBrowser = sel?.toString().trim() ?? '';
       if (fromBrowser && sel && sel.rangeCount > 0) {
         const node = sel.getRangeAt(0).startContainer;
         const anchor = node instanceof Element ? node : node.parentElement;
-        // Reject selections whose anchor element is no longer in the live
-        // DOM — happens after an SPA route change when the previous page's
-        // textarea / paragraph got unmounted but the browser's Selection
-        // object still holds a Range pointing at the detached node. In
-        // that state `sel.toString()` returns the stale text until the
-        // user makes a new selection. Drop it; don't pin a ghost.
         if (anchor && anchor.isConnected && document.contains(anchor)) {
           text = fromBrowser;
           elementSel = inferSelector(anchor) || undefined;
         }
       }
+    }
+
+    // 2) LIVE dwell marker — query the DOM for the element currently
+    //    carrying `[data-dddk-dwell-target]`. No stored Element ref to
+    //    go stale; if the marked element was unmounted by an SPA route
+    //    change, `querySelector` simply doesn't find it on the new
+    //    page and there is no pin to mis-attribute. This is the
+    //    canonical path for Dwell pins.
+    if (!text && typeof document !== 'undefined') {
+      const marked = document.querySelector<HTMLElement>('[data-dddk-dwell-target]');
+      if (marked) {
+        const inner = (marked.innerText ?? marked.textContent ?? '').trim().slice(0, 1000);
+        if (inner) {
+          const tag = marked.tagName.toLowerCase();
+          const id = marked.id ? `#${marked.id}` : '';
+          const classList = marked.classList
+            ? Array.from(marked.classList).slice(0, 3)
+            : [];
+          const cls = classList.length ? '.' + classList.join('.') : '';
+          text = `<${tag}${id}${cls}> ${inner}`;
+          elementSel = inferSelector(marked) || undefined;
+          kind = 'dom';
+        }
+      }
+    }
+
+    // 3) LEGACY programmatic pin via setPinnedContext (rare; only hosts
+    //    that pin outside of the Dwell module). Kept for back-compat
+    //    but cleared aggressively if its element has detached.
+    if (!text && this.pinnedContextEl) {
+      const liveText = this.readPinnedTextLive({ withSignature: true });
+      if (liveText) {
+        text = liveText;
+        elementSel = inferSelector(this.pinnedContextEl) || undefined;
+        kind = this.pinnedContextKind;
+      } else {
+        this.clearPinnedContext();
+      }
+    }
+    if (!text && this.pinnedContextText && !this.pinnedContextEl) {
+      text = this.pinnedContextText;
+      kind = this.pinnedContextKind;
     }
 
     this.contextSelectionText = text;

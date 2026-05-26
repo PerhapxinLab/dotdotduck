@@ -367,6 +367,21 @@ export class Dwell {
         this.unmarkTarget();
       }
     };
+    // Mutual exclusivity with text selection. The moment the user
+    // creates a non-empty range, Dwell yields — both showing a frame
+    // AND a highlighted text range at the same time is the bug the user
+    // hit. The palette / agent context derive a SINGLE pin at open time;
+    // clearing here keeps the visual in sync with that decision.
+    const onSelChange = () => {
+      if (!this.currentMarked) return;
+      const sel = typeof window !== 'undefined' ? window.getSelection?.() : null;
+      if (!sel || sel.isCollapsed) return;
+      const text = sel.toString();
+      if (!text || text.trim().length === 0) return;
+      // User has an active text selection → kill the dwell frame + pin.
+      this.hidePopover();
+      this.unmarkTarget();
+    };
     // mousedown outside both the marked element and the popover → dismiss.
     // Covers the "popover hasn't rendered yet but frame is showing" gap.
     //
@@ -391,9 +406,11 @@ export class Dwell {
     };
     document.addEventListener('keydown', onKey);
     document.addEventListener('mousedown', onPageMouseDown);
+    document.addEventListener('selectionchange', onSelChange);
     this.cleanups.push(() => {
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('mousedown', onPageMouseDown);
+      document.removeEventListener('selectionchange', onSelChange);
     });
   }
 

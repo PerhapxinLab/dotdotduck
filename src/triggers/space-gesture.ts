@@ -15,12 +15,15 @@
  * (i.e. there's a pending UI awaiting user response).
  */
 
-// Long-press threshold for voice. Bumped from 200ms → 400ms because
-// 200ms was triggering on normal taps when the user was typing fast or
-// composing CJK characters (IME hold state). 400ms is firmly past the
-// "tap" range and well under any user's patience for a deliberate hold.
-const DEFAULT_HOLD_THRESHOLD_MS = 400;
-const DOUBLE_TAP_WINDOW_MS = 350;
+// Long-press threshold for voice. 250ms keeps the gesture snappy
+// (anything longer felt sluggish) while staying clear of the natural
+// space-tap range (~80-200ms in fast typing). If you hit accidental
+// voice triggers on fast prose typing, push this back up to 350-400ms.
+const DEFAULT_HOLD_THRESHOLD_MS = 250;
+// Default window for double-tap-reject detection. Two space taps
+// completing within this window are treated as "reject". Configurable
+// via `GestureManagerOptions.doubleTapWindowMs`.
+const DEFAULT_DOUBLE_TAP_WINDOW_MS = 350;
 
 export interface GestureCallbacks {
   onAccept: () => void;
@@ -40,10 +43,16 @@ export interface GestureManagerOptions {
   gestureKey?: 'space' | 'ctrl';
   /**
    * How long the user must hold the gesture key before voice_start fires.
-   * Default 200ms. Lower = more responsive but easier to mis-trigger;
-   * higher = less mis-trigger but voice feels laggy.
+   * Default 250ms. Lower = more responsive but easier to mis-trigger on
+   * fast prose typing; higher = less mis-trigger but voice feels laggy.
    */
   holdThresholdMs?: number;
+  /**
+   * Window for "two taps in this many ms → reject" detection. Default
+   * 350ms. Raise if users with slower fingers can't reliably double-tap;
+   * lower for power users who want reject to fire snappier.
+   */
+  doubleTapWindowMs?: number;
 }
 
 export class GestureManager {
@@ -51,13 +60,12 @@ export class GestureManager {
   private shouldIntercept: () => boolean;
   private gestureKey: 'space' | 'ctrl';
   private holdThresholdMs: number;
+  private doubleTapWindowMs: number;
 
   private holdTimer: ReturnType<typeof setTimeout> | null = null;
   private tapTimer: ReturnType<typeof setTimeout> | null = null;
   private lastTapAt = 0;
   private isHolding = false;
-  /** Pre-captured selection — refreshed on every selectionchange/mouseup. */
-  private lastSelection = '';
   /**
    * Set on space-keydown inside an input field. If user releases before the
    * hold threshold, we insert the missing space character manually (since we
@@ -66,6 +74,18 @@ export class GestureManager {
    * which is the desired behavior for "long-press to dictate".
    */
   private pendingSpaceInput: HTMLElement | null = null;
+
+  /**
+   * Disposer for the per-hold reactive guard that watches the focused
+   * input for unexpected value changes during voice. Set when voice
+   * triggers, called from `handleKeyUp` when the user releases. The
+   * guard's job is to revert any character the OS-level IME slips into
+   * the input despite `readOnly = true` — bullet-proofing against Edge
+   * + Microsoft Bopomofo, which on some builds writes one stray space
+   * AFTER readOnly is set (in-flight queued keystroke from the 250ms
+   * detection window).
+   */
+  private holdRevertDispose: (() => void) | null = null;
 
   private cleanups: Array<() => void> = [];
 
@@ -77,6 +97,7 @@ export class GestureManager {
     this.shouldIntercept = opts.shouldIntercept ?? (() => this.hasSuggestion);
     this.gestureKey = opts.gestureKey ?? 'space';
     this.holdThresholdMs = opts.holdThresholdMs ?? DEFAULT_HOLD_THRESHOLD_MS;
+    this.doubleTapWindowMs = opts.doubleTapWindowMs ?? DEFAULT_DOUBLE_TAP_WINDOW_MS;
   }
 
   start(): void {
@@ -84,9 +105,26 @@ export class GestureManager {
 
     const onKeyDown = (e: KeyboardEvent) => this.handleKeyDown(e);
     const onKeyUp = (e: KeyboardEvent) => this.handleKeyUp(e);
-    const onSelectionChange = () => {
-      const s = this.readSelection();
-      if (s) this.lastSelection = s;
+
+    // Edge + Microsoft IME (Bopomofo / Pinyin) inserts characters at
+    // the OS level BEFORE our document-capture keydown handler runs,
+    // so `preventDefault` on keydown is too late — a stream of literal
+    // spaces leaks into the input while the user is holding space for
+    // voice. `beforeinput` fires after keydown but right BEFORE the
+    // input's value mutates, and `preventDefault` here is honoured
+    // even for IME-mediated inserts. Block input mutations while we
+    // are detecting (`holdTimer` set) or actively voice-holding
+    // (`isHolding`). Normal taps still type a space via the
+    // `insertSpaceAt` path on keyup.
+    const onBeforeInput = (e: InputEvent) => {
+      if (this.isHolding || this.holdTimer !== null) {
+        // Only block space-character inserts so other input (paste of
+        // pre-existing text, deletion, etc.) keeps working.
+        if (e.data === ' ' || e.inputType === 'insertText' && e.data === ' ') {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
+      }
     };
 
     // Use capture phase for keys so we get Ctrl+K BEFORE the browser's
@@ -95,14 +133,12 @@ export class GestureManager {
     // level before our bubble-phase listener runs.
     document.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('keyup', onKeyUp, true);
-    document.addEventListener('selectionchange', onSelectionChange);
-    document.addEventListener('mouseup', onSelectionChange);
+    document.addEventListener('beforeinput', onBeforeInput, true);
 
     this.cleanups.push(
       () => document.removeEventListener('keydown', onKeyDown, true),
       () => document.removeEventListener('keyup', onKeyUp, true),
-      () => document.removeEventListener('selectionchange', onSelectionChange),
-      () => document.removeEventListener('mouseup', onSelectionChange)
+      () => document.removeEventListener('beforeinput', onBeforeInput, true),
     );
   }
 
@@ -113,13 +149,16 @@ export class GestureManager {
     this.cleanups = [];
   }
 
-  /** Read currently selected text (live, from DOM/input). */
+  /**
+   * Read currently selected text (live, from DOM/input). Always queried
+   * at the moment of the gesture — no cached state. Previously we kept
+   * a `lastSelection` mirror updated by selectionchange / mouseup, but
+   * that cache survived SPA navigation and leaked the previous page's
+   * selection into the next page's first Ctrl+K. The fix is to never
+   * cache: if the browser has live selection at gesture time, use it;
+   * otherwise the gesture has no selection context.
+   */
   captureSelection(): string {
-    if (this.lastSelection) {
-      const s = this.lastSelection;
-      this.lastSelection = '';
-      return s;
-    }
     return this.readSelection();
   }
 
@@ -215,6 +254,27 @@ export class GestureManager {
       e.preventDefault();
       if (e.repeat || this.holdTimer) return;
       this.pendingSpaceInput = e.target as HTMLElement;
+      const targetInput = e.target as HTMLElement;
+
+      // Snapshot the input's pre-hold state. Edge's IME can still leak
+      // 1-2 literal spaces into the input during the detection window
+      // (between this keydown and the hold timer firing) — the OS path
+      // runs ahead of our preventDefault. When voice triggers, we
+      // restore this snapshot so the input is in its ORIGINAL state.
+      const isFormInput =
+        targetInput instanceof HTMLInputElement ||
+        targetInput instanceof HTMLTextAreaElement;
+      const snapshotValue = isFormInput
+        ? (targetInput as HTMLInputElement | HTMLTextAreaElement).value
+        : null;
+      const snapshotStart = isFormInput
+        ? (targetInput as HTMLInputElement | HTMLTextAreaElement).selectionStart
+            ?? (snapshotValue as string).length
+        : 0;
+      const snapshotEnd = isFormInput
+        ? (targetInput as HTMLInputElement | HTMLTextAreaElement).selectionEnd
+            ?? (snapshotValue as string).length
+        : 0;
 
       const selection = this.captureSelection();
       const images = this.captureImages();
@@ -226,9 +286,57 @@ export class GestureManager {
           clearTimeout(this.tapTimer);
           this.tapTimer = null;
         }
-        // Hold confirmed → voice. Drop the pending-space (we won't insert it).
         this.pendingSpaceInput = null;
         this.callbacks.onVoiceStart(selection, images);
+
+        // Set readOnly FIRST so the snapshot restore can't get
+        // immediately re-written by an in-flight IME insert.
+        //   - <input> / <textarea> → `readOnly = true`
+        //   - contentEditable → `contentEditable = 'false'`
+        // Caret stays visible; consecutive voice gestures on the same
+        // field keep appending. voice-handler flips these back right
+        // before insertion.
+        const isInputLike =
+          targetInput instanceof HTMLInputElement ||
+          targetInput instanceof HTMLTextAreaElement;
+        if (isInputLike) {
+          try { (targetInput as HTMLInputElement | HTMLTextAreaElement).readOnly = true; } catch { /* detached */ }
+        } else if (targetInput.isContentEditable) {
+          try { targetInput.contentEditable = 'false'; } catch { /* detached */ }
+        }
+
+        // Wipe any stray characters the IME leaked during the 250ms
+        // detection window (before readOnly was set).
+        if (
+          snapshotValue !== null &&
+          (targetInput instanceof HTMLInputElement || targetInput instanceof HTMLTextAreaElement) &&
+          targetInput.value !== snapshotValue
+        ) {
+          targetInput.value = snapshotValue;
+          try { targetInput.setSelectionRange(snapshotStart, snapshotEnd); } catch { /* detached */ }
+          targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        // REACTIVE guard. Edge + Microsoft Bopomofo IME can still flush
+        // one in-flight space into the input AFTER readOnly is set (the
+        // OS path queues the keystroke ahead of our JS handler). Listen
+        // for `input` events on the target — anytime the value drifts
+        // from the snapshot while voice is active, revert. Disposer is
+        // called on keyup.
+        if (isInputLike) {
+          const inputEl = targetInput as HTMLInputElement | HTMLTextAreaElement;
+          const onUnwantedInput = () => {
+            if (inputEl.value !== snapshotValue) {
+              inputEl.value = snapshotValue as string;
+              try { inputEl.setSelectionRange(snapshotStart, snapshotEnd); } catch { /* detached */ }
+            }
+          };
+          inputEl.addEventListener('input', onUnwantedInput, true);
+          this.holdRevertDispose = () => {
+            inputEl.removeEventListener('input', onUnwantedInput, true);
+            this.holdRevertDispose = null;
+          };
+        }
       }, this.holdThresholdMs);
       return;
     }
@@ -276,7 +384,7 @@ export class GestureManager {
     if (!this.isHolding) {
       // Tap (no voice). Check double-tap window.
       const now = Date.now();
-      if (now - this.lastTapAt < DOUBLE_TAP_WINDOW_MS) {
+      if (now - this.lastTapAt < this.doubleTapWindowMs) {
         if (this.tapTimer) {
           clearTimeout(this.tapTimer);
           this.tapTimer = null;
@@ -289,13 +397,16 @@ export class GestureManager {
         this.tapTimer = setTimeout(() => {
           this.tapTimer = null;
           if (this.hasSuggestion) this.callbacks.onAccept();
-        }, DOUBLE_TAP_WINDOW_MS);
+        }, this.doubleTapWindowMs);
       }
       return;
     }
 
-    // Was holding → voice end
+    // Was holding → voice end. Tear down the reactive input-revert
+    // guard (it's no-op once host clears readOnly anyway, but freeing
+    // the listener now avoids a leak across sessions).
     this.isHolding = false;
+    this.holdRevertDispose?.();
     this.callbacks.onVoiceEnd();
   }
 
@@ -311,6 +422,7 @@ export class GestureManager {
       clearTimeout(this.holdTimer);
       this.holdTimer = null;
     }
+    this.holdRevertDispose?.();
     if (this.isHolding) {
       this.isHolding = false;
       this.callbacks.onVoiceEnd();
