@@ -24,6 +24,7 @@ import { SkillRegistry } from './skills/registry';
 import { PanelRuntime } from './triggers/panel-runtime';
 import { ensureDwellStyles } from './triggers/dwell/styles';
 import { Placements } from './ui/placement';
+import { sdkString } from './utils/sdk-i18n';
 import { PinnedPanelRegistry } from './modules/pinned-panel';
 import { ToolsRegistry } from './tools-registry';
 import type { Skill, ScriptSkill } from './skills/types';
@@ -193,6 +194,27 @@ export interface DotDotDuckConfig {
    * can skip this entirely.
    */
   agentSubtitleAutoHideMs?: number | { summary?: number; error?: number };
+
+  /**
+   * Force every SDK-emitted agent subtitle (done summary / error) into
+   * a Space-gated `agent` bar with accept / reject buttons. Default
+   * `false` — done summary uses plain `info` (any-key dismiss, no
+   * satisfaction signal).
+   *
+   * Set `true` when you want:
+   *  1. **Explicit dismiss** — no accidental dismissal, the user has
+   *     to press Space (accept) or double-tap Space (reject).
+   *  2. **Satisfaction signal** — accept / reject emits an
+   *     `agent_feedback` intent (`satisfied: true | false | null`)
+   *     so the host can measure agent quality from the intent stream.
+   *  3. **Continuity hook** — onAccept becomes the natural place to
+   *     queue the next agent turn (e.g. "ask a follow-up").
+   *
+   * Per the dddk-frontend's demo guidance: prefer gated subtitles
+   * over silent text. The SDK keeps the plain-text path available
+   * for embedded / dashboard contexts where Space isn't reachable.
+   */
+  gateAgentSubtitles?: boolean;
 }
 
 export class DotDotDuck {
@@ -287,7 +309,7 @@ export class DotDotDuck {
     const running = resolveIndicator(config.indicators?.running);
     if (running) this.subtitle.setRunningLabel(running);
     this.storage = config.storage ?? defaultStorage();
-    this.prefs = new PreferenceStore(this.storage);
+    this.prefs = new PreferenceStore(this.storage, this.config.locale);
     this.voiceEnabled = config.voice?.enabled ?? true;
     this.agentEnabled = config.agent?.enabled ?? true;
 
@@ -770,6 +792,15 @@ export class DotDotDuck {
 
   // ─── webagent integration ──────────────────────────────────────
 
+  /** Read a host-supplied indicator label override (`config.indicators
+   *  .processing` / `.listening`). Accepts string or per-locale map. */
+  private resolveIndicatorOverride(kind: 'processing' | 'listening'): string | null {
+    const v = this.config.indicators?.[kind];
+    if (!v) return null;
+    if (typeof v === 'string') return v;
+    return v[String(this.config.locale ?? 'en')] ?? v.en ?? null;
+  }
+
   /** Pull the auto-hide ms for agent summary / error subtitles out of
    *  config. Returns 0 (sticky) when the host didn't configure it. */
   private resolveAgentAutoHide(kind: 'summary' | 'error'): number {
@@ -945,9 +976,12 @@ export class DotDotDuck {
     // carry the visual narrative — re-flashing every step would just
     // obscure the page underneath.
     let indicatorShownThisRun = false;
+    const thinkingLabel =
+      this.resolveIndicatorOverride('processing')
+      ?? sdkString(this.config.locale, 'agent.thinking');
     agent.on('status', (status) => {
       if (status === 'thinking' && !indicatorShownThisRun) {
-        this.subtitle.showIndicator('processing', '思考中…');
+        this.subtitle.showIndicator('processing', thinkingLabel);
         indicatorShownThisRun = true;
       } else if (status === 'thinking') {
         // Subsequent thinking turns — silently. The user already knows.
@@ -968,17 +1002,44 @@ export class DotDotDuck {
 
     const summaryHideMs = this.resolveAgentAutoHide('summary');
     const errorHideMs = this.resolveAgentAutoHide('error');
+    const gated = this.config.gateAgentSubtitles === true;
 
     agent.on('done', (session: AgentSession) => {
       this.subtitle.hideIndicator();
       if (session.summary) {
-        // Default: no autoHide — user dismisses at their own pace.
-        // Hosts opt back into auto-hide via `agentSubtitleAutoHideMs`.
-        this.subtitle.show({
-          text: session.summary,
-          type: 'info',
-          ...(summaryHideMs > 0 ? { autoHide: summaryHideMs } : {}),
-        });
+        // Two delivery modes:
+        //  - Plain `info` (default): the user dismisses by clicking
+        //    anywhere or pressing any non-Space key. No satisfaction
+        //    signal captured.
+        //  - `gated` (config.gateAgentSubtitles === true): mount as
+        //    `agent` type with Space accept / double-Space reject.
+        //    Accept emits a `feedback` intent with `satisfied: true`,
+        //    reject emits `satisfied: false`. Hosts wired into the
+        //    intent stream can measure agent quality + use it as the
+        //    canonical "next agent turn" hook.
+        if (gated) {
+          const summary = session.summary;
+          this.subtitle.show({
+            text: summary,
+            type: 'agent',
+            onAccept: () => {
+              this.emitIntent({ kind: 'agent_feedback', satisfied: true, summary, timestamp: Date.now() });
+            },
+            onReject: () => {
+              this.emitIntent({ kind: 'agent_feedback', satisfied: false, summary, timestamp: Date.now() });
+            },
+            onCancel: () => {
+              this.emitIntent({ kind: 'agent_feedback', satisfied: null, summary, timestamp: Date.now() });
+            },
+            ...(summaryHideMs > 0 ? { autoHide: summaryHideMs } : {}),
+          });
+        } else {
+          this.subtitle.show({
+            text: session.summary,
+            type: 'info',
+            ...(summaryHideMs > 0 ? { autoHide: summaryHideMs } : {}),
+          });
+        }
       }
       // If the host configured auto-hide, also clear the highlight /
       // overlays at the same time so the agent's framing doesn't
@@ -994,7 +1055,11 @@ export class DotDotDuck {
     agent.on('error', (err) => {
       this.subtitle.show({
         text: `Agent 錯誤：${err.message}`,
-        type: 'info',
+        type: gated ? 'agent' : 'info',
+        ...(gated ? {
+          onAccept: () => { /* acknowledge — clears subtitle via the running indicator path */ },
+          onReject: () => { /* same — error has no continue semantics */ },
+        } : {}),
         ...(errorHideMs > 0 ? { autoHide: errorHideMs } : {}),
       });
       this.clearHighlight();

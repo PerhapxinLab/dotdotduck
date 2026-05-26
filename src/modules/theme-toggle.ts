@@ -4,6 +4,7 @@
 
 import type { CommandPalette, PaletteItem } from '../triggers/command-palette';
 import type { StorageAdapter } from '../types';
+import { sdkString } from '../utils/sdk-i18n';
 
 export type ThemeValue = 'light' | 'dark' | 'system';
 
@@ -13,12 +14,15 @@ export interface ThemeToggleConfig {
   attribute?: string;
   /** Storage key. Default 'dddk.theme'. */
   storageKey?: string;
+  /** Locale used for the palette command names — `en` / `zh-TW` ship
+   *  bundled, anything else falls back to English. Default `en`. */
+  locale?: string;
   /** Callback when theme changes. */
   onChange?: (theme: ThemeValue) => void;
 }
 
 export class ThemeToggleModule {
-  private cfg: Required<Omit<ThemeToggleConfig, 'storage' | 'onChange'>> & ThemeToggleConfig;
+  private cfg: Required<Pick<ThemeToggleConfig, 'attribute' | 'storageKey'>> & ThemeToggleConfig;
   private mediaQuery?: MediaQueryList;
 
   constructor(config: ThemeToggleConfig = {}) {
@@ -79,10 +83,11 @@ export class ThemeToggleModule {
   };
 
   paletteCommands(): PaletteItem[] {
+    const loc = this.cfg.locale;
     return [
       {
         id: 'theme-light',
-        name: '主題：亮色',
+        name: sdkString(loc, 'palette.theme.light'),
         section: 'Appearance',
         icon: '○',
         handler: (p) => {
@@ -92,7 +97,7 @@ export class ThemeToggleModule {
       },
       {
         id: 'theme-dark',
-        name: '主題：暗色',
+        name: sdkString(loc, 'palette.theme.dark'),
         section: 'Appearance',
         icon: '●',
         handler: (p) => {
@@ -102,7 +107,7 @@ export class ThemeToggleModule {
       },
       {
         id: 'theme-system',
-        name: '主題：跟隨系統',
+        name: sdkString(loc, 'palette.theme.system'),
         section: 'Appearance',
         icon: '◐',
         handler: (p) => {

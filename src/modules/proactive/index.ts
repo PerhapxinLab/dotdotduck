@@ -2,6 +2,7 @@ import { resolveStorage } from '../../utils/storage/index.js';
 import type { StorageAdapter, StorageKind } from '../../utils/storage/types.js';
 import { betaSample } from '../../utils/text/sampling.js';
 import type { Memory } from '../../agent/memory/index.js';
+import { sdkString } from '../../utils/sdk-i18n';
 
 /**
  * Structural Analytics interface — the subset of `Analytics` that
@@ -63,6 +64,9 @@ export type ProactiveOpts = {
   fatigue?: FatigueConfig;
   keys?: { yes?: string; no?: string; dismiss?: string };
   identity?: () => Record<string, unknown>;
+  /** Locale for the default Yes / No prompt labels when a prompt's
+   *  surface doesn't supply its own. `en` / `zh-TW` ship bundled. */
+  locale?: string;
   render?: (prompt: PromptDefinition, variantSurface: PromptSurface) => Promise<'yes' | 'no' | 'dismiss'>;
 
   /**
@@ -190,8 +194,8 @@ export class Proactive {
       triggers: [],
       surface: {
         text: opts.text,
-        yesLabel: opts.yesLabel ?? '是',
-        noLabel: opts.noLabel ?? '否',
+        yesLabel: opts.yesLabel ?? sdkString(this.opts.locale, 'proactive.yes'),
+        noLabel: opts.noLabel ?? sdkString(this.opts.locale, 'proactive.no'),
         dismissable: true,
       },
     };

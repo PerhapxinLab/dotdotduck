@@ -14,6 +14,7 @@
 import type { Subtitle } from '../ui/subtitle';
 import { inferSelector } from '../utils/selector';
 import { injectScopedStyle } from '../utils/dom';
+import { sdkString } from '../utils/sdk-i18n';
 
 export interface FormAssistConfig {
   /** Selector for forms to assist with. Default 'form'. */
@@ -28,6 +29,11 @@ export interface FormAssistConfig {
   onAssist: (info: FormAssistInfo) => void;
   /** Show the button automatically when forms appear. Default true. */
   autoShow?: boolean;
+  /** Locale for the "AI fill" button label + tooltip. `en` / `zh-TW`
+   *  ship bundled; anything else falls back to English. */
+  locale?: string;
+  /** Override the button label entirely (skips the locale lookup). */
+  buttonLabel?: string;
 }
 
 export interface FormAssistInfo {
@@ -40,7 +46,7 @@ const UI_ATTR = 'data-dddk-ui';
 const STYLE_ID = 'dddk-form-assist-style';
 
 export class FormAssistModule {
-  private cfg: Required<Omit<FormAssistConfig, 'onAssist' | 'skipSelector'>> & FormAssistConfig;
+  private cfg: Required<Pick<FormAssistConfig, 'formSelector' | 'autoShow'>> & FormAssistConfig;
   private observed = new WeakSet<HTMLFormElement>();
   private buttons = new WeakMap<HTMLFormElement, HTMLButtonElement>();
   private observer: MutationObserver | null = null;
@@ -78,8 +84,8 @@ export class FormAssistModule {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute(UI_ATTR, 'form-assist-btn');
-    btn.textContent = '✨ 幫填';
-    btn.title = 'AI 幫你填寫這個表單';
+    btn.textContent = this.cfg.buttonLabel ?? sdkString(this.cfg.locale, 'form.assist.fill');
+    btn.title = this.cfg.buttonLabel ?? sdkString(this.cfg.locale, 'form.assist.fill');
     btn.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();

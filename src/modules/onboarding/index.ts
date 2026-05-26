@@ -10,6 +10,7 @@
 import type { ScriptSkill } from '../../skills/types';
 import type { CommandPalette, PaletteItem } from '../../triggers/command-palette';
 import type { StorageAdapter } from '../../types';
+import { sdkString } from '../../utils/sdk-i18n';
 
 export interface OnboardingConfig {
   /** The tour to run. */
@@ -26,6 +27,9 @@ export interface OnboardingConfig {
   runOnPath?: string | RegExp | Array<string | RegExp>;
   /** Run after this delay (let host render first). Default 500ms. */
   startDelayMs?: number;
+  /** Locale for the "Replay tour" palette command name. `en` / `zh-TW`
+   *  ship bundled. Default `en`. */
+  locale?: string;
 }
 
 export class OnboardingModule {
@@ -74,7 +78,7 @@ export class OnboardingModule {
     return [
       {
         id: `${this.cfg.skill.id}-restart`,
-        name: '重看導覽',
+        name: sdkString(this.cfg.locale, 'palette.onboarding.replay'),
         description: this.cfg.skill.name,
         icon: '▶',
         section: 'Help',

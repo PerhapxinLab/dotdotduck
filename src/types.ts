@@ -109,7 +109,15 @@ export type IntentEvent =
   | { kind: 'voice_captured'; text: string; cleanedText?: string; timestamp: number }
   | { kind: 'selection_used'; selectionText: string; selectorHint?: string; itemId: string; timestamp: number }
   | { kind: 'skill_started'; skillId: string; timestamp: number }
-  | { kind: 'skill_finished'; skillId: string; timestamp: number };
+  | { kind: 'skill_finished'; skillId: string; timestamp: number }
+  /**
+   * Fired when the SDK's `gateAgentSubtitles` mode is on and the user
+   * responds to the final done summary. `satisfied: true` = Space
+   * accept, `false` = double-tap reject, `null` = explicit cancel
+   * (Esc / click-outside). Useful for measuring agent quality from
+   * the intent stream.
+   */
+  | { kind: 'agent_feedback'; satisfied: boolean | null; summary: string; timestamp: number };
 
 export interface DddkEventMap {
   subtitle_show: SubtitleShowOptions;

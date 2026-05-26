@@ -9,6 +9,7 @@
  */
 
 import type { StorageAdapter } from '../types';
+import { sdkString } from '../utils/sdk-i18n';
 
 export type PreferenceKind = 'text' | 'password' | 'number' | 'checkbox' | 'select';
 
@@ -37,7 +38,7 @@ export interface PreferenceContext {
 }
 
 export class PreferenceStore {
-  constructor(private storage: StorageAdapter) {}
+  constructor(private storage: StorageAdapter, private locale?: string) {}
 
   private keyOf(skillId: string): string {
     return `prefs.${skillId}`;
@@ -110,7 +111,7 @@ export class PreferenceStore {
     for (const field of schema.fields) {
       components.push(buildFieldComponent(field));
     }
-    components.push({ id: 'submit', component: 'Button', text: '儲存', action: 'submit' });
+    components.push({ id: 'submit', component: 'Button', text: sdkString(this.locale, 'form.submit'), action: 'submit' });
 
     const data: Record<string, unknown> = {};
     const existing = this.read(schema.skillId);

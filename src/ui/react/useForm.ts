@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { StorageAdapter } from '../../types';
+import { sdkString } from '../../utils/sdk-i18n';
 
 export type FieldValidator<T> = (value: T) => string | undefined | null;
 
@@ -27,6 +28,10 @@ export interface UseFormOptions<V extends Record<string, unknown>> {
   /** Persist half-filled values across reloads. */
   draftKey?: string;
   storage?: StorageAdapter;
+  /** Locale for the bundled "field required" error message. `en` /
+   *  `zh-TW` ship bundled. Pass a string on a field's `required` to
+   *  override per-field. Default `en`. */
+  locale?: string;
 }
 
 export interface FormFieldProps<T> {
@@ -98,7 +103,7 @@ export function useForm<V extends Record<string, unknown>>(
       if (cfg.required) {
         const empty = value === undefined || value === null || value === '';
         if (empty) {
-          return typeof cfg.required === 'string' ? cfg.required : '此欄位必填';
+          return typeof cfg.required === 'string' ? cfg.required : sdkString(options.locale, 'form.required');
         }
       }
       if (cfg.validate) {

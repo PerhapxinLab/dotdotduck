@@ -4,12 +4,17 @@
 
 import type { CommandPalette, PaletteItem } from '../triggers/command-palette';
 import type { StorageAdapter } from '../types';
+import { sdkString } from '../utils/sdk-i18n';
 
 export interface LanguageSwitcherConfig {
   available: Array<{ code: string; label: string }>;
   current?: string;
   storage?: StorageAdapter;
   storageKey?: string;
+  /** Locale for the "✓ Active" marker label on the currently-selected
+   *  language. `en` / `zh-TW` ship bundled, anything else falls back
+   *  to English. Default `en`. */
+  locale?: string;
   /** Called when user picks a language. Host applies to its i18n layer. */
   onChange: (code: string) => void;
 }
@@ -42,7 +47,7 @@ export class LanguageSwitcherModule {
     return this.cfg.available.map((lang) => ({
       id: `lang-${lang.code}`,
       name: lang.label,
-      description: lang.code === this.current ? '✓ 目前' : undefined,
+      description: lang.code === this.current ? sdkString(this.cfg.locale, 'palette.language.current') : undefined,
       section: 'Language',
       icon: '文',
       handler: (p) => {

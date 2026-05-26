@@ -551,7 +551,7 @@ const EmptyState: PieceDefinition = {
       padding: 24, textAlign: 'center', color: 'var(--dddk-text-muted, #6b6b6b)',
     }}>
       <div style={{ fontSize: 28, marginBottom: 8 }}>{(node.icon as string) ?? '∅'}</div>
-      <div>{node.title as string ?? '無資料'}</div>
+      <div>{node.title as string ?? 'No data'}</div>
       {Boolean(node.description) && <small>{node.description as string}</small>}
     </div>
   ),
@@ -565,7 +565,7 @@ const ErrorState: PieceDefinition = {
       padding: 16, background: 'rgba(239,68,68,0.08)', border: '1px solid #ef4444',
       borderRadius: 6, color: '#991b1b',
     }}>
-      <strong>{node.title as string ?? '錯誤'}</strong>
+      <strong>{node.title as string ?? 'Error'}</strong>
       {Boolean(node.message) && <div style={{ marginTop: 4, fontSize: 13 }}>{node.message as string}</div>}
     </div>
   ),
