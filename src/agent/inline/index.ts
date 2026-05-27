@@ -24,6 +24,7 @@
 
 import { resolveLLM, type LLMSource } from '../llm/router';
 import type { ToolCall } from '../llm/types';
+import type { StreamingProvider, StreamChunk } from '../llm/stream';
 import type { ActionDefinition } from '../webagent/types';
 import type { DotDotDuck } from '../../orchestrator';
 import { escapeHtml } from '../../utils/dom';
@@ -32,6 +33,8 @@ import {
   SYSTEM_PROMPT,
   extractReplacement,
   buildContextPrompt,
+  REPLACEMENT_START,
+  REPLACEMENT_END,
 } from './parse';
 import { ensureInlineAgentStyles, UI_ATTR } from './styles';
 
@@ -778,11 +781,9 @@ export class InlineAgent {
     if (!instruction) return;
 
     this.hide();
+    // Indicator shown only as a brief flash — the streaming path tears
+    // it down on the first delta and writes straight into the target.
     this.dddk?.subtitle.showIndicator('processing', this.t('processing'));
-    // Capture a token for this run — when the user fires a SECOND action
-    // before the first finishes, the first one's result is stale and we
-    // drop it. Prevents the "user picked Translate then Improve, both
-    // resolve, second replaces first, then first replaces second" race.
     this.runToken++;
     const myToken = this.runToken;
 
@@ -807,46 +808,68 @@ export class InlineAgent {
 
     try {
       const llm = resolveLLM(this.llm, 'inline');
-      const userMessage = `Instruction: ${instruction}\n\nContext (with selection marked):\n"""\n${contextPrompt}\n"""\n\nReturn JSON: { "replacement": "..." }`;
+      const userMessage = `Instruction: ${instruction}\n\nContext (with selection marked):\n"""\n${contextPrompt}\n"""`;
       const systemMessage = this.cfg.systemPrompt ?? SYSTEM_PROMPT;
-      const result = this.cfg.tools
-        ? await this.runWithTools(llm, systemMessage, userMessage, sel.text.length, myToken)
-        : await llm.complete({
-            messages: [
-              { role: 'system', content: systemMessage },
-              { role: 'user', content: userMessage },
-            ],
-            // Inline edits never need reasoning — the answer is straight rewriting.
-            thinking: 'off',
-            // Providers that support structured output enforce JSON; others just
-            // get the prompt instruction (which we parse defensively).
-            jsonMode: true,
-            temperature: 0,
-            maxTokens: Math.max(256, sel.text.length * 4 + 200),
-          });
-      // Stale-result drop — if another runAction fired while we were
-      // awaiting the LLM, this token won't match and we silently discard.
-      if (myToken !== this.runToken) return;
-      const replacement = extractReplacement(result.content);
-      if (replacement) {
-        const mode = action.displayAs ?? 'replace';
-        if (mode === 'replace') {
-          this.applyResult(target, sel, replacement);
-        } else if (mode === 'subtitle') {
-          // Info display only — agent's reply, no apply.
-          this.dddk?.subtitle.show({
-            text: replacement,
-            type: 'agent',
-          });
-        } else if (mode === 'confirm') {
-          // Show in subtitle with accept/reject. On accept we splice;
-          // on reject we discard. Space accepts, double-tap rejects.
+      const mode = action.displayAs ?? 'replace';
+
+      const streamingProvider = llm as unknown as StreamingProvider;
+      const canStream = typeof streamingProvider.streamComplete === 'function' && !this.cfg.tools;
+
+      if (canStream && (mode === 'replace' || mode === 'subtitle' || mode === 'confirm')) {
+        const handle = streamingProvider.streamComplete!({
+          messages: [
+            { role: 'system', content: systemMessage },
+            { role: 'user', content: userMessage },
+          ],
+          thinking: 'off',
+          temperature: 0,
+          maxTokens: Math.max(256, sel.text.length * 4 + 200),
+        });
+        const replacement = await this.consumeStream(handle, target, sel, mode, myToken);
+        if (myToken !== this.runToken) return;
+        if (mode === 'confirm' && replacement) {
+          // Confirm mode: we streamed into the subtitle bar; finalize
+          // with accept/reject. The result is NOT applied until the
+          // user accepts.
+          this.dddk?.subtitle.finalizeStreamed({ autoHide: 0 });
+          // Replace the streaming bar with an accept/reject bar carrying
+          // the same text — the user gets a clear decision moment.
           this.dddk?.subtitle.show({
             text: replacement,
             type: 'agent',
             onAccept: () => this.applyResult(target, sel, replacement),
-            onReject: () => { /* discard — leave selection untouched */ },
+            onReject: () => { /* discard */ },
           });
+        } else if (mode === 'subtitle') {
+          this.dddk?.subtitle.finalizeStreamed({ autoHide: 0 });
+        }
+      } else {
+        const result = this.cfg.tools
+          ? await this.runWithTools(llm, systemMessage, userMessage, sel.text.length, myToken)
+          : await llm.complete({
+              messages: [
+                { role: 'system', content: systemMessage },
+                { role: 'user', content: userMessage },
+              ],
+              thinking: 'off',
+              temperature: 0,
+              maxTokens: Math.max(256, sel.text.length * 4 + 200),
+            });
+        if (myToken !== this.runToken) return;
+        const replacement = extractReplacement(result.content);
+        if (replacement) {
+          if (mode === 'replace') {
+            this.applyResult(target, sel, replacement);
+          } else if (mode === 'subtitle') {
+            this.dddk?.subtitle.show({ text: replacement, type: 'agent' });
+          } else if (mode === 'confirm') {
+            this.dddk?.subtitle.show({
+              text: replacement,
+              type: 'agent',
+              onAccept: () => this.applyResult(target, sel, replacement),
+              onReject: () => { /* discard */ },
+            });
+          }
         }
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -874,6 +897,135 @@ export class InlineAgent {
     } finally {
       this.dddk?.subtitle.hideIndicator();
     }
+  }
+
+  /**
+   * Stream tokens from the LLM straight into the target — character by
+   * character into an input/textarea (mode=replace) or into the live
+   * subtitle bar (mode=subtitle/confirm). Watches for the
+   * `<<<REPLACEMENT>>>` start marker so we don't emit any preamble the
+   * model leaks, and stops at `<<<END>>>` so trailing tokens don't
+   * contaminate. Returns the final concatenated replacement string —
+   * mode=confirm uses it to build the accept/reject UI after streaming.
+   */
+  private async consumeStream(
+    handle: AsyncIterable<StreamChunk>,
+    target: HTMLElement,
+    sel: { text: string; start: number; end: number },
+    mode: 'replace' | 'subtitle' | 'confirm',
+    myToken: number,
+  ): Promise<string> {
+    let inReplacement = false;
+    let processedLen = 0;
+    let replacementBuf = '';
+    let replaceCursor = sel.start;
+    let replaceStarted = false;
+
+    // For replace mode: blank out the selection up-front. As deltas
+    // arrive we splice them in at cursor.
+    const isFormInput = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
+
+    // Hide the indicator on first delta (we'll get the visual progress
+    // from the input or the streaming bar).
+    let indicatorCleared = false;
+
+    for await (const chunk of handle) {
+      if (myToken !== this.runToken) return replacementBuf;
+      if (!indicatorCleared) {
+        this.dddk?.subtitle.hideIndicator();
+        indicatorCleared = true;
+      }
+
+      const totalText = chunk.text;
+
+      if (!inReplacement) {
+        const startIdx = totalText.indexOf(REPLACEMENT_START);
+        if (startIdx < 0) continue;
+        inReplacement = true;
+        processedLen = startIdx + REPLACEMENT_START.length;
+        if (mode === 'replace' && isFormInput && !replaceStarted) {
+          // Blank the selection now — the model has committed to a
+          // replacement and we want the deletion to land on the SAME
+          // tick as the first character so the cursor doesn't dance.
+          const el = target as HTMLInputElement | HTMLTextAreaElement;
+          const before = el.value.slice(0, sel.start);
+          const after = el.value.slice(sel.end);
+          el.value = before + after;
+          el.setSelectionRange(sel.start, sel.start);
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          replaceStarted = true;
+        }
+      }
+
+      // Process whatever's new since last iteration, watching for END.
+      const newRaw = totalText.slice(processedLen);
+      const endIdx = newRaw.indexOf(REPLACEMENT_END);
+
+      let safeChunk: string;
+      let consumeLen: number;
+      let finished = false;
+      if (endIdx >= 0) {
+        safeChunk = newRaw.slice(0, endIdx);
+        consumeLen = endIdx + REPLACEMENT_END.length;
+        finished = true;
+      } else {
+        // Hold back the tail if it could be the start of "<<<END>>>".
+        const partialIdx = findPartialMarkerTail(newRaw, REPLACEMENT_END);
+        const safeEnd = partialIdx >= 0 ? partialIdx : newRaw.length;
+        safeChunk = newRaw.slice(0, safeEnd);
+        consumeLen = safeEnd;
+      }
+
+      // Trim the leading newline that the prompt encourages but the
+      // replacement body shouldn't carry. Only on the very first
+      // emitted chunk after the start marker.
+      let emit = safeChunk;
+      if (replacementBuf === '' && emit.startsWith('\n')) emit = emit.slice(1);
+      else if (replacementBuf === '' && emit.startsWith('\r\n')) emit = emit.slice(2);
+
+      if (emit) {
+        replacementBuf += emit;
+        if (mode === 'replace' && isFormInput) {
+          this.insertAtCursor(target as HTMLInputElement | HTMLTextAreaElement, replaceCursor, emit);
+          replaceCursor += emit.length;
+        } else if (mode === 'subtitle' || mode === 'confirm') {
+          this.dddk?.subtitle.appendStreamed(emit);
+        }
+      }
+      processedLen += consumeLen;
+      if (finished) break;
+    }
+
+    // Strip trailing newline left over from the closing marker on its own line.
+    if (replacementBuf.endsWith('\n')) {
+      replacementBuf = replacementBuf.slice(0, -1);
+      // No visual fix-up needed — the trailing newline is already on screen
+      // but harmless. We could trim from the input here, but a single
+      // newline at end-of-replacement isn't worth the splice ceremony.
+    }
+
+    return replacementBuf;
+  }
+
+  /** Splice text into an input / textarea at a known cursor position
+   *  and update the cursor. Uses the React-aware native value setter so
+   *  controlled inputs see the change. */
+  private insertAtCursor(
+    el: HTMLInputElement | HTMLTextAreaElement,
+    cursorPos: number,
+    text: string,
+  ): void {
+    const proto = el instanceof HTMLTextAreaElement
+      ? HTMLTextAreaElement.prototype
+      : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    const cur = el.value;
+    const next = cur.slice(0, cursorPos) + text + cur.slice(cursorPos);
+    if (setter) setter.call(el, next);
+    else el.value = next;
+    const newCursor = cursorPos + text.length;
+    el.setSelectionRange(newCursor, newCursor);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
   /**
@@ -974,7 +1126,13 @@ export class InlineAgent {
                   startedAt: Date.now(),
                 } as never,
                 signal: abort.signal,
-                emit: () => { /* inline agent doesn't relay events */ },
+                // Inline agent has no indexed DOM dump — pass CSS selectors
+                // through to querySelector. The numeric-index resolution path
+                // only matters for the webagent (tour mode).
+                resolveTarget: (target: string | number) => {
+                  if (typeof target !== 'string' || typeof document === 'undefined') return null;
+                  try { return document.querySelector(target); } catch { return null; }
+                },
               },
             );
           } catch (err) {
@@ -1250,14 +1408,31 @@ export class InlineAgent {
  * common cases into 1-line guidance. Full original message goes to
  * console for engineers to grep.
  */
+/**
+ * Find the index in `text` where a prefix of `marker` starts at the tail.
+ * Used by the streaming consumer to avoid emitting characters that
+ * might be the leading edge of a closing marker we haven't fully
+ * received yet (e.g. `<<<EN` is held back until the next chunk reveals
+ * whether it's `<<<END>>>` or just literal text).
+ * Returns -1 if no prefix overlap.
+ */
+function findPartialMarkerTail(text: string, marker: string): number {
+  // Longest prefix of `marker` that the tail of `text` ends with.
+  const maxLen = Math.min(text.length, marker.length - 1);
+  for (let n = maxLen; n > 0; n--) {
+    if (text.endsWith(marker.slice(0, n))) return text.length - n;
+  }
+  return -1;
+}
+
 function humanizeLLMError(raw: string, locale: string): string {
   const zh = locale === 'zh-TW';
   const m = raw.match(/^(\w+)\s+HTTP\s+(\d+)/i);
   if (!m) return raw.length > 80 ? raw.slice(0, 77) + '…' : raw;
   const vendor = m[1];
   const status = parseInt(m[2]!, 10);
-  if (status === 429) return zh ? `${vendor} 速率上限,稍等幾秒再試` : `${vendor} rate limit — wait a few seconds and retry`;
-  if (status >= 500 && status < 600) return zh ? `${vendor} 暫時忙線,請再試一次` : `${vendor} is having a moment — please retry`;
+  if (status === 429) return zh ? `${vendor} 速率上限，稍等幾秒再試` : `${vendor} rate limit — wait a few seconds and retry`;
+  if (status >= 500 && status < 600) return zh ? `${vendor} 暫時忙線，請再試一次` : `${vendor} is having a moment — please retry`;
   if (status === 400) return zh ? `${vendor} 拒絕請求(請求格式問題)` : `${vendor} rejected the request (bad shape)`;
   if (status === 401 || status === 403) return zh ? `${vendor} 認證失敗` : `${vendor} auth failed`;
   return zh ? `${vendor} 失敗 (${status})` : `${vendor} failed (${status})`;

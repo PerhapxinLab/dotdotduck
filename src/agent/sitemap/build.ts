@@ -46,10 +46,20 @@ export interface NavTarget {
   /** URL path or route id (forwarded to `SitemapEntry.path` verbatim). */
   path: string;
   /**
-   * Lookup key into each locale dict. Resolves to the route's label in
-   * each locale.
+   * Lookup key into each locale dict. Resolves to the route's short
+   * label in each locale (the same string the sidebar / palette show).
    */
   i18nKey: string;
+  /**
+   * Optional lookup key for the LLM-facing description — a longer
+   * sentence that tells the agent what the page actually contains.
+   * Without this, the agent only sees the nav label (e.g. "Commercial")
+   * and can confuse it with same-named elements on other pages.
+   *
+   * Defaults to `${i18nKey}.desc` — hosts can just add that key to
+   * their dict to opt in.
+   */
+  descI18nKey?: string;
   /** Extra aliases — domain synonyms, abbreviations, slang. Merged into
    *  the final `aliases` list regardless of locale. */
   aliases?: string[];
@@ -75,31 +85,43 @@ export interface BuildSitemapOpts {
 export function buildSitemap(targets: NavTarget[], opts: BuildSitemapOpts): SitemapEntry[] {
   const out: SitemapEntry[] = [];
   for (const t of targets) {
-    const primaryLabel = opts.i18n[opts.primaryLocale]?.[t.i18nKey];
-    if (!primaryLabel) {
-      // No translation in the primary locale — fall back to the first
-      // locale that DOES have one, so the entry still shows up.
-      let fallback: string | undefined;
-      for (const loc of opts.allLocales) {
-        const v = opts.i18n[loc]?.[t.i18nKey];
-        if (v) { fallback = v; break; }
-      }
-      if (!fallback) continue; // nothing to show — skip the entry entirely
-      out.push(buildOne(t, fallback, opts));
-      continue;
-    }
-    out.push(buildOne(t, primaryLabel, opts));
+    // Prefer the dedicated description key; fall back to the short label.
+    // Either way, primary-locale wins; if missing, scan other locales.
+    const descKey = t.descI18nKey ?? `${t.i18nKey}.desc`;
+    const description =
+      opts.i18n[opts.primaryLocale]?.[descKey]
+      ?? opts.i18n[opts.primaryLocale]?.[t.i18nKey]
+      ?? findAcrossLocales(opts, descKey)
+      ?? findAcrossLocales(opts, t.i18nKey);
+    if (!description) continue; // nothing usable — skip the entry
+    out.push(buildOne(t, description, opts));
   }
   return out;
 }
 
+function findAcrossLocales(opts: BuildSitemapOpts, key: string): string | undefined {
+  for (const loc of opts.allLocales) {
+    const v = opts.i18n[loc]?.[key];
+    if (v) return v;
+  }
+  return undefined;
+}
+
 function buildOne(target: NavTarget, description: string, opts: BuildSitemapOpts): SitemapEntry {
+  // Aliases are SHORT label translations across locales (so a user
+  // typing the nav label in any language matches). Long descriptions
+  // are not used as aliases — they would bloat the prompt.
   const aliases = new Set<string>();
   for (const loc of opts.allLocales) {
     if (loc === opts.primaryLocale) continue;
     const v = opts.i18n[loc]?.[target.i18nKey];
     if (v && v !== description) aliases.add(v);
   }
+  // The primary-locale short label is also worth including as an alias
+  // when description came from the long-desc key — so the user typing
+  // the nav label still matches.
+  const primaryLabel = opts.i18n[opts.primaryLocale]?.[target.i18nKey];
+  if (primaryLabel && primaryLabel !== description) aliases.add(primaryLabel);
   for (const a of target.aliases ?? []) aliases.add(a);
   const entry: SitemapEntry = { path: target.path, description };
   if (aliases.size > 0) entry.aliases = [...aliases];

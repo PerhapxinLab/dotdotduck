@@ -902,6 +902,17 @@ export class CommandPalette {
     if (this.listSplit) this.listSplit.style.display = 'flex';
   }
 
+  /**
+   * True when the palette is open AND in a state where Esc has its own
+   * meaning (back out of result-mode / pop a sub-menu). External
+   * keyboard handlers (orchestrator's GestureManager Esc) should defer
+   * to the palette in that case — otherwise the global "Esc closes the
+   * whole palette" rule kills the back-step the user expected.
+   */
+  hasInternalEsc(): boolean {
+    return this.isOpen() && (this.resultMode || this.subMenuStack.length > 0);
+  }
+
   /** Snapshot of the currently-registered root items. Read-only — use
    *  `addItem` / `removeItem` / `setItems` to mutate. */
   getItems(): readonly PaletteItem[] {

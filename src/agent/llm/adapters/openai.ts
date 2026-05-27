@@ -29,6 +29,7 @@ export const openaiAdapter: LLMAdapter = {
       baseURL: config.baseURL as string | undefined,
       organization: config.organization as string | undefined,
       headers: config.headers as Record<string, string> | undefined,
+      extraBody: config.extraBody as Record<string, unknown> | undefined,
     };
     return new OpenAIProvider(cfg);
   },

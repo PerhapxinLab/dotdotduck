@@ -94,6 +94,11 @@ export type DddkEventName =
   | 'skill_done'
   | 'surface'
   | 'agent_start'
+  | 'agent_tool_start'
+  | 'agent_tool_end'
+  | 'agent_thinking'
+  | 'agent_final'
+  | 'agent_error'
   | 'intent';
 
 /**
@@ -145,6 +150,16 @@ export interface DddkEventMap {
   skill_done: { skillId: string };
   surface: { surface: unknown; placement: import('./skills/types').SurfacePlacement };
   agent_start: { task: string };
+  /** Emitted at every LLM call boundary (between tool dispatches). */
+  agent_thinking: void;
+  /** Emitted right before a tool's handler runs. */
+  agent_tool_start: { name: string; args: Record<string, unknown>; targetSelector?: string };
+  /** Emitted after a tool's handler returns. */
+  agent_tool_end: { name: string; result: import('./agent/webagent/types').ActionResult };
+  /** Emitted when the agent run completed naturally (no more tool calls). */
+  agent_final: void;
+  /** Emitted when the agent run failed terminally. */
+  agent_error: { error: Error };
   intent: IntentEvent;
 }
 

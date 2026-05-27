@@ -21,7 +21,12 @@ const STYLE_ID = 'webagent-overlay-style';
 const SELECTOR_DS_KEY = 'overlaySelector';
 
 const STYLE_CSS = `
-  [${OVERLAY_ATTR}] { position: absolute; pointer-events: none; z-index: var(--webagent-z-overlay, 9800); }
+  /* Overlays paint on top of page content but MUST sit below dddk's
+     UI chrome — subtitle bar (z-index 9500), indicator (9510), palette
+     (9600), modal (9700), toast (9800). The border / highlight frames
+     are visual context for whatever the subtitle is talking about;
+     they must never obscure the subtitle's text. */
+  [${OVERLAY_ATTR}] { position: absolute; pointer-events: none; z-index: var(--webagent-z-overlay, 9100); }
   [${OVERLAY_ATTR}="highlight"] { background: var(--webagent-highlight, rgba(255, 235, 59, 0.4)); border-radius: var(--webagent-radius-xs, 4px); }
   [${OVERLAY_ATTR}="border"]    { border: 2px solid var(--webagent-overlay-border, #ff9800); border-radius: var(--webagent-radius-sm, 6px); }
   [${OVERLAY_ATTR}="spotlight"] { box-shadow: 0 0 0 9999px var(--webagent-spotlight, rgba(0,0,0,0.55)); border-radius: 8px; }
@@ -118,50 +123,76 @@ function position(overlay: HTMLElement, target: Element): void {
   overlay.style.height = `${rect.height}px`;
 }
 
-export function highlight(selector: string, color?: string, label?: string): string {
+/**
+ * Tag the target element with a unique attribute so the repositioner can
+ * re-find it across DOM mutations even when the caller passed an `Element`
+ * (numeric index path — no CSS selector available). Returns the stable
+ * attribute selector for the repositioner to store.
+ */
+const TARGET_ATTR = 'data-webagent-overlay-target';
+function tagTarget(target: Element): string {
+  const html = target as HTMLElement;
+  let tag = html.getAttribute(TARGET_ATTR);
+  if (!tag) {
+    tag = genId('ot');
+    html.setAttribute(TARGET_ATTR, tag);
+  }
+  return `[${TARGET_ATTR}="${tag}"]`;
+}
+
+function resolveOrTag(input: Element | string): { target: Element; selector: string } | null {
+  if (typeof input === 'string') {
+    const target = document.querySelector(input);
+    if (!target) return null;
+    return { target, selector: input };
+  }
+  return { target: input, selector: tagTarget(input) };
+}
+
+export function highlight(target: Element | string, color?: string, label?: string): string {
   ensureStyles();
-  const target = document.querySelector(selector);
-  if (!target) return '';
+  const r = resolveOrTag(target);
+  if (!r) return '';
   const id = makeId();
   const ov = document.createElement('div');
   ov.setAttribute(OVERLAY_ATTR, 'highlight');
   ov.dataset.overlayId = id;
-  ov.dataset[SELECTOR_DS_KEY] = selector;
+  ov.dataset[SELECTOR_DS_KEY] = r.selector;
   if (color) ov.style.background = color;
   if (label) ov.dataset.overlayLabel = label;
-  position(ov, target);
+  position(ov, r.target);
   document.body.appendChild(ov);
-  if (label) attachLabel(target, label, id, selector);
+  if (label) attachLabel(r.target, label, id, r.selector);
   return id;
 }
 
-export function border(selector: string, color?: string, label?: string): string {
+export function border(target: Element | string, color?: string, label?: string): string {
   ensureStyles();
-  const target = document.querySelector(selector);
-  if (!target) return '';
+  const r = resolveOrTag(target);
+  if (!r) return '';
   const id = makeId();
   const ov = document.createElement('div');
   ov.setAttribute(OVERLAY_ATTR, 'border');
   ov.dataset.overlayId = id;
-  ov.dataset[SELECTOR_DS_KEY] = selector;
+  ov.dataset[SELECTOR_DS_KEY] = r.selector;
   if (color) ov.style.borderColor = color;
   if (label) ov.dataset.overlayLabel = label;
-  position(ov, target);
+  position(ov, r.target);
   document.body.appendChild(ov);
-  if (label) attachLabel(target, label, id, selector);
+  if (label) attachLabel(r.target, label, id, r.selector);
   return id;
 }
 
-export function spotlight(selector: string): string {
+export function spotlight(target: Element | string): string {
   ensureStyles();
-  const target = document.querySelector(selector);
-  if (!target) return '';
+  const r = resolveOrTag(target);
+  if (!r) return '';
   const id = makeId();
   const ov = document.createElement('div');
   ov.setAttribute(OVERLAY_ATTR, 'spotlight');
   ov.dataset.overlayId = id;
-  ov.dataset[SELECTOR_DS_KEY] = selector;
-  position(ov, target);
+  ov.dataset[SELECTOR_DS_KEY] = r.selector;
+  position(ov, r.target);
   document.body.appendChild(ov);
   return id;
 }

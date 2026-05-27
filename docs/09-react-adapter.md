@@ -12,7 +12,7 @@ npm install @perhapxin/dddk @perhapxin/dddk-react react
 
 ```tsx
 import { DddkProvider } from '@perhapxin/dddk-react';
-import { OpenAIProvider } from '@perhapxin/webagent';
+import { OpenAIProvider } from '@perhapxin/dddk';
 
 const llm = new OpenAIProvider({ apiKey: 'sk-...' });
 

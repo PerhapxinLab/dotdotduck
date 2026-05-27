@@ -12,7 +12,7 @@
  */
 
 import type { PanelSkill, PanelSkillContext } from '../skills/types';
-import { ensurePaletteStyles } from './command-palette/styles';
+import { ensurePaletteStyles, UI_ATTR } from './command-palette/styles';
 
 type StackFrame = {
   skill: PanelSkill;
@@ -38,7 +38,7 @@ export class PanelRuntime {
   private stack: StackFrame[] = [];
   private overlay: HTMLDivElement | null = null;
   private inputEl: HTMLInputElement | null = null;
-  private breadcrumbEl: HTMLDivElement | null = null;
+  private breadcrumbEl: HTMLElement | null = null;
   private contentEl: HTMLDivElement | null = null;
   private inputTimer: ReturnType<typeof setTimeout> | null = null;
   private host: PanelRuntimeHost;
@@ -93,78 +93,65 @@ export class PanelRuntime {
 
   private mount(): void {
     ensurePaletteStyles();
+
+    // Visually identical to the CommandPalette — same overlay, card,
+    // input row, result area, close button. The user perceives the
+    // transition palette → panel skill as the same window changing
+    // content, not a separate modal popping over with a different
+    // shape. The single visual differentiator is the BACK button
+    // tucked inside the input row when the panel stack is deeper
+    // than one, which signals "you're in a sub-view, esc returns".
     const overlay = document.createElement('div');
+    overlay.setAttribute(UI_ATTR, 'palette-backdrop');
     overlay.setAttribute('data-dddk-panel', 'true');
-    Object.assign(overlay.style, {
-      position: 'fixed',
-      inset: '0',
-      zIndex: '999998',
-      background: 'var(--dddk-bg-overlay, rgba(0,0,0,0.32))',
-      display: 'flex',
-      alignItems: 'flex-start',
-      justifyContent: 'center',
-      paddingTop: '12vh',
-    });
 
     const card = document.createElement('div');
-    Object.assign(card.style, {
-      width: 'min(720px, 92vw)',
-      maxHeight: '72vh',
-      background: 'var(--dddk-bg-elevated, var(--dddk-bg, #fff))',
-      borderRadius: 'var(--dddk-radius, 12px)',
-      boxShadow: 'var(--dddk-shadow-lg, 0 24px 64px rgba(0,0,0,0.24))',
-      display: 'flex',
-      flexDirection: 'column',
-      overflow: 'hidden',
-      fontFamily: 'var(--dddk-font, system-ui, -apple-system, sans-serif)',
-    });
+    card.setAttribute(UI_ATTR, 'palette');
 
-    // breadcrumb bar
-    const crumb = document.createElement('div');
-    Object.assign(crumb.style, {
-      padding: '8px 12px',
-      borderBottom: '1px solid var(--dddk-border, rgba(0,0,0,0.08))',
-      fontSize: '12px',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '6px',
-    });
-    this.breadcrumbEl = crumb;
+    // Input row — same as palette, with optional back arrow on the
+    // left side AND the standard × close button on the right.
+    const inputRow = document.createElement('div');
+    inputRow.setAttribute(UI_ATTR, 'palette-input-row');
 
-    // input
+    const backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.setAttribute(UI_ATTR, 'panel-back');
+    backBtn.setAttribute('aria-label', 'Back');
+    backBtn.innerHTML = '←';
+    backBtn.addEventListener('click', () => { void this.back(); });
+    this.breadcrumbEl = backBtn; // reusing the field as the back-button ref
+
     const input = document.createElement('input');
     input.type = 'text';
-    Object.assign(input.style, {
-      padding: '12px 16px',
-      fontSize: '15px',
-      border: 'none',
-      outline: 'none',
-      borderBottom: '1px solid var(--dddk-border, rgba(0,0,0,0.08))',
-      background: 'transparent',
-      color: 'inherit',
-    });
+    input.setAttribute(UI_ATTR, 'palette-input');
     input.addEventListener('input', this.handleInput);
     input.addEventListener('keydown', this.handleKeyDown);
     this.inputEl = input;
 
-    // content area
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.setAttribute(UI_ATTR, 'panel-close');
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.textContent = '×';
+    closeBtn.addEventListener('click', () => { void this.close(); });
+
+    inputRow.appendChild(backBtn);
+    inputRow.appendChild(input);
+    inputRow.appendChild(closeBtn);
+
+    // Content area — host's surface paints here. Uses `palette-result`
+    // so the panel-surface utility classes (.dddk-panel-*) compose
+    // naturally with zero extra padding wrappers.
     const content = document.createElement('div');
-    Object.assign(content.style, {
-      flex: '1 1 auto',
-      overflowY: 'auto',
-      padding: '12px 16px',
-      fontSize: '14px',
-      lineHeight: '1.5',
-    });
+    content.setAttribute(UI_ATTR, 'palette-result');
     this.contentEl = content;
 
-    card.appendChild(crumb);
-    card.appendChild(input);
+    card.appendChild(inputRow);
     card.appendChild(content);
     overlay.appendChild(card);
 
     overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) this.close();
+      if (e.target === overlay) void this.close();
     });
 
     document.body.appendChild(overlay);
@@ -183,43 +170,18 @@ export class PanelRuntime {
   }
 
   private renderShell(): void {
-    if (!this.breadcrumbEl || !this.inputEl) return;
-    // Breadcrumbs
-    this.breadcrumbEl.innerHTML = '';
-    const back = document.createElement('span');
-    back.textContent = '←';
-    Object.assign(back.style, { cursor: 'pointer', padding: '2px 8px', opacity: '0.6' });
-    back.addEventListener('click', () => this.back());
-    this.breadcrumbEl.appendChild(back);
-    this.stack.forEach((frame, i) => {
-      const sep = document.createElement('span');
-      sep.textContent = '›';
-      sep.style.opacity = '0.4';
-      this.breadcrumbEl!.appendChild(sep);
-      const name = document.createElement('span');
-      name.textContent = frame.skill.name;
-      Object.assign(name.style, {
-        cursor: i < this.stack.length - 1 ? 'pointer' : 'default',
-        fontWeight: i === this.stack.length - 1 ? '600' : '400',
-      });
-      name.addEventListener('click', () => {
-        while (this.stack.length - 1 > i) void this.back();
-      });
-      this.breadcrumbEl!.appendChild(name);
-    });
-    const closeBtn = document.createElement('span');
-    closeBtn.textContent = '×';
-    Object.assign(closeBtn.style, { marginLeft: 'auto', cursor: 'pointer', padding: '2px 8px', opacity: '0.6' });
-    closeBtn.addEventListener('click', () => this.close());
-    this.breadcrumbEl.appendChild(closeBtn);
-
-    // Input placeholder
+    if (!this.inputEl) return;
+    // Show the back arrow only when there's somewhere to go back to.
+    // For the top-level panel, hide it — the × button takes care of
+    // dismissal. This keeps the input row chrome quiet when there's
+    // no navigation history.
+    if (this.breadcrumbEl) {
+      (this.breadcrumbEl as HTMLElement).style.display = this.stack.length > 1 ? '' : 'none';
+    }
     const top = this.stack[this.stack.length - 1];
     this.inputEl.placeholder = top?.skill.inputPlaceholder ?? '';
     this.inputEl.value = top?.input ?? '';
     this.inputEl.focus();
-
-    // Render current surface
     if (top?.currentSurface) this.renderSurface(top.currentSurface);
     else this.clearContent();
   }

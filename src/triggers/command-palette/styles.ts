@@ -7,32 +7,80 @@ export function ensurePaletteStyles(): void {
   injectScopedStyle(STYLE_ID, `
     [${UI_ATTR}="palette-backdrop"] {
       position: fixed; inset: 0;
-      background: var(--dddk-bg-overlay, rgba(0,0,0,0.5));
-      backdrop-filter: blur(var(--dddk-blur, 12px));
+      background: var(--dddk-bg-overlay, rgba(15, 23, 42, 0.42));
+      backdrop-filter: blur(var(--dddk-blur, 20px));
+      -webkit-backdrop-filter: blur(var(--dddk-blur, 20px));
       z-index: var(--dddk-z-palette, 9900);
       display: flex; align-items: flex-start; justify-content: center;
-      padding-top: 12vh;
-      animation: dddk-fade 120ms ease-out;
+      padding-top: 10vh;
+      animation: dddk-fade 140ms ease-out;
     }
     [${UI_ATTR}="palette"] {
-      width: var(--dddk-palette-width, 720px); max-width: 90vw;
-      max-height: var(--dddk-palette-max-height, 80vh);
-      background: var(--dddk-bg-elevated, #fff);
+      width: var(--dddk-palette-width, 760px); max-width: 92vw;
+      max-height: var(--dddk-palette-max-height, 78vh);
+      background: var(--dddk-bg-elevated, #ffffff);
       color: var(--dddk-text, #1a1a1a);
-      border-radius: var(--dddk-radius, 12px);
-      box-shadow: var(--dddk-shadow-lg, 0 8px 32px rgba(0,0,0,0.15));
-      font-family: var(--dddk-font, system-ui, sans-serif);
+      border-radius: var(--dddk-radius, 18px);
+      border: 1px solid var(--dddk-border, rgba(0, 0, 0, 0.06));
+      box-shadow: var(--dddk-shadow-lg, 0 28px 72px -16px rgba(0, 0, 0, 0.38), 0 4px 18px rgba(0, 0, 0, 0.08));
+      font-family: var(--dddk-font, system-ui, -apple-system, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif);
       display: flex; flex-direction: column; overflow: hidden;
+      animation: dddk-palette-rise 200ms cubic-bezier(0.2, 0, 0, 1);
+    }
+    @keyframes dddk-palette-rise {
+      from { transform: translateY(8px) scale(0.985); opacity: 0; }
+      to   { transform: translateY(0)    scale(1);     opacity: 1; }
     }
     [${UI_ATTR}="palette-input-row"] {
       display: flex; align-items: center;
       padding-right: 14px;
+      border-bottom: 1px solid var(--dddk-border, rgba(0, 0, 0, 0.06));
     }
+    /* Back / close chrome shared with PanelRuntime — the panel skill
+       UI reuses the same input row so the user sees one continuous
+       palette experience, with a back arrow appearing only when
+       there's somewhere to go. */
+    [${UI_ATTR}="panel-back"],
+    [${UI_ATTR}="panel-close"] {
+      flex-shrink: 0;
+      width: 32px; height: 32px;
+      margin: 0 4px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: transparent;
+      color: var(--dddk-text-muted, #64748b);
+      border: 0;
+      border-radius: 8px;
+      font-size: 18px; line-height: 1;
+      cursor: pointer;
+      padding: 0;
+      transition: background 0.12s, color 0.12s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    [${UI_ATTR}="panel-back"] { margin-left: 8px; }
+    [${UI_ATTR}="panel-close"] { margin-right: 0; }
+    [${UI_ATTR}="panel-back"]:hover,
+    [${UI_ATTR}="panel-close"]:hover {
+      background: var(--dddk-row-hover, rgba(0, 0, 0, 0.06));
+      color: var(--dddk-text, #1a1a1a);
+    }
+    [${UI_ATTR}="panel-back"]:focus-visible,
+    [${UI_ATTR}="panel-close"]:focus-visible {
+      outline: 2px solid var(--dddk-accent, #6366f1);
+      outline-offset: 2px;
+    }
+    [${UI_ATTR}="panel-back"]:active,
+    [${UI_ATTR}="panel-close"]:active { transform: scale(0.94); }
     [${UI_ATTR}="palette-input"] {
-      border: 0; outline: 0; padding: 16px 20px;
-      font-size: var(--dddk-font-size-lg, 16px);
+      border: 0; outline: 0; padding: 18px 22px;
+      font-size: var(--dddk-font-size-lg, 16.5px);
+      font-weight: 400;
       background: transparent; color: inherit; width: 100%;
       flex: 1; min-width: 0;
+      letter-spacing: 0.002em;
+    }
+    [${UI_ATTR}="palette-input"]::placeholder {
+      color: var(--dddk-text-muted, #94a3b8);
+      font-weight: 400;
     }
     [${UI_ATTR}="palette-camera"] {
       flex-shrink: 0;
@@ -200,9 +248,15 @@ export function ensurePaletteStyles(): void {
       color: var(--dddk-palette-kbd-color, var(--dddk-text-muted, #71717a));
     }
     [${UI_ATTR}="palette-result"] {
-      padding: 18px 22px;
+      /* Zero internal padding — host content owns its own layout. The
+         outer palette shell provides the visual frame; custom panels
+         live edge-to-edge inside, so there's no "box inside a box"
+         feel when a host's split-view / image preview / chip grid
+         mounts here. Hosts that want padded content add their own
+         padding to the surface they emit (.dddk-panel-section etc). */
+      padding: 0;
       overflow-y: auto;
-      overscroll-behavior: contain;       /* don't propagate scroll to the page */
+      overscroll-behavior: contain;
       max-height: 60vh;
       flex: 1;
       font-size: var(--dddk-font-size-md, 14px);
@@ -341,6 +395,239 @@ export function ensurePaletteStyles(): void {
       font-weight: var(--dddk-palette-match-weight, 600);
     }
     @keyframes dddk-fade { from { opacity: 0; } to { opacity: 1; } }
+
+    /* ─────────────────────────────────────────────────────────────
+       Panel-surface utilities — opt-in classes hosts can compose
+       inside any palette result / panel runtime content area.
+       The point is to give custom UIs a consistent visual language
+       without each host writing its own CSS (or pulling Tailwind).
+       All classes use the dddk-panel- prefix so they never collide
+       with the host's own styles.
+       ───────────────────────────────────────────────────────────── */
+
+    /* Section — generous-padding container for prose / hero content. */
+    .dddk-panel-section {
+      padding: 18px 22px;
+    }
+    .dddk-panel-section + .dddk-panel-section {
+      border-top: 1px solid var(--dddk-border, rgba(0, 0, 0, 0.06));
+    }
+
+    /* Split — left rail (list) + right detail panel. */
+    .dddk-panel-split {
+      display: grid;
+      grid-template-columns: minmax(220px, 38%) 1fr;
+      min-height: 320px;
+    }
+    .dddk-panel-split > :first-child {
+      border-right: 1px solid var(--dddk-border, rgba(0, 0, 0, 0.06));
+      overflow-y: auto; min-height: 0;
+    }
+    .dddk-panel-split > :last-child {
+      overflow-y: auto; min-height: 0;
+    }
+    @media (max-width: 640px) {
+      .dddk-panel-split { grid-template-columns: 1fr; min-height: 240px; }
+      .dddk-panel-split > :first-child {
+        border-right: 0;
+        border-bottom: 1px solid var(--dddk-border, rgba(0, 0, 0, 0.06));
+      }
+    }
+
+    /* Section heading — small, muted, generous letter-spacing. */
+    .dddk-panel-section-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--dddk-text-muted, #64748b);
+      padding: 12px 16px 4px;
+    }
+
+    /* List rows — Raycast-style hoverable list. */
+    .dddk-panel-list {
+      list-style: none;
+      margin: 0;
+      padding: 4px 8px 8px;
+    }
+    .dddk-panel-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      color: var(--dddk-text, #1a1a1a);
+      transition: background 80ms ease;
+    }
+    .dddk-panel-row:hover {
+      background: var(--dddk-row-hover, rgba(0, 0, 0, 0.04));
+    }
+    .dddk-panel-row[data-active="true"] {
+      background: var(--dddk-row-active, rgba(0, 0, 0, 0.06));
+    }
+    .dddk-panel-row-icon {
+      flex: 0 0 28px;
+      width: 28px; height: 28px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 8px;
+      background: var(--dddk-bg-elevated, rgba(0, 0, 0, 0.04));
+      color: var(--dddk-text-muted, #64748b);
+      font-size: 13px;
+    }
+    .dddk-panel-row-icon img,
+    .dddk-panel-row-icon svg { width: 100%; height: 100%; border-radius: 8px; object-fit: cover; }
+    .dddk-panel-row-main {
+      flex: 1; min-width: 0;
+      display: flex; flex-direction: column;
+    }
+    .dddk-panel-row-title {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--dddk-text, #1a1a1a);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .dddk-panel-row-sub {
+      font-size: 12px;
+      color: var(--dddk-text-muted, #64748b);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+    .dddk-panel-row-meta {
+      font-size: 11.5px;
+      color: var(--dddk-text-muted, #64748b);
+      flex: 0 0 auto;
+      margin-left: 8px;
+    }
+
+    /* Detail panel — hero block + info table. */
+    .dddk-panel-detail {
+      padding: 22px 24px;
+      display: flex; flex-direction: column; gap: 18px;
+    }
+    .dddk-panel-detail-hero {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 160px;
+      border-radius: 12px;
+      background: var(--dddk-bg-elevated, rgba(0, 0, 0, 0.03));
+      overflow: hidden;
+    }
+    .dddk-panel-detail-hero img {
+      max-width: 100%; max-height: 240px; object-fit: contain;
+      border-radius: 12px;
+    }
+    .dddk-panel-detail-title {
+      font-size: 16px; font-weight: 600;
+      color: var(--dddk-text, #1a1a1a);
+      text-align: center;
+    }
+
+    /* Info table — key/value rows. */
+    .dddk-panel-info {
+      display: flex; flex-direction: column;
+      border-top: 1px solid var(--dddk-border, rgba(0, 0, 0, 0.06));
+      padding-top: 12px;
+    }
+    .dddk-panel-info-row {
+      display: flex; align-items: baseline; justify-content: space-between;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--dddk-border-subtle, rgba(0, 0, 0, 0.04));
+      font-size: 13px;
+    }
+    .dddk-panel-info-row:last-child { border-bottom: 0; }
+    .dddk-panel-info-key {
+      color: var(--dddk-text-muted, #64748b);
+      font-weight: 500;
+    }
+    .dddk-panel-info-value {
+      color: var(--dddk-text, #1a1a1a);
+      text-align: right;
+      max-width: 70%;
+      word-break: break-word;
+    }
+    .dddk-panel-info-value code {
+      font-family: var(--dddk-mono, ui-monospace, "SF Mono", Menlo, monospace);
+      font-size: 12.5px;
+      background: var(--dddk-row-hover, rgba(0, 0, 0, 0.05));
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+
+    /* Pill / tag chip. */
+    .dddk-panel-pill {
+      display: inline-flex; align-items: center;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: var(--dddk-row-hover, rgba(0, 0, 0, 0.06));
+      color: var(--dddk-text, #1a1a1a);
+      font-size: 12px;
+      font-weight: 500;
+      line-height: 1.4;
+    }
+    .dddk-panel-pill[data-tone="accent"] {
+      background: var(--dddk-accent-soft, rgba(99, 102, 241, 0.12));
+      color: var(--dddk-accent, #4f46e5);
+    }
+    .dddk-panel-pill[data-tone="success"] {
+      background: rgba(34, 197, 94, 0.12);
+      color: rgb(21, 128, 61);
+    }
+    .dddk-panel-pill[data-tone="warning"] {
+      background: rgba(245, 158, 11, 0.14);
+      color: rgb(180, 83, 9);
+    }
+
+    /* Card grid — responsive product / item gallery. */
+    .dddk-panel-card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 12px;
+      padding: 14px 16px 18px;
+    }
+    .dddk-panel-card {
+      display: flex; flex-direction: column; gap: 8px;
+      padding: 14px;
+      border-radius: 12px;
+      background: var(--dddk-bg-elevated, rgba(0, 0, 0, 0.02));
+      border: 1px solid var(--dddk-border, rgba(0, 0, 0, 0.06));
+      cursor: pointer;
+      transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+    }
+    .dddk-panel-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 24px -10px rgba(0, 0, 0, 0.2);
+      background: var(--dddk-row-hover, rgba(0, 0, 0, 0.04));
+    }
+    .dddk-panel-card-hero {
+      height: 96px;
+      border-radius: 8px;
+      background: var(--dddk-accent-soft, rgba(99, 102, 241, 0.1));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 28px;
+      color: var(--dddk-accent, #4f46e5);
+    }
+    .dddk-panel-card-title {
+      font-size: 14px; font-weight: 600;
+      color: var(--dddk-text, #1a1a1a);
+    }
+    .dddk-panel-card-sub {
+      font-size: 12.5px;
+      color: var(--dddk-text-muted, #64748b);
+      line-height: 1.5;
+    }
+
+    /* Empty state — for "no results" / first-time content. */
+    .dddk-panel-empty {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 8px;
+      padding: 48px 24px;
+      text-align: center;
+      color: var(--dddk-text-muted, #64748b);
+      font-size: 13.5px;
+    }
+    .dddk-panel-empty-icon {
+      font-size: 28px;
+      opacity: 0.5;
+    }
+
 
     /* ── Mobile / coarse-pointer overrides ─────────────────────────
        The default chrome (centered modal, keyboard-shortcut footer, 14px

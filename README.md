@@ -49,7 +49,9 @@
 <td width="45%" valign="top">
 
 - **DOM-grounded autonomous loop.** Reads the visible page, picks one tool at a time, narrates each step in the subtitle bar before it runs.
-- **19 built-in actions** — `navigate`, `click`, `fill_input`, `ask_user_choice`, and friends. Add your own; the LLM picks them.
+- **Indexed DOM dump.** Every actionable element gets a numeric `[N]` index; the LLM passes that index back instead of guessing CSS selectors. Viewport markers (`↑` / `↓`) tell it what the user can actually see.
+- **12 built-in actions** — `navigate`, `click`, `fill_input`, `ask_user_choice`, and friends. Add your own; the LLM picks them.
+- **Optional page screenshots.** Off by default; opt in with `screenshot: 'viewport'` or `'full-page'` (auto-split for tall pages) when the agent needs to comment on visual content the DOM dump can't convey.
 - **Space-gated every step.** Single tap accept · double-tap reject · Esc cancel. Users see what's about to happen *before* it happens.
 - **Asks back when ambiguous.** `ask_user_choice` for 2-4 options, `ask_user` for free text. No silent decisions, no guessing.
 - **Bring your own keys.** LLM via OpenAI, Google AI Studio, or a server-side `ProxyProvider`; per-role routing keeps cheap models on cleanup and the flagship on the agent loop. STT defaults to the browser's Web Speech for zero-setup; swap to Whisper or any vendor via one `transcribe(audio)` callback.
@@ -237,13 +239,15 @@ dotdotduck is in active development. It works, but expect rough edges. A few thi
 
 ### What the live demo runs (not bundled with the package)
 
-[dddk.perhapxin.com](https://dddk.perhapxin.com) is wired to a specific provider stack for the showcase. None of these are baked into `@perhapxin/dddk`:
+[dddk.perhapxin.com](https://dddk.perhapxin.com) doubles as dotdotduck's official landing page AND as the real-world test bed for the package — every release ships first to this site and gets exercised end-to-end before being tagged. The standing challenge: serve the demo well using the **smallest viable model** at each role, so the same recipe holds up when other teams adopt dddk on a cost budget. Expect the model picks below to keep shifting as smaller checkpoints catch up.
 
-- **WebAgent** loop → OpenAI `gpt-5.4`
-- **InlineAgent** + voice transcript cleanup → OpenAI `gpt-5.4-mini`
+Current stack:
+
+- **WebAgent** loop → OpenAI `gpt-5.4-mini`
+- **InlineAgent** + voice transcript cleanup → OpenAI `gpt-5.4-nano`
 - **Speech-to-text** → the browser's Web Speech API (the SDK default; fine for demo, no SLA — production hosts wire `transcribe` with Whisper / Deepgram / etc.)
 
-The package itself ships LLM provider adapters (OpenAI / Google / proxy) and a `transcribe(audio)` extension point. Bring your own keys, models, and ASR vendor — the SDK doesn't lock you in.
+None of this is baked into `@perhapxin/dddk`. The package itself ships LLM provider adapters (OpenAI / Google / proxy, plus any OpenAI-compatible vendor via `baseURL` — e.g. DeepSeek, Qwen, OpenRouter) and a `transcribe(audio)` extension point. Bring your own keys, models, and ASR vendor — the SDK doesn't lock you in.
 
 ## Documentation
 

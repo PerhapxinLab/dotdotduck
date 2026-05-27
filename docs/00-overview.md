@@ -12,7 +12,7 @@ You **never write UI** for any of this. `dotdotduck` ships its own palette, subt
 ## 30-second install
 
 ```bash
-npm install @perhapxin/dddk @perhapxin/webagent
+npm install @perhapxin/dddk
 ```
 
 ```ts
@@ -43,5 +43,5 @@ That's it. `Ctrl+K` works, voice works, Dwell works.
 
 - Don't write palette UI yourself — `dotdotduck` renders it.
 - Don't proxy events manually — register a palette item, dotdotduck fires its handler.
-- Don't roll your own DOM action layer — webagent has 19 built-in actions plus your custom ones.
+- Don't roll your own DOM action layer — webagent has 12 built-in actions plus your custom ones.
 - Don't ship API keys to the client bundle. Use `ProxyProvider` + a worker that holds the key. See the security guide in webagent.

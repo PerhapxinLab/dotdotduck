@@ -647,10 +647,14 @@ function ensureStyles(): void {
 
     /* Floating Action Button (FAB) — default mobile entry point.
        Hosts can fully override via MobileFABConfig.style or by passing
-       className and writing their own CSS. */
+       className and writing their own CSS.
+
+       z-index sits between the subtitle bar (9500) and the palette
+       (9700) so the FAB stays reachable while the agent's confirm /
+       pause bar is up, but the palette modal still wins when open. */
     [${UI_ATTR}="mobile-fab"] {
       position: fixed;
-      z-index: var(--dddk-z-bar, 9700);
+      z-index: 9650;
       background: var(--dddk-accent, #ec4899);
       color: var(--dddk-text-on-accent, #fff);
       border: 0;

@@ -63,17 +63,10 @@ export class AgentCursor {
     ensureStyles();
     this.mount();
 
-    // before_action: travel to target, hold for preClickPauseMs.
-    const beforeAction = async (payload: {
-      actionName: string;
-      params: Record<string, unknown>;
-      targetSelector?: string;
-    }) => {
+    // agent_tool_start: travel to target, hold for preClickPauseMs.
+    const onToolStart = async (payload: { name: string; args: Record<string, unknown>; targetSelector?: string }) => {
       if (!this.enabled) return;
-      if (!payload.targetSelector) {
-        // No DOM target (e.g. `wait`, `done`) — leave cursor where it is.
-        return;
-      }
+      if (!payload.targetSelector) return;
       const el = document.querySelector<HTMLElement>(payload.targetSelector);
       if (!el) return;
       const rect = el.getBoundingClientRect();
@@ -84,45 +77,27 @@ export class AgentCursor {
       await this.wait(this.cfg.preClickPauseMs);
     };
 
-    // step: brief "click" pulse animation on completion.
-    const onStep = () => {
+    // agent_tool_end: brief click pulse animation.
+    const onToolEnd = (): void => {
       if (!this.enabled || !this.cursorEl) return;
       this.cursorEl.classList.remove('clicking');
-      // Force reflow to restart animation.
       void this.cursorEl.offsetHeight;
       this.cursorEl.classList.add('clicking');
     };
 
-    const onDone = () => this.hide();
-    const onError = () => this.hide();
+    const onFinal = (): void => this.hide();
+    const onError = (): void => this.hide();
 
-    const agent = dddk.getAgent?.();
-    // Subscribe via dddk forwarding if available, else direct.
-    // dddk forwards subtitle/ask_user etc. but not before_action — wire direct.
-    // We attach lazily once an agent instance exists; rewire on `agent_start`.
-    const wireAgent = () => {
-      const a = dddk.getAgent();
-      if (!a) return;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (a as any).on('before_action', beforeAction);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (a as any).on('step', onStep);
-      a.on('done', onDone);
-      a.on('error', onError);
-      this.cleanups.push(() => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (a as any).off?.('before_action', beforeAction);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (a as any).off?.('step', onStep);
-        a.off?.('done', onDone);
-        a.off?.('error', onError);
-      });
-    };
-
-    if (agent) wireAgent();
-    const onAgentStart = () => wireAgent();
-    dddk.on('agent_start', onAgentStart);
-    this.cleanups.push(() => dddk.off('agent_start', onAgentStart));
+    dddk.on('agent_tool_start', onToolStart);
+    dddk.on('agent_tool_end', onToolEnd);
+    dddk.on('agent_final', onFinal);
+    dddk.on('agent_error', onError);
+    this.cleanups.push(
+      () => dddk.off('agent_tool_start', onToolStart),
+      () => dddk.off('agent_tool_end', onToolEnd),
+      () => dddk.off('agent_final', onFinal),
+      () => dddk.off('agent_error', onError),
+    );
   }
 
   setEnabled(enabled: boolean): void {

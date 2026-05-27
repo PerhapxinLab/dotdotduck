@@ -118,7 +118,18 @@ export async function* streamGemini(args: {
   let buf = '';
 
   while (true) {
-    const { done, value } = await reader.read();
+    let done = false;
+    let value: Uint8Array | undefined;
+    try {
+      const r = await reader.read();
+      done = r.done;
+      value = r.value;
+    } catch (err) {
+      // User aborted the stream — surface as a clean exit so the loop
+      // can wind down without an unhandled rejection.
+      if ((err as Error).name === 'AbortError') return;
+      throw err;
+    }
     if (done) break;
     buf += decoder.decode(value, { stream: true });
     const lines = buf.split('\n');

@@ -12,7 +12,7 @@ import {
   WebAgent,
   clearOverlays as clearWebagentOverlays,
   type WebAgentConfig,
-  type AgentSession,
+  type AgentEvent,
   type SelectionContext,
 } from './agent';
 import type { LLMSource } from './agent/llm/router';
@@ -132,8 +132,29 @@ export interface DotDotDuckConfig {
   /** Per-host storage (for clipboard history, recent commands, etc.). Defaults to localStorage. */
   storage?: StorageAdapter;
 
-  /** Host route navigation callback (for SPA-friendly nav). */
-  onNavigate?: (path: string) => void;
+  /** Host route navigation callback (for SPA-friendly nav). Hosts whose
+   *  router returns a Promise (e.g. SvelteKit's `goto(path)`) should
+   *  return that Promise so the agent knows when the page render
+   *  completes before reading the new DOM. */
+  onNavigate?: (path: string) => void | Promise<void>;
+
+  /**
+   * Custom renderer for PanelSkill surfaces. When a PanelSkill calls
+   * `ctx.render(surface)`, the runtime hands the surface to this
+   * function which paints it into the panel content area. Use this to
+   * support host-defined surface shapes (rich HTML, framework components,
+   * piece schemas). When omitted, the runtime renders nothing — the
+   * skill is responsible for any DOM via other side-effects.
+   *
+   * The `onAction(actionName, data)` callback wires user gestures
+   * (clicks on `[data-dddk-action]` elements) back to the skill's
+   * `onAction` handler.
+   */
+  panelRenderPiece?: (
+    container: HTMLElement,
+    surface: unknown,
+    onAction: (action: string, data: unknown) => void,
+  ) => void;
 
   /** Override gesture key (legacy 'ctrl' for migration). Default 'space'. */
   gestureKey?: 'space' | 'ctrl';
@@ -200,39 +221,16 @@ export interface DotDotDuckConfig {
   };
 
   /**
-   * Auto-hide policy for SDK-emitted agent summary / error subtitles
-   * (the ones the orchestrator's built-in `agent.on('done')` and
-   * `agent.on('error')` handlers surface). Pass:
-   *  - `0` or omit (default) — sticky; user dismisses on their own pace
-   *  - milliseconds — auto-hide after this many ms
+   * Auto-hide policy for the streaming subtitle bar AFTER the agent's
+   * final paragraph has fully streamed in (`AgentEvent kind: 'final'`).
+   * Pass:
+   *  - `0` or omit — uses the SDK default (12s).
+   *  - milliseconds — auto-hide after this many ms once finalized.
    *
-   * Hosts that want different behaviour per type (e.g. error sticky,
-   * summary auto-hide) pass an object. Hosts that subscribe to the
-   * underlying agent events themselves and render their own subtitle
-   * can skip this entirely.
+   * Errors that abort the run get a separate `error` slot — same
+   * config shape if you pass an object.
    */
   agentSubtitleAutoHideMs?: number | { summary?: number; error?: number };
-
-  /**
-   * Force every SDK-emitted agent subtitle (done summary / error) into
-   * a Space-gated `agent` bar with accept / reject buttons. Default
-   * `false` — done summary uses plain `info` (any-key dismiss, no
-   * satisfaction signal).
-   *
-   * Set `true` when you want:
-   *  1. **Explicit dismiss** — no accidental dismissal, the user has
-   *     to press Space (accept) or double-tap Space (reject).
-   *  2. **Satisfaction signal** — accept / reject emits an
-   *     `agent_feedback` intent (`satisfied: true | false | null`)
-   *     so the host can measure agent quality from the intent stream.
-   *  3. **Continuity hook** — onAccept becomes the natural place to
-   *     queue the next agent turn (e.g. "ask a follow-up").
-   *
-   * Per the dddk-frontend's demo guidance: prefer gated subtitles
-   * over silent text. The SDK keeps the plain-text path available
-   * for embedded / dashboard contexts where Space isn't reachable.
-   */
-  gateAgentSubtitles?: boolean;
 }
 
 export class DotDotDuck {
@@ -326,6 +324,16 @@ export class DotDotDuck {
     };
     const running = resolveIndicator(config.indicators?.running);
     if (running) this.subtitle.setRunningLabel(running);
+    // Wire the × close button on the subtitle bar to:
+    //   1. stop a running agent (with stopped-feedback subtitle)
+    //   2. fire gesture_escape so a running ScriptSkill cancels too
+    //      (its `waitForAcceptOrEscape` listens on this event; without
+    //      this hook a click-outside during a script just hid the
+    //      subtitle and the NEXT step's subtitle would silently appear)
+    this.subtitle.setCloseHandler(() => {
+      this.handleUserStopAgent('close');
+      this.emitter.emit('gesture_escape', undefined);
+    });
     this.storage = config.storage ?? defaultStorage();
     this.prefs = new PreferenceStore(this.storage, this.config.locale);
     this.voiceEnabled = config.voice?.enabled ?? true;
@@ -403,12 +411,18 @@ export class DotDotDuck {
       },
       onReject: () => {
         this.emitter.emit('gesture_reject', undefined);
-        // Double-tap Space is the canonical "no / dismiss" gesture. We
-        // fire onReject (so analytics differentiate yes from no) AND
-        // auto-hide if no reject handler was registered (info subtitles
-        // with no real "no" semantic — they just need to go away).
         const hadReject = this.subtitle.invokeReject();
-        if (!hadReject) this.subtitle.hide();
+        // If the subtitle had its own reject (e.g. confirm dialog: "no"),
+        // that handler already fired and the bar is gone. If not, this
+        // is a "user dismissed the agent" double-tap — stop the loop
+        // with a polished feedback line.
+        if (!hadReject) {
+          if (this.agentInstance?.isRunning()) {
+            this.handleUserStopAgent('reject');
+          } else {
+            this.subtitle.hide();
+          }
+        }
         this.emitIntent({ kind: 'agent_answered', answer: 'reject', via: 'gesture', timestamp: Date.now() });
       },
       onAcceptLine: () => {
@@ -417,6 +431,10 @@ export class DotDotDuck {
       },
       onVoiceStart: () => {
         if (!this.voiceEnabled) return;
+        // Long-press space while agent is running = "I have a new
+        // prompt to say". Stop the current agent loop cleanly first,
+        // then let voice take over.
+        this.handleUserStopAgent('voice');
         this.emitter.emit('voice_start', undefined);
       },
       onVoiceEnd: () => {
@@ -425,15 +443,27 @@ export class DotDotDuck {
       },
       onPaletteToggle: (selection) => {
         this.currentSelection = selection ? this.captureSelection(selection) : null;
+        // Opening the palette signals "I want to type a new prompt" —
+        // stop the agent so the next message is a clean start, not a
+        // race with the in-flight loop.
+        this.handleUserStopAgent('palette');
         this.emitter.emit('palette_open', { selection });
         this.palette.toggle(selection);
       },
       onEscape: () => {
         this.emitter.emit('gesture_escape', undefined);
-        // Esc closes palette / unlocks spotter only. Subtitles are
-        // dismissed via double-tap Space (routes through onReject →
-        // both the reject callback and the dismiss happen), or via
-        // click / any-key for info-type subtitles.
+        // PanelRuntime owns Esc when a panel skill is open — esc
+        // means "go back one step / close this panel", NOT "stop
+        // the agent" / "close the palette". Bail before any of the
+        // cross-cutting stop handlers fire.
+        if (this.panelRuntime?.isOpen()) return;
+        // Palette owns Esc when it's in result-mode or a sub-menu —
+        // esc means "back one level" there, not "close the whole
+        // palette". Let the palette's own keydown handler take care
+        // of it. (Palette's plain list mode still falls through to
+        // the close() call below.)
+        if (this.palette.hasInternalEsc()) return;
+        this.handleUserStopAgent('esc');
         this.palette.close();
         this.spotter.unlock();
       },
@@ -456,6 +486,16 @@ export class DotDotDuck {
     this.subtitle.setVisibilityListener((visible) => {
       gestures.hasSuggestion = visible;
     });
+
+    // Touch-tap relay: the subtitle bar's internal touch handler emits
+    // DOM events instead of calling invokeAccept/Reject directly, so
+    // we can run the SAME full pipeline desktop Space goes through —
+    // emit `gesture_accept` for script skills, log intent, etc.
+    const onBarTapAccept = (): void => this.triggerAccept();
+    const onBarTapReject = (): void => this.triggerReject();
+    document.addEventListener('dddk:bar-tap-accept', onBarTapAccept);
+    document.addEventListener('dddk:bar-tap-reject', onBarTapReject);
+
     // NOTE: Spotter is NOT auto-started. Its hover-ring fires on plain
     // mousemove and would shadow every paragraph on a text-rich page. Hosts
     // that need it call `dddk.spotter.start()` themselves.
@@ -578,9 +618,21 @@ export class DotDotDuck {
     if (typeof document === 'undefined') return false;
     this.clearHighlight();
     ensureDwellStyles();
-    const el = typeof target === 'string'
-      ? document.querySelector<HTMLElement>(target)
-      : target;
+    // String input is treated as a CSS selector. The querySelector call
+    // throws SyntaxError on invalid syntax (e.g. a bare numeric agent
+    // index like "13") — swallow it instead of letting the pump die.
+    // Callers that have a numeric index from the indexed DOM dump should
+    // resolve via `WebAgent.resolveSelector(...)` first.
+    let el: HTMLElement | null;
+    if (typeof target === 'string') {
+      try {
+        el = document.querySelector<HTMLElement>(target);
+      } catch {
+        return false;
+      }
+    } else {
+      el = target;
+    }
     if (!el) return false;
     // Clear any pre-existing frame (Dwell pin, prior highlight) — we own
     // the attribute now.
@@ -623,16 +675,12 @@ export class DotDotDuck {
             ? async (prompt: string) => {
                 const llm = this.config.llm;
                 if (!llm) return '';
-                // Use the simplest interface: feed the prompt as a single user turn.
                 const r = await (llm as { complete?: (p: string) => Promise<string> }).complete?.(prompt);
                 return r ?? '';
               }
             : undefined,
           navigate: (path: string) => this.navigate(path),
-          renderPiece: undefined,
-          // Hosts that want richer rendering can swap in their own PieceRenderer-backed
-          // implementation by listening to `panel_render` and rendering themselves —
-          // see docs/toolbox/06-proactive.md for the same pattern via surface events.
+          renderPiece: this.config.panelRenderPiece,
         },
       });
     }
@@ -739,7 +787,7 @@ export class DotDotDuck {
             ? `${task}\n\n[Attachments]\n${meta}`
             : task;
           const sel: SelectionContext = { ...(selection ?? {}), images };
-          this.agentInstance?.run(augmentedTask, { selection: sel });
+          this.runAgentStream(augmentedTask, { selection: sel });
           this.emitter.emit('agent_start', { task: augmentedTask });
           // Clear once consumed — host can re-attach for next run.
           this.palette.clearAttachments();
@@ -751,14 +799,127 @@ export class DotDotDuck {
           // image, or FileReader denied by privacy policy.)
           console.warn('[dddk] failed to attach palette images, running without:', err);
           this.emitter.emit('agent_start', { task });
-          this.agentInstance?.run(task, selection ? { selection } : {});
+          this.runAgentStream(task, selection ? { selection } : {});
           this.palette.clearAttachments();
         });
       return;
     }
 
     this.emitter.emit('agent_start', { task });
-    this.agentInstance.run(task, selection ? { selection } : {});
+    this.runAgentStream(task, selection ? { selection } : {});
+  }
+
+  private runAgentStream(task: string, opts: { selection?: SelectionContext } = {}): void {
+    const agent = this.agentInstance;
+    if (!agent) return;
+    void this.pumpAgentStream(agent.runStream(task, opts));
+  }
+
+  /** Resume a saved session — used by the host's onMount after a full
+   *  page reload. If there's no saved session or it's in a terminal
+   *  state, no-ops. Otherwise pumps the stream into the dddk UI as if
+   *  the loop had never been interrupted. */
+  resumeAgent(): void {
+    if (!this.agentEnabled) return;
+    if (!this.config.llm) return;
+    if (!this.agentInstance) this.agentInstance = this.buildAgent();
+    void this.pumpAgentStream(this.agentInstance.resumeStream());
+  }
+
+  /** Tell the agent that its continuity window should close now (used
+   *  for `sessionScope: 'palette'` hosts when the palette closes). */
+  endAgentContinuity(): void {
+    this.agentInstance?.endContinuity();
+  }
+
+  /** Wipe any saved agent session — the next `runStream()` starts
+   *  fresh. Hosts call this after a full page reload to drop an
+   *  abandoned conversation from the previous load. */
+  clearAgentSession(): void {
+    this.agentInstance?.clearSession();
+  }
+
+  /** Stop a running agent and clear its on-screen UI. Safe to call
+   *  when the agent is idle (no-ops). Use this when the host wants to
+   *  cancel mid-task — e.g. the user clicked an in-app link / sidebar
+   *  entry, signalling they're moving on regardless of where the
+   *  agent thinks it is. */
+  stopAgent(): void {
+    this.handleUserStopAgent('close');
+  }
+
+  /**
+   * Fire the same "accept" gesture that single-tap Space fires on
+   * desktop — emits `gesture_accept`, advances script skills waiting
+   * on it, advances streaming pause hints, accepts confirm dialogs,
+   * etc. Use this from a mobile FAB tap or any host-built "next"
+   * button so touch users get the full Space-equivalent pipeline,
+   * not just `subtitle.invokeAccept()` (which alone misses script
+   * skills + intent analytics).
+   */
+  triggerAccept(): void {
+    this.emitter.emit('gesture_accept', undefined);
+    this.subtitle.invokeAccept();
+    this.emitIntent({ kind: 'agent_answered', answer: 'accept', via: 'gesture', timestamp: Date.now() });
+  }
+
+  /**
+   * Fire the same "reject" gesture that double-tap Space fires on
+   * desktop — emits `gesture_reject`, exits script skills, rejects
+   * confirms, or stops an in-flight agent. Use this from a mobile
+   * double-tap on the FAB / subtitle bar.
+   */
+  triggerReject(): void {
+    this.emitter.emit('gesture_reject', undefined);
+    const hadReject = this.subtitle.invokeReject();
+    if (!hadReject) {
+      if (this.agentInstance?.isRunning()) {
+        this.handleUserStopAgent('reject');
+      } else {
+        this.subtitle.hide();
+      }
+    }
+    this.emitIntent({ kind: 'agent_answered', answer: 'reject', via: 'gesture', timestamp: Date.now() });
+  }
+
+  /**
+   * Cross-cutting "stop the agent now" handler. Reasons:
+   *   - `close`: user clicked the × on the subtitle bar
+   *   - `esc`: Escape key while agent was running
+   *   - `palette`: user opened the command palette (which means they
+   *     want to send a new prompt)
+   *   - `reject`: user double-tapped Space to reject
+   *   - `voice`: user long-pressed Space to start a new voice prompt
+   *
+   * Surfaces a brief "stopped — say something new" subtitle so the user
+   * knows their gesture worked and the agent is safely halted. Skipped
+   * if the agent wasn't running (avoids "stopped" flashing on idle).
+   */
+  private handleUserStopAgent(reason: 'close' | 'esc' | 'palette' | 'reject' | 'voice'): void {
+    const agent = this.agentInstance;
+    if (!agent || !agent.isRunning()) return;
+    // `palette` / `voice` are interruptions that come WITH a new prompt
+    // attached — the user wants to redirect mid-task, not abandon the
+    // conversation. Soft-stop so the next runStream() appends as a
+    // follow-up turn even when `sessionContinuityMs: 0`. Other reasons
+    // (× / Esc / double-tap reject) are explicit abandons → hard stop.
+    if (reason === 'palette' || reason === 'voice') {
+      agent.interruptForFollowup();
+    } else {
+      agent.stop();
+    }
+    this.subtitle.clearStreamed();
+    this.subtitle.hideIndicator();
+    this.clearHighlight();
+    clearWebagentOverlays();
+    // Voice + palette have their own next UI (mic indicator / palette
+    // open) — don't double-up with a stopped subtitle that immediately
+    // gets replaced. Close / esc / reject show the feedback line.
+    if (reason === 'voice' || reason === 'palette') return;
+    const key = reason === 'close' ? 'agent.stop_close'
+      : reason === 'esc' ? 'agent.stop_esc'
+      : 'agent.stop_reject';
+    this.subtitle.show({ text: sdkString(this.config.locale, key), type: 'info', autoHide: 2500 });
   }
 
   /** Runtime toggle for voice (hold-space STT gesture). */
@@ -834,8 +995,6 @@ export class DotDotDuck {
 
   private buildAgent(): WebAgent {
     // Collect opted-in palette commands → expose as webagent custom actions.
-    // This is the "palette as agent tool" mechanism. Items are exposed only
-    // if they declare `agentTool: {...}` — default is NOT exposed (safer).
     const paletteTools = this.collectPaletteTools();
     // Host-registered tools via `dddk.tools.register(...)` / `registerQA(...)`.
     // Snapshot is one-shot for the initial customActions set; tools registered
@@ -855,274 +1014,89 @@ export class DotDotDuck {
       ],
     });
 
-    // Intercept ALL webagent events → route to dddk UI layer.
-    agent.on('subtitle', (text) => {
-      this.subtitle.show({
-        text,
-        type: 'agent',
-        onAccept: () => agent.respond('continue'),
-        onReject: () => agent.stop(),
-        onCancel: () => agent.stop(),
-      });
-    });
+    // Host router bridge — webagent emits `navigated` events; this
+    // callback also drives the SPA goto (the agent's own code calls
+    // this BEFORE the SPA settle window).
+    agent.setNavigateBridge((path: string) => this.navigate(path));
 
-    // Real-time "agent is doing X" feedback. Without this, the user clicks
-    // "Ask AI" and sees nothing on screen until the loop ends — they assume
-    // the agent silently bailed. Showing each action as it fires (`navigate
-    // → /docs`, `scroll_to .pricing`, …) makes the agent's intent legible
-    // and lets the user catch and stop it if it heads the wrong way.
-    //
-    // Destructive actions still go through the separate `confirm_action`
-    // flow below (which blocks until the user decides). before_action is
-    // ONLY for visibility on routine ops — never blocks.
-    //
-    agent.on('before_action', (payload) => {
-      // No mid-screen pill here — the per-step border around the target
-      // plus the confirm_action subtitle (in interactive mode) carry the
-      // narration. Hosts that want a pill can listen to before_action
-      // themselves and call subtitle.showIndicator.
-      if (payload.targetSelector) {
-        // Frame the action target the same way Dwell frames a long-pressed
-        // element — visual continuity so the user sees what the agent is
-        // about to touch. The next action's frame replaces this one;
-        // `done` / `error` events clear the final frame.
-        this.highlightElement(payload.targetSelector);
-      }
-    });
-    // After each step completes, hide the action pill and clear the
-    // per-step border so visuals don't bleed into the next step.
-    agent.on('step', () => {
-      this.subtitle.hideIndicator();
-      clearWebagentOverlays();
-      // Don't clear `highlightElement` here — the border framing IS the
-      // user's visual anchor for what just happened. It clears on the
-      // next before_action (which immediately reframes the new target)
-      // or on `done` / `error`.
-    });
-
-    agent.on('ask_user', ({ question }) => {
+    // ask_user / ask_user_choice are dispatched via the action handler;
+    // the handler calls back into these to render the host UI.
+    agent.setAskUserHandler(({ question, resolve }) => {
       this.emitIntent({ kind: 'agent_asked', question, timestamp: Date.now() });
       this.subtitle.show({
         text: question,
         type: 'agent',
-        hints: 'space 同意 ｜ 雙擊 space 拒絕 ｜ 或輸入後 ctrl+space',
         onAccept: () => {
           this.emitIntent({ kind: 'agent_answered', question, answer: 'yes', via: 'gesture', timestamp: Date.now() });
-          agent.respond('yes');
+          resolve('yes');
         },
         onReject: () => {
           this.emitIntent({ kind: 'agent_answered', question, answer: 'no', via: 'gesture', timestamp: Date.now() });
-          agent.respond('no');
+          resolve('no');
         },
-        onCancel: () => agent.stop(),
+        onCancel: () => resolve(''),
       });
     });
 
-    // Multi-choice variant — the agent asks for ONE of N options. We
-    // render via Subtitle.showChoice (click / digit-key / free-text).
-    // The chosen string flows back via agent.respond. `agent_answered`
-    // intent uses the option index when canonical, or `'free-text'`
-    // when the user typed into the Other slot.
-    agent.on('ask_user_choice', (payload) => {
-      this.emitIntent({ kind: 'agent_asked', question: payload.question, timestamp: Date.now() });
+    agent.setAskUserChoiceHandler(({ question, options, allowFreeText, resolve }) => {
+      this.emitIntent({ kind: 'agent_asked', question, timestamp: Date.now() });
       this.subtitle.showChoice({
-        question: payload.question,
-        options: payload.options,
-        allowFreeText: payload.allowFreeText,
+        question,
+        options,
+        allowFreeText,
         onChoose: (value, index) => {
           this.emitIntent({
             kind: 'agent_answered',
-            question: payload.question,
+            question,
             answer: value,
             via: index === -1 ? 'text' : 'gesture',
             timestamp: Date.now(),
           });
-          agent.respond(value);
+          resolve(value);
         },
-        onCancel: () => agent.stop(),
+        onCancel: () => resolve(''),
       });
     });
 
-    // confirm_action fires before EVERY action in step-mode (or just
-    // destructive ones otherwise). Frame the target element so the user
-    // can SEE what's about to be touched, then surface a subtitle bar
-    // asking for confirmation. Reject (double-tap) stops the agent.
-    agent.on('confirm_action', (payload) => {
-      // Find a target selector to frame (most action params include
-      // selector / target / element / path).
-      const targetSelector =
-        (typeof payload.params.selector === 'string' ? payload.params.selector : null) ??
-        (typeof payload.params.target   === 'string' ? payload.params.target   : null) ??
-        (typeof payload.params.element  === 'string' ? payload.params.element  : null);
-      if (targetSelector) {
-        this.highlightElement(targetSelector);
+    // `pause` is the narrator's mid-stream beat. We DON'T spawn a
+    // separate prompt subtitle — that would wipe the text the agent
+    // just streamed. Instead, attach a "press space to continue" hint
+    // to the existing streaming bar so the text remains visible while
+    // the user reads. If for some reason there's no streaming bar
+    // active (e.g. agent called pause as its first action), fall back
+    // to a regular ask_user-style prompt so the gesture still works.
+    agent.setPauseHandler(({ hint, resolve }) => {
+      if (this.subtitle.isStreaming()) {
+        this.subtitle.applyStreamingPauseHint({
+          hint,
+          onAccept: () => {
+            // Wipe the streamed text so the NEXT subject starts in a
+            // clean bar. Each subject in the walkthrough is its own
+            // paragraph; accumulating across subjects makes the bar
+            // read as one tangled wall-of-text. (The streaming bar el
+            // itself stays mounted so the next text-delta appends
+            // smoothly with no visible flicker.)
+            this.subtitle.replaceStreamed('');
+            resolve('continue');
+          },
+          onReject: () => {
+            resolve('');
+            this.handleUserStopAgent('reject');
+          },
+        });
       } else {
-        this.clearHighlight();
+        // No streaming bar — fall back to the regular agent prompt.
+        this.subtitle.show({
+          text: hint,
+          type: 'agent',
+          onAccept: () => resolve('continue'),
+          onReject: () => {
+            resolve('');
+            this.handleUserStopAgent('reject');
+          },
+          onCancel: () => resolve(''),
+        });
       }
-      this.subtitle.show({
-        text: payload.message,
-        type: 'agent',
-        onAccept: () => {
-          this.emitIntent({ kind: 'confirm_action', actionName: payload.actionName, params: payload.params, approved: true, timestamp: Date.now() });
-          payload.decide(true);
-        },
-        onReject: () => {
-          this.emitIntent({ kind: 'confirm_action', actionName: payload.actionName, params: payload.params, approved: false, timestamp: Date.now() });
-          this.clearHighlight();
-          payload.decide(false);
-        },
-        onCancel: () => {
-          this.clearHighlight();
-          payload.decide(false);
-        },
-      });
-    });
-
-    agent.on('piece_surface', ({ surface, placement }) => {
-      // Forward to dddk's `surface` event — host listens and renders via
-      // PieceRenderer. Map webagent's PiecePlacement (`'center' | 'inline'
-      // | 'dock'`) to dddk's SurfacePlacement: 'center' → 'modal',
-      // 'inline' → 'subtitle'.
-      const mapped: import('./skills/types').SurfacePlacement =
-        placement === 'inline' ? 'subtitle'
-        : placement === 'center' ? 'modal'
-        : placement;
-      this.emitter.emit('surface', { surface, placement: mapped });
-    });
-
-    agent.on('navigate', ({ path }) => this.navigate(path));
-
-    // The "thinking" indicator shows once at the start of a run, then
-    // hides until done/error so it can show again on the next run().
-    // After step 1 the subtitle / border / per-step confirmations
-    // carry the visual narrative — re-flashing every step would just
-    // obscure the page underneath.
-    let indicatorShownThisRun = false;
-    const thinkingLabel =
-      this.resolveIndicatorOverride('processing')
-      ?? sdkString(this.config.locale, 'agent.thinking');
-
-    // Watchdog — while a "thinking" indicator is up we periodically check
-    // `agent.isRunning()` directly. If the agent stopped without emitting
-    // a terminal status (interrupted, callback never fired, page changed
-    // mid-loop), the indicator clears on its own. Same principle as the
-    // selection fix: query live state instead of trusting cached
-    // notifications. See [[feedback-selection-no-cache]].
-    let watchdog: ReturnType<typeof setInterval> | null = null;
-    const startWatchdog = () => {
-      if (watchdog) return;
-      watchdog = setInterval(() => {
-        if (!agent.isRunning()) {
-          stopWatchdog();
-          this.subtitle.hideIndicator();
-          indicatorShownThisRun = false;
-        }
-      }, 600);
-    };
-    const stopWatchdog = () => {
-      if (watchdog) { clearInterval(watchdog); watchdog = null; }
-    };
-
-    agent.on('status', (status) => {
-      if (status === 'thinking' && !indicatorShownThisRun) {
-        this.subtitle.showIndicator('processing', thinkingLabel);
-        indicatorShownThisRun = true;
-        startWatchdog();
-      } else if (status === 'thinking') {
-        // Subsequent thinking turns — silently. The user already knows.
-      } else if (status === 'executing') {
-        // Executing has its own UI (border frame + confirm subtitle in
-        // interactive mode). No indicator needed.
-        this.subtitle.hideIndicator();
-        stopWatchdog();
-      } else {
-        // idle / done / failed / waiting — hide the indicator. Reset the
-        // flag only when the run truly ended (done/failed), so a brief
-        // "waiting" status (between confirm prompts) doesn't re-arm.
-        this.subtitle.hideIndicator();
-        stopWatchdog();
-        if (status === 'done' || status === 'failed') {
-          indicatorShownThisRun = false;
-        }
-      }
-    });
-
-    const summaryHideMs = this.resolveAgentAutoHide('summary');
-    const errorHideMs = this.resolveAgentAutoHide('error');
-    const gated = this.config.gateAgentSubtitles === true;
-
-    agent.on('done', (session: AgentSession) => {
-      stopWatchdog();
-      this.subtitle.hideIndicator();
-      if (!session.summary) {
-        // Silent completion — surface a brief "✓ 執行完畢" pip so the
-        // user sees the run ended (otherwise the spinner just vanishes
-        // mid-air with no closure). 2s feels long enough to register
-        // without nagging.
-        const doneLabel = sdkString(this.config.locale, 'agent.done');
-        this.subtitle.showIndicator('done', doneLabel);
-        setTimeout(() => this.subtitle.hideIndicator(), 2000);
-      }
-      if (session.summary) {
-        // Two delivery modes:
-        //  - Plain `info` (default): the user dismisses by clicking
-        //    anywhere or pressing any non-Space key. No satisfaction
-        //    signal captured.
-        //  - `gated` (config.gateAgentSubtitles === true): mount as
-        //    `agent` type with Space accept / double-Space reject.
-        //    Accept emits a `feedback` intent with `satisfied: true`,
-        //    reject emits `satisfied: false`. Hosts wired into the
-        //    intent stream can measure agent quality + use it as the
-        //    canonical "next agent turn" hook.
-        if (gated) {
-          const summary = session.summary;
-          this.subtitle.show({
-            text: summary,
-            type: 'agent',
-            onAccept: () => {
-              this.emitIntent({ kind: 'agent_feedback', satisfied: true, summary, timestamp: Date.now() });
-            },
-            onReject: () => {
-              this.emitIntent({ kind: 'agent_feedback', satisfied: false, summary, timestamp: Date.now() });
-            },
-            onCancel: () => {
-              this.emitIntent({ kind: 'agent_feedback', satisfied: null, summary, timestamp: Date.now() });
-            },
-            ...(summaryHideMs > 0 ? { autoHide: summaryHideMs } : {}),
-          });
-        } else {
-          this.subtitle.show({
-            text: session.summary,
-            type: 'info',
-            ...(summaryHideMs > 0 ? { autoHide: summaryHideMs } : {}),
-          });
-        }
-      }
-      // If the host configured auto-hide, also clear the highlight /
-      // overlays at the same time so the agent's framing doesn't
-      // outlive its summary.
-      if (summaryHideMs > 0) {
-        setTimeout(() => {
-          this.clearHighlight();
-          clearWebagentOverlays();
-        }, summaryHideMs);
-      }
-    });
-
-    agent.on('error', (err) => {
-      stopWatchdog();
-      this.subtitle.hideIndicator();
-      this.subtitle.show({
-        text: `Agent 錯誤：${err.message}`,
-        type: gated ? 'agent' : 'info',
-        ...(gated ? {
-          onAccept: () => { /* acknowledge — clears subtitle via the running indicator path */ },
-          onReject: () => { /* same — error has no continue semantics */ },
-        } : {}),
-        ...(errorHideMs > 0 ? { autoHide: errorHideMs } : {}),
-      });
-      this.clearHighlight();
-      clearWebagentOverlays();
     });
 
     // Attach the live agent to the tools registry so any future
@@ -1131,6 +1105,190 @@ export class DotDotDuck {
     this.tools.attachAgent(agent);
 
     return agent;
+  }
+
+  // ─── agent event pump ──────────────────────────────────────────
+  /**
+   * Consume the agent's AsyncIterable<AgentEvent> stream and route each
+   * event to its dddk UI slot:
+   *
+   *   thinking     → showIndicator('processing')
+   *   text-delta   → subtitle.appendStreamed(delta) (cancels the indicator)
+   *   tool-start   → frame target element, hide indicator
+   *   tool-end     → no-op (next text-delta or next tool-start carries the visual)
+   *   confirm      → subtitle.show with onAccept / onReject calling decide()
+   *   navigated    → clear overlays (the bridge already moved the router)
+   *   final        → finalizeStreamed with autoHide
+   *   error        → subtitle.show error
+   *
+   * The async `for await` loop runs in the background — the host's
+   * `startAgent()` returns synchronously, and event handlers on the
+   * orchestrator (gestures, palette, voice) keep firing throughout.
+   */
+  private async pumpAgentStream(stream: AsyncIterable<AgentEvent>): Promise<void> {
+    const thinkingLabel =
+      this.resolveIndicatorOverride('processing')
+      ?? sdkString(this.config.locale, 'agent.thinking');
+    const finalAutoHide = this.resolveAgentAutoHide('summary');
+
+    // Universal "agent is no longer running" cleanup. Fires on:
+    //   - natural completion (final / error)
+    //   - exception inside the pump
+    //   - external `agent.stop()` (stream exits with signal aborted)
+    //   - any other path that ends the for-await
+    // Symptom we're guarding against: thinking indicator camping on
+    // screen after the agent halted via click-outside / palette open /
+    // long-press voice / esc. ANY stop reason should clear it.
+    const safeCleanup = (): void => {
+      this.subtitle.hideIndicator();
+      this.clearHighlight();
+      clearWebagentOverlays();
+    };
+
+    try {
+      for await (const ev of stream) {
+        switch (ev.kind) {
+          case 'thinking':
+            if (!this.subtitle.isStreaming()) {
+              this.subtitle.showIndicator('processing', thinkingLabel);
+            }
+            this.emitter.emit('agent_thinking', undefined);
+            break;
+
+          case 'text-delta':
+            this.subtitle.appendStreamed(ev.delta);
+            break;
+
+          case 'tool-start':
+            this.subtitle.hideIndicator();
+            if (ev.targetSelector) {
+              // Resolve numeric `[N]` indexes via the agent's per-turn
+              // map before falling through to CSS selector matching.
+              // Without this, the LLM passing a bare "13" would crash
+              // querySelector with SyntaxError.
+              const resolved = this.agentInstance?.resolveSelector(ev.targetSelector);
+              if (resolved) this.highlightElement(resolved as HTMLElement);
+              else this.highlightElement(ev.targetSelector);
+            }
+            this.emitter.emit('agent_tool_start', { name: ev.name, args: ev.args, targetSelector: ev.targetSelector });
+            break;
+
+          case 'tool-end':
+            this.emitter.emit('agent_tool_end', { name: ev.name, result: ev.result });
+            break;
+
+          case 'navigating':
+            // SPA route change kicked off but the new page isn't ready
+            // to read yet — show a polished loading indicator until
+            // `navigated` arrives.
+            this.subtitle.showIndicator('processing', sdkString(this.config.locale, 'agent.loading'));
+            clearWebagentOverlays();
+            this.clearHighlight();
+            break;
+
+          case 'navigated':
+            // New page settled. Hide the loading indicator; the next
+            // text-delta from the model will create the streaming bar
+            // for narration about the new page.
+            this.subtitle.hideIndicator();
+            break;
+
+          case 'confirm':
+            await this.routeConfirm(ev);
+            break;
+
+          case 'final':
+            // No auto-hide by default — the user explicitly dismisses
+            // via × / Space / Esc. Auto-hiding mid-read steals the
+            // answer; if the host wants timed dismiss they can set
+            // `agentSubtitleAutoHideMs` to a positive number.
+            this.subtitle.finalizeStreamed(
+              finalAutoHide > 0 ? { autoHide: finalAutoHide } : {},
+            );
+            this.clearHighlight();
+            clearWebagentOverlays();
+            this.emitter.emit('agent_final', undefined);
+            break;
+
+          case 'error':
+            this.subtitle.hideIndicator();
+            if (!ev.retrying) {
+              const errMsg = this.config.locale === 'zh-TW'
+                ? `出了點問題：${ev.error.message}`
+                : `Something went wrong: ${ev.error.message}`;
+              if (this.subtitle.isStreaming()) {
+                this.subtitle.appendStreamed('\n\n' + errMsg);
+                this.subtitle.finalizeStreamed({ autoHide: 6_000 });
+              } else {
+                this.subtitle.show({ text: errMsg, type: 'info', autoHide: 6_000 });
+              }
+              this.clearHighlight();
+              clearWebagentOverlays();
+              this.emitter.emit('agent_error', { error: ev.error });
+            }
+            break;
+        }
+      }
+    } catch (err) {
+      // Pump itself threw (shouldn't normally — agent catches its own
+      // errors and emits `error` events). Defensive cleanup.
+      if (this.subtitle.isStreaming()) {
+        this.subtitle.finalizeStreamed({ autoHide: 4_000 });
+      }
+      safeCleanup();
+      if (typeof console !== 'undefined') {
+        console.warn('[dddk] agent pump threw:', err);
+      }
+    } finally {
+      // Always-fires cleanup. Handles the "stream ended without firing
+      // a terminal event" case — most commonly when an external
+      // `agent.stop()` (via close button, esc, palette open,
+      // long-press voice) aborts the loop mid-flight. Without this
+      // hook the thinking indicator stayed up forever.
+      safeCleanup();
+    }
+  }
+
+  /**
+   * Route a `confirm` event to the subtitle bar with Space-accept /
+   * double-tap-reject wiring. The agent is awaiting `decide()` — we
+   * resolve it from the user's gesture.
+   */
+  private async routeConfirm(ev: Extract<AgentEvent, { kind: 'confirm' }>): Promise<void> {
+    const targetSelector =
+      (typeof ev.args.selector === 'string' ? ev.args.selector : null) ??
+      (typeof ev.args.target === 'string' ? ev.args.target : null) ??
+      (typeof ev.args.element === 'string' ? ev.args.element : null);
+    if (targetSelector) {
+      const resolved = this.agentInstance?.resolveSelector(targetSelector);
+      if (resolved) this.highlightElement(resolved as HTMLElement);
+      else this.highlightElement(targetSelector);
+    } else {
+      this.clearHighlight();
+    }
+
+    await new Promise<void>((resolve) => {
+      this.subtitle.show({
+        text: ev.message,
+        type: 'agent',
+        onAccept: () => {
+          this.emitIntent({ kind: 'confirm_action', actionName: ev.actionName, params: ev.args, approved: true, timestamp: Date.now() });
+          ev.decide(true);
+          resolve();
+        },
+        onReject: () => {
+          this.emitIntent({ kind: 'confirm_action', actionName: ev.actionName, params: ev.args, approved: false, timestamp: Date.now() });
+          this.clearHighlight();
+          ev.decide(false);
+          resolve();
+        },
+        onCancel: () => {
+          this.clearHighlight();
+          ev.decide(false);
+          resolve();
+        },
+      });
+    });
   }
 
   /**
@@ -1344,6 +1502,12 @@ export class DotDotDuck {
     const items: PaletteItem[] = [];
 
     for (const skill of this.skills.list()) {
+      // Skills marked `hidden: true` are still callable (host can fire
+      // them via `dddk.runSkill(id)` or wire their own palette items
+      // pointing at them), but they don't auto-appear in the default
+      // "Skills" section. Use this when you want explicit control over
+      // section / placement / labelling in the palette.
+      if (skill.hidden) continue;
       // If skill.name already looks like `/command`, use it as-is to avoid
       // duplication ("/introduce — /introduce"). Otherwise prefix `/<id>` so
       // the palette can route the slash command, and append name for context.
@@ -1403,6 +1567,7 @@ export class DotDotDuck {
 }
 
 // ─── helpers ────────────────────────────────────────────────────────
+
 
 /**
  * Render a webagent before_action payload into a one-line subtitle label.

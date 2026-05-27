@@ -33,22 +33,29 @@ export { builtinActions } from './webagent/actions';
 export type {
   WebAgentConfig,
   AgentSession,
-  AgentStep,
-  AgentAction,
+  AgentTurn,
+  UserTurn,
+  AgentStepTurn,
+  AgentFinalTurn,
   AgentStatus,
-  AgentEventName,
-  AgentEventMap,
+  AgentEvent,
   ActionDefinition,
   ActionResult,
   ActionFailureReason,
   ActionContext,
   SitemapEntry,
+  SitemapConfig,
   OverlayItem,
   OverlayType,
   PiecePlacement,
   RunOptions,
   SelectionContext,
 } from './webagent/types';
+
+export { DEFAULT_DESTRUCTIVE_PATTERNS } from './webagent/destructive';
+
+export type { ScreenshotConfig, ScreenshotMode } from './webagent/screenshot';
+export { captureScreenshots } from './webagent/screenshot';
 
 export type {
   BrandPrompt,

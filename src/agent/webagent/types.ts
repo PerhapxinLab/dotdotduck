@@ -1,49 +1,23 @@
 /**
- * @perhapxin/dddk — Public types
- * See ../../docs/01-architecture.md + 02-api.md for the full design.
+ * @perhapxin/dddk — WebAgent public types.
+ *
+ * Loop shape: the agent is an async generator that yields `AgentEvent`s
+ * (text-delta / tool-start / tool-end / navigated / confirm / final /
+ * thinking / error). The orchestrator consumes the stream with a single
+ * `for await` and routes each event to its UI slot. No event emitter
+ * subscription, no per-step user gate.
+ *
+ * Session shape: `turns[]` accumulates everything that happened across
+ * one logical conversation — user queries, agent's chosen tool calls
+ * with results, and final pure-text turns. Multi-turn follow-ups append
+ * a new `user` turn to the same session; cross-page resume picks up
+ * where the loop left off without dropping prior turns.
+ *
+ * See ../../docs/01-architecture.md for the design.
  */
 
 import type { ToolDefinition } from '../llm/types';
 import type { LLMSource } from '../llm/router';
-
-// ─── Agent state ────────────────────────────────────────────────────
-
-export type AgentStatus =
-  | 'idle'
-  | 'thinking'
-  | 'executing'
-  | 'waiting'
-  | 'done'
-  | 'failed';
-
-export interface AgentSession {
-  id: string;
-  task: string;
-  steps: AgentStep[];
-  status: AgentStatus;
-  currentPage: string;
-  startedAt: number;
-  updatedAt: number;
-  summary?: string;
-}
-
-export interface AgentStep {
-  action: AgentAction;
-  result: ActionResult;
-  subtitle?: string;
-  timestamp: number;
-  /**
-   * The LLM's original tool_call.id for this step. Used to pair the
-   * follow-up `tool` role message correctly when re-building the prompt.
-   */
-  toolCallId?: string;
-}
-
-export interface AgentAction {
-  name: string;
-  params: Record<string, unknown>;
-  reasoning?: string;
-}
 
 // ─── Action contracts ───────────────────────────────────────────────
 
@@ -54,6 +28,7 @@ export type ActionFailureReason =
   | 'timeout'
   | 'navigation'
   | 'cancelled'
+  | 'user_declined'
   | 'unknown';
 
 export type ActionResult<T = unknown> =
@@ -63,29 +38,118 @@ export type ActionResult<T = unknown> =
 export interface ActionContext {
   session: AgentSession;
   signal: AbortSignal;
-  emit: (event: AgentEventName, payload: unknown) => void;
+  /**
+   * Resolve a selector argument (e.g. `selector`, `target`) to a live
+   * element. Accepts either:
+   *   - A numeric index from the DOM dump (`"3"` or `"[3]"`) — looked
+   *     up in the per-turn index map. This is the preferred form.
+   *   - A CSS selector string — passed to `document.querySelector`.
+   *
+   * Returns `null` when neither resolves. Action handlers use this
+   * helper instead of calling `document.querySelector` directly so
+   * the indexed-tree contract works uniformly.
+   */
+  resolveTarget(target: string | number): Element | null;
 }
 
 export interface ActionDefinition<P = unknown, R = unknown> {
   name: string;
   description: string;
-  /** JSON Schema for params. Zod schemas can be passed via `zodToJsonSchema()`. */
+  /** JSON Schema for params. */
   parameters: Record<string, unknown>;
   handler: (params: P, ctx: ActionContext) => Promise<ActionResult<R>>;
 
   /**
-   * If true, the agent pauses before invoking and asks the host to confirm.
-   * Use for destructive / external-side-effect actions (delete, send email,
-   * place order, transfer money). Default false.
+   * If true (or a predicate returning true), the agent pauses before
+   * invoking and emits a `confirm` event that the host must `decide()`
+   * on. Use for destructive / external-side-effect actions (delete,
+   * send email, place order, transfer money). The webagent also
+   * auto-marks any action whose name matches a destructive-pattern
+   * regex (see `WebAgentConfig.destructivePatterns`); per-action
+   * `requireConfirmation: false` can opt out of the pattern match.
    */
   requireConfirmation?: boolean | ((params: P, ctx: ActionContext) => boolean | Promise<boolean>);
 
-  /**
-   * Override the confirmation prompt. Receives the params being passed in.
-   * Default: `"Confirm `<name>`?"`.
-   */
+  /** Override the confirmation prompt. */
   confirmationMessage?: (params: P) => string;
 }
+
+// ─── Selection (captured at run start) ──────────────────────────────
+
+export interface SelectionContext {
+  text?: string;
+  images?: string[];
+  bbox?: { x: number; y: number; width: number; height: number };
+  /** CSS selectors / DOM paths the user clicked or multi-selected. */
+  elements?: string[];
+}
+
+// ─── Session model — append-only turn log ───────────────────────────
+
+export interface AgentSession {
+  id: string;
+  turns: AgentTurn[];
+  status: AgentStatus;
+  currentPage: string;
+  startedAt: number;
+  updatedAt: number;
+}
+
+export type AgentStatus =
+  | 'idle'
+  | 'thinking'
+  | 'executing'
+  | 'waiting'
+  | 'navigating'
+  | 'done'
+  | 'failed';
+
+/** Discriminated union of everything that can land in `session.turns[]`. */
+export type AgentTurn =
+  | UserTurn
+  | AgentStepTurn
+  | AgentFinalTurn;
+
+export interface UserTurn {
+  kind: 'user';
+  ts: number;
+  text: string;
+  selection?: SelectionContext;
+}
+
+export interface AgentStepTurn {
+  kind: 'agent_step';
+  ts: number;
+  /** Free-form text the model emitted *before* picking the tool (streaming). */
+  preText?: string;
+  toolCall: { name: string; arguments: Record<string, unknown> };
+  toolCallId: string;
+  result: ActionResult;
+}
+
+export interface AgentFinalTurn {
+  kind: 'agent_final';
+  ts: number;
+  text: string;
+}
+
+// ─── Agent event stream — what `runStream` / `continueStream` yield ─
+
+export type AgentEvent =
+  | { kind: 'thinking' }
+  | { kind: 'text-delta'; delta: string }
+  | { kind: 'tool-start'; name: string; args: Record<string, unknown>; targetSelector?: string; toolCallId: string }
+  | { kind: 'tool-end'; name: string; result: ActionResult; toolCallId: string }
+  /** Fired right BEFORE the SPA router is invoked. The page is still
+   *  the old one; the host should show a "loading" indicator until
+   *  `navigated` arrives. */
+  | { kind: 'navigating'; from: string; to: string }
+  /** Fired AFTER the router Promise resolved AND the DOM has settled.
+   *  The page is now the new one and safe to introspect. */
+  | { kind: 'navigated'; from: string; to: string }
+  | { kind: 'confirm'; actionName: string; args: Record<string, unknown>; message: string; decide: (approved: boolean) => void }
+  | { kind: 'final' }
+  | { kind: 'error'; error: Error; retrying: boolean };
 
 // ─── Overlay items (visual highlights on page) ──────────────────────
 
@@ -101,16 +165,10 @@ export interface OverlayItem {
   position?: 'before' | 'after';
 }
 
-// ─── Pieces (structured surface envelope) ───────────────────────────
+// ─── Pieces (structured surface envelope) — kept for parity, optional ─
 
 export type PiecePlacement = 'center' | 'inline' | 'dock';
 
-/**
- * Envelope shape for a declarative UI surface that the agent (or host)
- * can mount. Wire-compatible with the upstream v0.10 surface protocol
- * dddk's Pieces system bridges from, but the webagent treats this as
- * its own internal contract.
- */
 export interface PieceSurface {
   version: 'v0.10';
   updateComponents?: {
@@ -126,209 +184,162 @@ export interface PieceSurface {
   actionResponse?: Record<string, unknown>;
 }
 
-// ─── Sitemap ─────────────────────────────────────────────────────────
+// ─── Sitemap ────────────────────────────────────────────────────────
 
-/**
- * Flat sitemap (simple sites) — still supported in v1. Prefer the
- * `SitemapNode` tree for sites with more than ~8 pages. See
- * `../sitemap/types.ts`.
- */
 export interface SitemapEntry {
   path: string;
-  /**
-   * Human-facing description in the host's primary locale. The agent's
-   * system prompt and the palette fuzzy matcher both read this field —
-   * keep it natural-language and idiomatic for the language you set.
-   */
   description: string;
-  /**
-   * Free-form synonyms the matcher should also accept. Two common uses:
-   *   1. Domain aliases — `'settings page'`, `'pref'`, `'preferences'`.
-   *   2. Other-locale labels for multilingual sites — when the primary
-   *      `description` is `'首頁'`, list `['Home', 'ホーム', '홈']` here
-   *      so users typing in any language land on the right path. Use
-   *      `buildSitemap()` from `@perhapxin/dddk/agent` to generate the
-   *      `description` + `aliases` pair from one i18n dict.
-   */
   aliases?: string[];
 }
 
-/** Either flat list (v0) or tree (recommended for >8 pages). */
 export type SitemapConfig = SitemapEntry[] | import('../sitemap/types').SitemapNode;
 
-// ─── WebAgent config ────────────────────────────────────────────────
-
-/**
- * Selection captured at run start. The agent sees this as part of its first
- * prompt, so it knows what the user clicked / highlighted / lassoed.
- */
-export interface SelectionContext {
-  /** Selected text content (if any). */
-  text?: string;
-  /** Selected images as base64 / URL (if any). */
-  images?: string[];
-  /** Bounding box of the selection on the page. */
-  bbox?: { x: number; y: number; width: number; height: number };
-  /** CSS selectors / DOM paths the user clicked or multi-selected. */
-  elements?: string[];
-}
+// ─── Run options ────────────────────────────────────────────────────
 
 export interface RunOptions {
   /** What the user had selected when they invoked the agent. */
   selection?: SelectionContext;
+  /**
+   * Force a fresh session even if a live session exists within the
+   * continuity window. Set this when the host's UX is "new conversation
+   * button pressed" — default behavior (false) appends to the existing
+   * session as a follow-up.
+   */
+  freshSession?: boolean;
 }
 
+// ─── WebAgent config ────────────────────────────────────────────────
+
 export interface WebAgentConfig {
-  /**
-   * LLM source — pass a single `LLMProvider` (same model everywhere) or an
-   * `LLMRouter` (per-role: `webagent`, `webagentWithSelection`, ...).
-   */
+  /** LLM source — single `LLMProvider` or `LLMRouter` (per-role). */
   llm: LLMSource;
-  /**
-   * BCP-47 locale used as a hint for the LLM (it still detects the user's
-   * actual input language) and for the SDK's bundled UI strings (the
-   * confirmation narrations etc. ship `'en'` and `'zh-TW'` translations;
-   * unknown values fall back to English UI).
-   *
-   * Accepts any string — `'en'`, `'zh-TW'`, `'ja-JP'`, `'es-MX'`, etc.
-   */
   locale?: string;
+  /** Hard cap on tool-call iterations per task. Default 30. */
   maxSteps?: number;
+  /** Consecutive LLM-call failures before bailing. Default 3. */
   maxErrors?: number;
-  /**
-   * Reasoning budget for the per-step LLM call. Default `'off'` — action
-   * selection on a fixed registry doesn't benefit from internal-scratchpad
-   * reasoning, and the latency hit (5-8s extra on reasoning-capable models)
-   * is the single biggest source of "why is the agent so slow" feedback.
-   * Set `'low'` / `'medium'` / `'high'` if your custom actions need the
-   * model to think harder before picking one. Providers without a
-   * reasoning mode (gpt-5.4-mini, gemini-2.x) ignore this flag.
-   */
+  /** Single LLM call hard timeout (ms). Default 60_000. */
+  llmTimeoutMs?: number;
+
+  /** Reasoning intensity (provider-specific). Default 'off'. */
   thinking?: 'off' | 'low' | 'medium' | 'high';
 
-  /**
-   * Full system prompt override. Pass a string to hard-replace the default,
-   * or a function `(ctx, defaultPrompt) => string` to compose around the default.
-   * Most hosts should NOT use this — prefer `brand` + `appendSystemPrompt`.
-   */
+  /** System prompt override — string hard-replaces; function composes. */
   systemPrompt?: import('./prompt').SystemPromptOverride;
-
-  /**
-   * Structured brand context. Easiest extension point — fill the fields,
-   * the runtime renders them into the prompt for you.
-   */
+  /** Structured brand context layered into the default prompt. */
   brand?: import('./prompt').BrandPrompt;
-
-  /**
-   * Plain string appended after the default prompt. The most common way
-   * to add domain knowledge ("Acme order IDs always start with ORD-").
-   */
+  /** Plain text appended after the default prompt. */
   appendSystemPrompt?: string;
 
   sitemap?: SitemapConfig;
   agentName?: string;
   siteName?: string;
-  /** Custom actions registered alongside built-ins. */
+
   customActions?: ActionDefinition[];
+
   /** sessionStorage key. Default 'webagent.session'. */
   sessionStorageKey?: string;
-  /** Override default tool list (advanced — usually leave undefined). */
+
+  /** Override default tool list (advanced). */
   toolDefinitions?: ToolDefinition[];
 
   /**
-   * Cross-tab session sync (same origin). Default `false`.
-   * When `true`, dddk mirrors session state to `localStorage` and uses
-   * `BroadcastChannel` so a new tab on the same origin can pick up the
-   * conversation. Cross-origin / cross-subdomain is NOT supported by the
-   * browser sandbox — see docs/12-session-continuity.md.
+   * Multi-turn continuity. After a turn ends, follow-ups within this
+   * window append to the current session as user turns. Older than this
+   * and the next `runStream()` starts a fresh session.
+   * Default 5 * 60 * 1000 (5 minutes). Pass `0` to disable continuity.
+   */
+  sessionContinuityMs?: number;
+
+  /**
+   * Continuity scope — `'time'` (default) honors `sessionContinuityMs`;
+   * `'palette'` ends continuity when the palette closes (host signals
+   * via `dddk.agent.endContinuity()`).
+   */
+  sessionScope?: 'time' | 'palette';
+
+  /**
+   * Custom destructive-action patterns. An action whose name matches
+   * any of these regexes auto-gates on `confirm`. Overrides built-in
+   * defaults; pass an empty array to disable the default list and
+   * rely only on per-action `requireConfirmation`.
+   */
+  destructivePatterns?: RegExp[];
+
+  /**
+   * Subtraction filter applied to every visible element the DOM reader
+   * considers. Return `false` to drop the element + its subtree from
+   * the dump. Use this to keep the agent focused on the host's main
+   * content area: filter out site chrome (nav / footer / cookie banner)
+   * the agent should never narrate.
+   *
+   *   domFilter: (el) => !el.matches('nav.global-nav, footer, [data-cookie]')
+   *
+   * Default: include everything visible.
+   */
+  domFilter?: (el: Element) => boolean;
+
+  /**
+   * Hard cap on the DOM dump size sent to the LLM each turn (in
+   * characters). Default ~12000 — large enough to capture a typical
+   * marketing / pricing / docs page in full; small enough to keep the
+   * per-turn token cost predictable. Hosts with denser pages can bump
+   * this; hosts on a budget can shrink it. The reader truncates with a
+   * `[...truncated]` marker rather than blowing the budget silently.
+   */
+  domMaxLength?: number;
+
+  /**
+   * Cross-tab session sync via BroadcastChannel + localStorage mirror.
+   * Default `false`.
    */
   crossTabSync?: boolean;
 
   /**
-   * Interactive (step-by-step) mode. Two effects:
-   *
-   *  1. The agent emits a `confirm_action` event BEFORE every action
-   *     (not just ones flagged `requireConfirmation`) and awaits the
-   *     host's `decide()` callback. Single Space tap → `decide(true)` →
-   *     action proceeds. Double-tap Space / Esc → `decide(false)` →
-   *     agent stops with a "stopped by user" status.
-   *
-   *  2. The built-in `show_subtitle` action becomes a "narrate and
-   *     wait" gesture — the agent surfaces a progress / explanation
-   *     line and the loop pauses for user acknowledgement (Space) before
-   *     the next step. The agent uses this to walk the user through
-   *     multi-step tasks at their pace.
-   *
-   * Demo / onboarding / customer-service contexts want this `true` so
-   * the user sees each step narrated and framed. Production automations
-   * usually leave it `false` so the loop runs at full speed and only
-   * pauses for genuinely destructive actions (those flagged
-   * `requireConfirmation: true` on the ActionDefinition).
-   *
-   * Default `false` (= full-auto).
+   * Subtitle-bar hint shown when the agent calls `pause` without a
+   * `note` argument. The SDK ships an English default — set this in
+   * the host's UI language for a localised experience.
    */
-  confirmEachStep?: boolean;
-}
+  defaultPauseNote?: string;
 
-// ─── Event surface ──────────────────────────────────────────────────
-
-export type AgentEventName =
-  | 'status'
-  | 'before_action'
-  | 'step'
-  | 'subtitle'
-  | 'piece_surface'
-  | 'ask_user'
-  | 'ask_user_choice'
-  | 'confirm_action'
-  | 'overlay_update'
-  | 'navigate'
-  | 'error'
-  | 'done';
-
-export interface AgentEventMap {
-  status: AgentStatus;
   /**
-   * Fires after the LLM picks an action but BEFORE the action handler runs.
-   * Lets visual layers (agent cursor, action overlay) preview the target
-   * element with a pause for user awareness. Differs from `confirm_action`
-   * in that this is informational only — no decision needed.
+   * Hard cap on how many session turns get serialised into each LLM
+   * prompt. When the session has more, the oldest turns are dropped
+   * and only the most recent `maxTurnsInPrompt` are sent (the system
+   * prompt is always kept). Default: undefined (no cap).
    */
-  before_action: {
-    actionName: string;
-    params: Record<string, unknown>;
-    /** Best-effort: CSS selector if the action targets an element. */
-    targetSelector?: string;
-  };
-  step: AgentStep;
-  subtitle: string;
-  piece_surface: { surface: PieceSurface; placement: PiecePlacement };
-  ask_user: { question: string; resolve: (answer: string) => void };
-  /**
-   * Multi-choice prompt — the host renders a picker (the dddk Subtitle's
-   * `showChoice` is the canonical renderer) and resolves with the chosen
-   * value. `allowFreeText` defaults to true so the user can also type a
-   * free-text answer.
-   */
-  ask_user_choice: {
-    question: string;
-    options: string[];
-    allowFreeText?: boolean;
-    resolve: (answer: string) => void;
-  };
-  /** Fired before an action with `requireConfirmation` runs. Host must call `decide`. */
-  confirm_action: {
-    actionName: string;
-    params: Record<string, unknown>;
-    message: string;
-    decide: (approved: boolean) => void;
-  };
-  overlay_update: OverlayItem[];
-  navigate: { path: string };
-  error: Error;
-  done: AgentSession;
-}
+  maxTurnsInPrompt?: number;
 
-export type AgentEventHandler<E extends AgentEventName> = (
-  payload: AgentEventMap[E]
-) => void;
+  /**
+   * Token budget for the per-turn LLM prompt. When the assembled
+   * prompt exceeds this estimate, the SDK drops the OLDEST turns
+   * first and keeps the most recent ones — the system prompt and the
+   * env-block / latest-user message are always preserved.
+   *
+   * The estimate is a coarse char-count → token approximation
+   * (mixed CJK + English ~ 3.5 chars per token); not a strict
+   * count. Set it well below your model's true context window so
+   * there's headroom for the model's own response.
+   *
+   * Default: undefined (no cap).
+   */
+  maxPromptTokens?: number;
+
+  /**
+   * Attach a screenshot of the current page to every LLM turn alongside
+   * the indexed DOM dump. Disabled by default — text-only mode is faster,
+   * cheaper, and sufficient for most narration tasks. Turn on when the
+   * page has visual content the DOM dump can't convey (charts, custom
+   * canvases, complex visual layouts the agent should comment on).
+   *
+   * Two modes:
+   *   - `'viewport'`  — one image of what the user currently sees.
+   *   - `'full-page'` — the full scroll height, auto-split into multiple
+   *                     images when taller than `maxSegmentHeight`.
+   *
+   * Requires the `html2canvas` peer dependency (`pnpm add html2canvas`)
+   * unless you provide a custom `capture` function. When neither is
+   * available the agent runs text-only without erroring.
+   */
+  screenshot?: boolean | import('./screenshot').ScreenshotConfig;
+}

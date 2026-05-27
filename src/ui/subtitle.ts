@@ -63,11 +63,40 @@ export class Subtitle {
     this.ttsProvider = fn ?? undefined;
   }
 
+  /**
+   * Wire a host-supplied handler for the bar's × close button (and
+   * any equivalent "user dismissed without committing" gestures). The
+   * orchestrator typically wires this to stop the agent loop + surface
+   * a brief "stopped — say something new" feedback subtitle.
+   */
+  setCloseHandler(fn: (() => void) | null): void {
+    this.closeHandler = fn;
+  }
+
   /** Multi-page state for a single `show()` call. When the caller's text
    *  exceeds maxCharsPerPage we paginate; Space advances. The final
    *  page's accept callback fires the original onAccept. */
   private pages: string[] | null = null;
   private pageIdx = 0;
+  /** Host-supplied "user explicitly closed the bar" handler (typically
+   *  wired to stop the agent + show a brief stopped-feedback subtitle). */
+  private closeHandler: (() => void) | null = null;
+
+  // ─── streaming mode state ───────────────────────────────────────
+  /** Live text node the streaming appendStreamed() writes into. */
+  private streamingTextNode: Text | null = null;
+  /** Cursor element shown after the live text node (blinking caret). */
+  private streamingCursor: HTMLSpanElement | null = null;
+  /** Untranscribed text held back for sentence-boundary TTS. */
+  private streamingTtsBuffer = '';
+  /** Raw accumulated streaming text (for replaceStreamed / introspection). */
+  private streamingFullText = '';
+  /** Active "pause hint" callbacks — set by applyStreamingPauseHint
+   *  when the agent pauses mid-stream. Space invokeAccept fires
+   *  accept (advances the agent), double-tap fires reject (stops it).
+   *  Both clear the hint and the callbacks. */
+  private streamingPauseAccept: (() => void) | null = null;
+  private streamingPauseReject: (() => void) | null = null;
 
   show(opts: SubtitleShowOptions): void {
     if (typeof document === 'undefined') return;
@@ -91,6 +120,16 @@ export class Subtitle {
       this.autoHideTimer = null;
     }
 
+    // Transitioning OUT of streaming mode → wipe the streaming-specific
+    // state so the new bar isn't misclassified as a still-streaming
+    // bar by `isStreaming()` / `invokeAccept()`. Without this, when a
+    // confirm subtitle replaces a streaming bar, Space-accept on the
+    // confirm gets misrouted as "stop the streaming agent".
+    this.streamingTextNode = null;
+    this.streamingCursor = null;
+    this.streamingFullText = '';
+    this.streamingTtsBuffer = '';
+
     const wasVisible = this.el !== null;
     if (!this.el) {
       this.el = document.createElement('div');
@@ -101,6 +140,12 @@ export class Subtitle {
       // in the bottom-center bar.
       applyPlacement(this.el, 'subtitle');
       document.body.appendChild(this.el);
+      this.bindTouchTapGestures(this.el);
+    } else {
+      // Reusing the existing el for a different mode — clear the
+      // bar-mode attribute so CSS selectors targeting streaming /
+      // streaming-done don't keep applying.
+      this.el.removeAttribute('data-dddk-bar-mode');
     }
     if (!wasVisible) this.onVisibilityChange?.(true);
 
@@ -179,7 +224,11 @@ export class Subtitle {
         // Clicks on the bar itself = let the bar's button handler fire.
         const target = e.target as Element | null;
         if (target && this.el && this.el.contains(target)) return;
-        this.hide();
+        // Click-outside is treated as an explicit user dismissal —
+        // same semantics as the × button. Route through handleCloseClick
+        // so the host's closeHandler (stop the agent loop + clear any
+        // running indicator) fires alongside the hide.
+        this.handleCloseClick();
       };
       const onKey = (e: KeyboardEvent): void => {
         // Skip pure modifier presses — preparing for a shortcut isn't dismissal.
@@ -217,6 +266,303 @@ export class Subtitle {
     if (this.currentOpts) this.currentOpts.text = text;
   }
 
+  // ─── streaming mode ────────────────────────────────────────────────
+  //
+  // Used by the agent loop: the LLM streams text between tool calls;
+  // each delta is appended to a live Text node so the bar "types itself".
+  // The bar persists across SPA navigation (it sits on document.body, the
+  // same as the rest of subtitle UI), so a continuous narrative reads
+  // across page changes without flicker.
+
+  /**
+   * Append a text delta to the streaming bar. First call materialises
+   * the bar in streaming mode. Sentence-boundary TTS is buffered and
+   * flushed automatically — see `flushStreamingTts`.
+   */
+  appendStreamed(delta: string): void {
+    if (typeof document === 'undefined' || !delta) return;
+    this.ensureStreamingBar();
+    // Subtitle bar renders prose, not docs — the SDK system prompt
+    // asks the LLM to skip markdown, but smaller models still slip
+    // `**bold**` in for emphasis. Strip the markers as a guard so the
+    // bar doesn't read with raw asterisks. A `*` split across two
+    // deltas can occasionally leak; that's a fair tradeoff for the
+    // simple code path.
+    const cleaned = delta.replace(/\*\*/g, '');
+    if (this.streamingTextNode) {
+      this.streamingTextNode.appendData(cleaned);
+      this.streamingFullText += cleaned;
+      this.autoScrollStream();
+    }
+    this.streamingTtsBuffer += cleaned;
+    this.flushStreamingTts(false);
+  }
+
+  /**
+   * Wipe the streaming bar's current text and replace with `text`.
+   * Use when the host wants a "明確一步一步" refresh between agent
+   * steps. Passing an empty string clears the bar but keeps it visible.
+   */
+  replaceStreamed(text: string): void {
+    if (typeof document === 'undefined') return;
+    // Flush whatever's in the TTS buffer so the previous paragraph
+    // doesn't drop a fragment when we wipe.
+    this.flushStreamingTts(true);
+    this.ensureStreamingBar();
+    if (this.streamingTextNode) {
+      this.streamingTextNode.data = text;
+      this.streamingFullText = text;
+    }
+    this.streamingTtsBuffer = text;
+    this.flushStreamingTts(false);
+  }
+
+  /**
+   * Mark the streaming bar as "settled" — remove the typing cursor and
+   * apply standard dismiss + autoHide. After this the bar behaves like
+   * any other `show()` info subtitle (any-key / click dismiss).
+   */
+  finalizeStreamed(opts?: { autoHide?: number }): void {
+    // Flush any tail text the model left in the buffer before going silent.
+    this.flushStreamingTts(true);
+    if (!this.el) return;
+    this.el.setAttribute('data-dddk-bar-mode', 'streaming-done');
+    if (this.streamingCursor) {
+      this.streamingCursor.remove();
+      this.streamingCursor = null;
+    }
+    // Append a faint "press space to close" hint so the user has a
+    // discoverable dismiss gesture (in addition to the × button).
+    const scroll = this.el.querySelector<HTMLDivElement>(`[${UI_ATTR}="bar-scroll"]`);
+    if (scroll && !scroll.querySelector(`[${UI_ATTR}="bar-hints"]`)) {
+      const hintText = this.locale === 'zh-TW' ? '按 space 關閉' : 'press space to close';
+      const hintEl = document.createElement('div');
+      hintEl.setAttribute(UI_ATTR, 'bar-hints');
+      hintEl.textContent = hintText;
+      scroll.appendChild(hintEl);
+    }
+    // Install any-key / click-outside dismiss for the now-static text.
+    const dismissOpts: SubtitleShowOptions = {
+      text: this.streamingFullText,
+      type: 'agent',
+    };
+    this.currentOpts = dismissOpts;
+    this.installInteractionDismiss(dismissOpts);
+    const autoHideMs = opts?.autoHide;
+    if (typeof autoHideMs === 'number' && autoHideMs > 0) {
+      if (this.autoHideTimer) clearTimeout(this.autoHideTimer);
+      this.autoHideTimer = setTimeout(() => this.hide(), autoHideMs);
+    }
+  }
+
+  /**
+   * Tear down the streaming bar immediately. Used when the agent run
+   * stops mid-stream (cancel / error). Distinct from `hide()` only in
+   * that it always resets streaming state — `hide()` is the universal
+   * "bar gone" used by every mode.
+   */
+  clearStreamed(): void {
+    this.flushStreamingTts(true);
+    this.streamingTextNode = null;
+    this.streamingCursor = null;
+    this.streamingFullText = '';
+    this.streamingTtsBuffer = '';
+    this.hide();
+  }
+
+  isStreaming(): boolean {
+    return this.streamingTextNode !== null && this.el?.getAttribute('data-dddk-bar-mode') === 'streaming';
+  }
+
+  /**
+   * Attach a "press space to continue" pause UI to the active
+   * streaming bar — without replacing the bar or wiping the text the
+   * agent just streamed. The hint sits BELOW the streamed text so the
+   * user can finish reading before deciding.
+   *
+   * Wiring:
+   *   - Space tap (invokeAccept) → fires opts.onAccept, clears hint.
+   *   - Double-tap Space (invokeReject) → fires opts.onReject, clears
+   *     hint. Host typically stops the agent on reject.
+   *   - × button → behaves like double-tap (fires reject + close).
+   */
+  applyStreamingPauseHint(opts: {
+    hint: string;
+    rejectHint?: string;
+    onAccept: () => void;
+    onReject: () => void;
+  }): void {
+    if (!this.el) return;
+    // Remove any prior hint (in case pause fires twice without clearing).
+    this.clearStreamingPauseHint();
+
+    // Stop the blinking cursor — the agent has paused, not "still typing".
+    if (this.streamingCursor) {
+      this.streamingCursor.style.opacity = '0.35';
+      this.streamingCursor.style.animation = 'none';
+    }
+
+    const scroll = this.el.querySelector<HTMLDivElement>(`[${UI_ATTR}="bar-scroll"]`);
+    if (!scroll) return;
+    const hintEl = document.createElement('div');
+    hintEl.setAttribute(UI_ATTR, 'streaming-pause');
+    hintEl.innerHTML = `
+      <div ${UI_ATTR}="streaming-pause-text">${escapeHtml(opts.hint)}</div>
+      <div ${UI_ATTR}="streaming-pause-hints">${escapeHtml(opts.rejectHint ?? this.defaultPauseRejectHint())}</div>
+    `;
+    scroll.appendChild(hintEl);
+    // Auto-scroll so the hint is visible.
+    this.autoScrollStream();
+
+    this.streamingPauseAccept = opts.onAccept;
+    this.streamingPauseReject = opts.onReject;
+  }
+
+  /**
+   * Tear down the pause hint and restore the cursor. Called on accept
+   * (the agent will continue with new deltas) and on reject. Safe to
+   * call when no hint is active.
+   */
+  clearStreamingPauseHint(): void {
+    if (!this.el) return;
+    const hintEl = this.el.querySelector(`[${UI_ATTR}="streaming-pause"]`);
+    if (hintEl) hintEl.remove();
+    this.streamingPauseAccept = null;
+    this.streamingPauseReject = null;
+    if (this.streamingCursor) {
+      this.streamingCursor.style.opacity = '';
+      this.streamingCursor.style.animation = '';
+    }
+  }
+
+  private defaultPauseRejectHint(): string {
+    if (isTouchOnlyDevice()) {
+      return this.locale === 'zh-TW'
+        ? '點一下繼續 ｜ 雙擊結束'
+        : 'tap to continue · double-tap to exit';
+    }
+    return this.locale === 'zh-TW'
+      ? 'space 繼續 ｜ 雙擊 space 結束'
+      : 'space continue · double-tap to exit';
+  }
+
+  /** Keep the scrollable inner pinned to the bottom as new text streams
+   *  in — but only if the user hasn't scrolled up to re-read. If they
+   *  scrolled up, leave them there. */
+  private autoScrollStream(): void {
+    if (!this.el) return;
+    const scroll = this.el.querySelector<HTMLDivElement>(`[${UI_ATTR}="bar-scroll"]`);
+    if (!scroll) return;
+    const distFromBottom = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight;
+    if (distFromBottom < 80) {
+      scroll.scrollTop = scroll.scrollHeight;
+    }
+  }
+
+  private ensureStreamingBar(): void {
+    // Already streaming → reuse.
+    if (this.streamingTextNode && this.el?.getAttribute('data-dddk-bar-mode') === 'streaming') return;
+
+    ensureStyles();
+
+    // Tear down any existing non-streaming bar first.
+    if (this.indicator) {
+      this.indicator.remove();
+      this.indicator = null;
+      this.pendingIndicator = null;
+    }
+    if (this.dismissTeardown) {
+      this.dismissTeardown();
+      this.dismissTeardown = null;
+    }
+    if (this.autoHideTimer) {
+      clearTimeout(this.autoHideTimer);
+      this.autoHideTimer = null;
+    }
+
+    const wasVisible = this.el !== null;
+    if (!this.el) {
+      this.el = document.createElement('div');
+      this.el.setAttribute(UI_ATTR, 'bar');
+      applyPlacement(this.el, 'subtitle');
+      document.body.appendChild(this.el);
+      this.bindTouchTapGestures(this.el);
+    }
+    this.el.setAttribute('data-dddk-bar-type', 'agent');
+    this.el.setAttribute('data-dddk-bar-mode', 'streaming');
+
+    // Build the streaming layout — wrapped in the standard bar shell so
+    // the × close button and max-height scroll behave identically to
+    // every other bar mode.
+    this.el.innerHTML = this.wrapBarShell(`<div ${UI_ATTR}="bar-text"></div>`);
+    this.wireClose();
+
+    const textWrap = this.el.querySelector<HTMLDivElement>(`[${UI_ATTR}="bar-text"]`);
+    if (!textWrap) return;
+    const textNode = document.createTextNode('');
+    const cursor = document.createElement('span');
+    cursor.setAttribute(UI_ATTR, 'streaming-cursor');
+    cursor.textContent = '▍';
+    textWrap.appendChild(textNode);
+    textWrap.appendChild(cursor);
+
+    this.streamingTextNode = textNode;
+    this.streamingCursor = cursor;
+    this.streamingFullText = '';
+    this.streamingTtsBuffer = '';
+    this.currentOpts = null;
+    document.body.dataset.dddkActive = 'true';
+    if (!wasVisible) this.onVisibilityChange?.(true);
+  }
+
+  /**
+   * Send buffered streaming text through TTS at sentence boundaries.
+   * `force = true` flushes whatever's left regardless of punctuation
+   * (used on finalize / replace).
+   *
+   * Sentence-end characters covered: `。 . ！ ! ？ ? \n`. To avoid
+   * choppy mid-clause reads, we also require either a sentence-end OR
+   * buffer length ≥ 80 characters before flushing in non-forced mode.
+   */
+  private flushStreamingTts(force: boolean): void {
+    if (!this.ttsProvider) {
+      // No TTS wired — keep the buffer trimmed so it doesn't grow forever.
+      this.streamingTtsBuffer = '';
+      return;
+    }
+    const buf = this.streamingTtsBuffer;
+    if (!buf) return;
+
+    if (force) {
+      try { this.ttsProvider(buf, { locale: this.locale, type: 'agent' }); } catch { /* swallow */ }
+      this.streamingTtsBuffer = '';
+      return;
+    }
+
+    // Find the LAST sentence-end punctuation in the buffer. Everything up
+    // to (and including) that point is one or more complete sentences;
+    // anything after stays buffered until the next delta brings more.
+    const SENTENCE_END = /[。．.！!？?\n]/g;
+    let lastIdx = -1;
+    let m: RegExpExecArray | null;
+    while ((m = SENTENCE_END.exec(buf)) !== null) lastIdx = m.index;
+    if (lastIdx < 0) {
+      if (buf.length < 80) return;
+      // No punctuation but buffer is long enough — flush at the closest
+      // whitespace (less likely to break a word) or just flush the whole
+      // thing.
+      const ws = buf.lastIndexOf(' ');
+      const cut = ws > 30 ? ws + 1 : buf.length;
+      const head = buf.slice(0, cut);
+      this.streamingTtsBuffer = buf.slice(cut);
+      try { this.ttsProvider(head, { locale: this.locale, type: 'agent' }); } catch { /* swallow */ }
+      return;
+    }
+    const head = buf.slice(0, lastIdx + 1);
+    this.streamingTtsBuffer = buf.slice(lastIdx + 1);
+    try { this.ttsProvider(head, { locale: this.locale, type: 'agent' }); } catch { /* swallow */ }
+  }
+
   /**
    * Multi-choice variant of `show()`. Renders the question + numbered
    * option list inside the subtitle bar. The user picks via click, digit
@@ -251,6 +597,7 @@ export class Subtitle {
       this.el.setAttribute(UI_ATTR, 'bar');
       applyPlacement(this.el, 'subtitle');
       document.body.appendChild(this.el);
+      this.bindTouchTapGestures(this.el);
     }
     if (!wasVisible) this.onVisibilityChange?.(true);
 
@@ -298,14 +645,15 @@ export class Subtitle {
       ? `按數字鍵選 ｜ 點擊也可以 ｜ esc 取消${allowFreeText ? ' ｜ Other 區可以直接打字' : ''}`
       : `digit to pick · click works too · esc cancels${allowFreeText ? ' · type into Other to free-text' : ''}`;
 
-    this.el.innerHTML = `
+    this.el.innerHTML = this.wrapBarShell(`
       <div ${UI_ATTR}="bar-text">${renderInlineMarkdown(opts.question)}</div>
       <div ${UI_ATTR}="choice-list">${optionsHtml}</div>
       ${freeTextHtml}
       <div ${UI_ATTR}="bar-hints">${hintText}</div>
-    `;
+    `);
 
     this.wireChoice(opts, allowFreeText);
+    this.wireClose();
     document.body.dataset.dddkActive = 'true';
 
     if (this.ttsProvider) {
@@ -342,6 +690,10 @@ export class Subtitle {
         const cb = opts.onCancel;
         this.hide();
         cb?.();
+        // Treat outside-dismiss as user cancel — also stop the agent
+        // loop + clear any thinking indicator that was up. Same path
+        // as the × button on regular subtitles.
+        this.closeHandler?.();
       };
       const onClick = (e: Event): void => {
         const target = e.target as Element | null;
@@ -402,6 +754,11 @@ export class Subtitle {
       this.el = null;
     }
     this.currentOpts = null;
+    // Streaming state is owned by the bar el — when it goes, reset.
+    this.streamingTextNode = null;
+    this.streamingCursor = null;
+    this.streamingFullText = '';
+    this.streamingTtsBuffer = '';
     delete document.body.dataset.dddkActive;
     if (this.autoHideTimer) {
       clearTimeout(this.autoHideTimer);
@@ -425,6 +782,53 @@ export class Subtitle {
   }
 
   /**
+   * Touch-only tap routing on the subtitle bar itself — single tap calls
+   * `invokeAccept()` and double tap calls `invokeReject()`, so phone /
+   * tablet users without a physical Space key can advance the streaming
+   * pause, accept a confirm gate, etc. by tapping the bar.
+   *
+   * Mouse clicks pass through unchanged (single-tap-to-accept on a
+   * desktop bar would be a footgun — users misclick). We feature-detect
+   * `pointerType === 'touch'` rather than viewport size so a laptop in
+   * tablet mode also gets the gesture.
+   *
+   * Taps on the embedded × button bubble up to here too — we ignore
+   * them by checking the event target's role.
+   */
+  private bindTouchTapGestures(el: HTMLElement): void {
+    let lastTapAt = 0;
+    let singleTapTimer: ReturnType<typeof setTimeout> | null = null;
+    const doubleTapMs = 320;
+    el.addEventListener('pointerup', (e) => {
+      if (e.pointerType !== 'touch') return;
+      // Ignore taps on interactive children (× close, choice rows,
+      // free-text input, etc.) — they handle themselves.
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('button, input, textarea, a, [role="button"]')) return;
+      const now = Date.now();
+      if (now - lastTapAt < doubleTapMs) {
+        // Double tap → reject (or close)
+        if (singleTapTimer !== null) {
+          clearTimeout(singleTapTimer);
+          singleTapTimer = null;
+        }
+        lastTapAt = 0;
+        // Dispatch a DOM custom event so the orchestrator runs the
+        // full gesture pipeline (emit `gesture_reject`, exit script
+        // skills, log intent) — NOT just subtitle.invokeReject() in
+        // isolation, which would miss the gesture event listeners.
+        document.dispatchEvent(new CustomEvent('dddk:bar-tap-reject'));
+        return;
+      }
+      lastTapAt = now;
+      singleTapTimer = setTimeout(() => {
+        singleTapTimer = null;
+        document.dispatchEvent(new CustomEvent('dddk:bar-tap-accept'));
+      }, doubleTapMs);
+    });
+  }
+
+  /**
    * Programmatically trigger the current subtitle's accept/reject/cancel
    * callback. Used by the orchestrator's gesture manager — single space
    * tap → `invokeAccept()`, double tap → `invokeReject()`, Esc →
@@ -434,22 +838,38 @@ export class Subtitle {
    * No-ops when no subtitle is currently shown.
    */
   invokeAccept(): boolean {
-    // Paged subtitle: Space advances to the next page until we run out;
-    // only the FINAL page's accept fires the caller's onAccept. The
-    // intermediate pages have no callback — Space is just "next".
+    // Paged subtitle: Space advances to the next page until we run out.
     if (this.pages && this.pageIdx < this.pages.length - 1) {
       this.pageIdx += 1;
       this.renderCurrentPage();
       return true;
     }
+    // Streaming bar with an active pause hint — Space ADVANCES the
+    // agent past the pause (does NOT stop it). The hint clears, the
+    // streamed text stays; the next agent turn's deltas will keep
+    // appending (or the agent will wipe via clear before next subject).
+    if (this.streamingPauseAccept) {
+      const cb = this.streamingPauseAccept;
+      this.clearStreamingPauseHint();
+      cb();
+      return true;
+    }
+    // Streaming IN PROGRESS (cursor still blinking, no pause hint
+    // attached): Space stops the agent — routes through the host's
+    // close handler so the orchestrator can stop the loop AND show a
+    // polished "stopped" feedback line.
+    if (this.isStreaming()) {
+      this.handleCloseClick();
+      return true;
+    }
+    // Streaming-done / info bars (no accept callback bound): Space
+    // closes the bar. Consistent dismiss gesture across modes.
+    if (this.el && !this.currentOpts?.onAccept) {
+      this.hide();
+      return true;
+    }
     const cb = this.currentOpts?.onAccept;
     if (!cb) {
-      // Paged read-only content (info/agent reply with no accept gate):
-      // last-page Space dismisses cleanly. Non-paged info subtitles are
-      // dismissed by the keydown listener in installInteractionDismiss
-      // — leaving them alone here means nothing routes through this
-      // invokeAccept path for them, so the previous "any key dismisses
-      // info" behaviour is preserved.
       if (this.pages) {
         this.hide();
         return true;
@@ -467,6 +887,16 @@ export class Subtitle {
     return true;
   }
   invokeReject(): boolean {
+    // Pause-hint reject takes priority — fires the pause's reject
+    // callback (host typically stops the agent) and clears the hint
+    // without going through hide() since the streaming bar should
+    // wind down via the host's stop-feedback path instead.
+    if (this.streamingPauseReject) {
+      const cb = this.streamingPauseReject;
+      this.clearStreamingPauseHint();
+      cb();
+      return true;
+    }
     const cb = this.currentOpts?.onReject;
     if (!cb) return false;
     this.hide();
@@ -573,12 +1003,67 @@ export class Subtitle {
       || (isLastPage ? this.renderHints(effectiveOpts) : '');
 
     this.el.setAttribute('data-dddk-bar-type', opts.type);
-    this.el.innerHTML = `
+    this.el.innerHTML = this.wrapBarShell(`
       <div ${UI_ATTR}="bar-text">${renderInlineMarkdown(pageText)}</div>
       ${hints.startsWith(`<div ${UI_ATTR}="bar-hints"`) ? hints : (hints ? `<div ${UI_ATTR}="bar-hints">${escapeHtml(hints)}</div>` : '')}
       ${this.renderButtons(effectiveOpts)}
-    `;
+    `);
     this.wireButtons(effectiveOpts);
+    this.wireClose();
+  }
+
+  /**
+   * Wrap any bar inner-HTML in a frame that gives us:
+   *   1. a non-scrolling × close button pinned to the top-right corner,
+   *      always reachable even when long content scrolls
+   *   2. a `bar-scroll` inner container so the content can be max-height
+   *      capped + scrolled without losing the close button
+   */
+  private wrapBarShell(innerHtml: string): string {
+    return `
+      <button ${UI_ATTR}="bar-close" data-dddk-action="close" aria-label="${escapeHtml(this.closeLabel())}" title="${escapeHtml(this.closeLabel())}">×</button>
+      <div ${UI_ATTR}="bar-scroll">${innerHtml}</div>
+    `;
+  }
+
+  private closeLabel(): string {
+    return this.locale === 'zh-TW' ? '關閉' : 'Close';
+  }
+
+  /**
+   * Wire the × close button's click to hide() + fire any host-supplied
+   * close handler. Idempotent — safe to call after any render path that
+   * uses `wrapBarShell`.
+   */
+  private wireClose(): void {
+    if (!this.el) return;
+    const btn = this.el.querySelector<HTMLButtonElement>(`button[${UI_ATTR}="bar-close"]`);
+    if (!btn) return;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.handleCloseClick();
+    });
+  }
+
+  private handleCloseClick(): void {
+    // The close button is always "user explicitly dismissed". Treat it
+    // like Esc — invoke onCancel if present so a confirm subtitle's
+    // host hook fires (e.g. agent.stop). Then hide.
+    const cancel = this.currentOpts?.onCancel;
+    // Drop any pending indicator BEFORE hide() — otherwise hide() would
+    // re-materialise the "thinking" pip we're about to clear via the
+    // closeHandler, causing a 1-frame flicker.
+    this.pendingIndicator = null;
+    this.hide();
+    // Also kill any currently-visible indicator. The host's closeHandler
+    // will redundantly hide it, but doing it here means a host that
+    // didn't wire a closeHandler still gets a clean dismiss.
+    this.hideIndicator();
+    cancel?.();
+    // Always notify the host so it can run cross-cutting cleanup
+    // (e.g. stop the agent loop even when there was no per-subtitle
+    // onCancel — which is the case for streaming bars).
+    this.closeHandler?.();
   }
 
   private formatPageHint(idx: number, total: number, isLast: boolean): string {
@@ -596,24 +1081,55 @@ export class Subtitle {
   private renderHints(opts: SubtitleShowOptions): string {
     if (opts.hints) return `<div ${UI_ATTR}="bar-hints">${escapeHtml(opts.hints)}</div>`;
 
+    // Subtitles WITHOUT explicit accept/reject AND without an `agent`
+    // type (which is gesture-driven via the script-skill pipeline) get
+    // a faint "press space to close" hint so the user knows the
+    // dismiss gesture without having to find the × button.
+    const isDecisionless = !opts.onAccept && !opts.onReject;
+    if (isDecisionless && opts.type !== 'agent') {
+      const touch = isTouchOnlyDevice();
+      const text = touch
+        ? (this.locale === 'zh-TW' ? '點一下關閉' : 'tap to dismiss')
+        : (this.locale === 'zh-TW' ? '按 space 關閉' : 'press space to close');
+      return `<div ${UI_ATTR}="bar-hints">${text}</div>`;
+    }
+
     // Bundled defaults: SDK ships `en` + `zh-TW` strings. Any other locale
     // (`ja`, `es`, `fr`, …) falls back to `en` so the UI never breaks.
     // Hosts that want a native translation pass it through the `hints`
     // option on `Subtitle.show()` or via the `i18n` config on DotDotDuck.
-    const defaults: Record<string, Record<SubtitleShowOptions['type'], string>> = {
+    // Touch-only devices (phones / tablets) get tap-language copy in
+    // place of the keyboard hints — there's no Space to press there.
+    const touch = isTouchOnlyDevice();
+    const defaults: Record<string, Record<SubtitleShowOptions['type'], string>> = touch ? {
+      'zh-TW': {
+        voice: '點一下繼續 ｜ 雙擊結束',
+        selection: '點一下接受 ｜ 雙擊拒絕',
+        agent: '點一下繼續 ｜ 雙擊結束',
+        post: '點一下接受 ｜ 雙擊拒絕',
+        info: '點一下關閉',
+      },
+      en: {
+        voice: 'tap to continue · double-tap to exit',
+        selection: 'tap to accept · double-tap to reject',
+        agent: 'tap to continue · double-tap to exit',
+        post: 'tap to accept · double-tap to reject',
+        info: 'tap to dismiss',
+      },
+    } : {
       'zh-TW': {
         voice: 'Tab 一行 ｜ space 同意 ｜ 雙擊 space 拒絕',
         selection: 'space 接受 ｜ 雙擊 space 拒絕',
         agent: 'space 繼續 ｜ 雙擊 space 結束',
         post: 'space 接受 ｜ 雙擊 space 拒絕',
-        info: '',
+        info: '按 space 關閉',
       },
       en: {
         voice: 'Tab line · space accept · double-tap reject',
         selection: 'space accept · double-tap reject',
         agent: 'space continue · double-tap exit',
         post: 'space accept · double-tap reject',
-        info: '',
+        info: 'press space to close',
       },
     };
     const dict = defaults[this.locale] ?? defaults.en!;
@@ -624,12 +1140,17 @@ export class Subtitle {
   private renderButtons(opts: SubtitleShowOptions): string {
     if (opts.type === 'info') return '';
     const showCopy = opts.onCopy !== undefined;
+    // On touch devices the bar itself is tap-to-accept / double-tap-to-
+    // reject (see `bindTouchTapGestures`), so the ✓ / ✕ button pair is
+    // redundant and visually heavy on small screens. Hide them on touch;
+    // keep `copy` (it has no gesture equivalent).
+    const touch = isTouchOnlyDevice();
     // Monochrome glyphs only — see user UI memo. Avoid emoji like 📋.
     return `
       <div ${UI_ATTR}="bar-buttons">
         ${showCopy ? `<button data-dddk-action="copy" aria-label="Copy">⎘</button>` : ''}
-        ${opts.onAccept ? `<button data-dddk-action="accept" aria-label="Accept">✓</button>` : ''}
-        ${opts.onReject ? `<button data-dddk-action="reject" aria-label="Reject">✕</button>` : ''}
+        ${!touch && opts.onAccept ? `<button data-dddk-action="accept" aria-label="Accept">✓</button>` : ''}
+        ${!touch && opts.onReject ? `<button data-dddk-action="reject" aria-label="Reject">✕</button>` : ''}
       </div>
     `;
   }
@@ -780,6 +1301,22 @@ export class Subtitle {
  * single very long sentence). The end result reads well aloud and
  * keeps the bar's three-line layout intact while Space-paged.
  */
+/** Touch-only environment heuristic — true on phones / tablets where
+ *  the user has no physical Space key. We swap "press space" hints for
+ *  "tap to continue" copy on these devices. Conservatively requires
+ *  BOTH a touch capability AND a coarse pointer, so a 2-in-1 laptop in
+ *  laptop mode still gets the keyboard hint. */
+function isTouchOnlyDevice(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  const hasTouch = 'ontouchstart' in window || (navigator.maxTouchPoints ?? 0) > 0;
+  if (!hasTouch) return false;
+  try {
+    return window.matchMedia('(pointer: coarse)').matches;
+  } catch {
+    return hasTouch;
+  }
+}
+
 function splitIntoPages(text: string, maxChars: number): string[] {
   const out: string[] = [];
   let remaining = text.trim();
@@ -888,22 +1425,109 @@ function ensureStyles(): void {
      * The hard-coded fallback at the end of each chain is only for hosts
      * that haven't bridged anything yet. */
     [${UI_ATTR}="bar"] {
-      background: var(--dddk-bar-bg, var(--dddk-bg-elevated, rgba(255, 255, 255, 0.96)));
+      position: relative;
+      background: var(--dddk-bar-bg, var(--dddk-bg-elevated, rgba(255, 255, 255, 0.985)));
       color: var(--dddk-bar-text, var(--dddk-text, #1a1a1a));
-      border: 1px solid var(--dddk-bar-border, var(--dddk-border, rgba(0, 0, 0, 0.06)));
-      border-radius: var(--dddk-bar-radius, 12px);
-      box-shadow: var(--dddk-bar-shadow, 0 8px 32px rgba(0, 0, 0, 0.18));
-      padding: var(--dddk-bar-padding, 12px 16px);
-      font-family: var(--dddk-bar-font, var(--dddk-font, system-ui, sans-serif));
-      font-size: var(--dddk-font-size-md, 14px);
-      display: flex; flex-direction: column; gap: 6px;
-      backdrop-filter: blur(var(--dddk-blur, 12px));
-      -webkit-backdrop-filter: blur(var(--dddk-blur, 12px));
+      border: 1px solid var(--dddk-bar-border, var(--dddk-border, rgba(0, 0, 0, 0.08)));
+      border-radius: var(--dddk-bar-radius, 16px);
+      box-shadow: var(--dddk-bar-shadow, 0 18px 48px -12px rgba(0, 0, 0, 0.32), 0 4px 14px rgba(0, 0, 0, 0.08));
+      padding: 0;
+      font-family: var(--dddk-bar-font, var(--dddk-font, system-ui, -apple-system, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif));
+      font-size: var(--dddk-bar-font-size, 15.5px);
+      line-height: 1.65;
+      letter-spacing: 0.005em;
+      backdrop-filter: blur(var(--dddk-blur, 18px));
+      -webkit-backdrop-filter: blur(var(--dddk-blur, 18px));
     }
+    [${UI_ATTR}="bar-scroll"] {
+      max-height: var(--dddk-bar-max-height, min(52vh, 460px));
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 18px 56px 18px 22px;
+      display: flex; flex-direction: column; gap: 10px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--dddk-border, rgba(0,0,0,0.18)) transparent;
+    }
+    [${UI_ATTR}="bar-scroll"]::-webkit-scrollbar { width: 8px; }
+    [${UI_ATTR}="bar-scroll"]::-webkit-scrollbar-track { background: transparent; }
+    [${UI_ATTR}="bar-scroll"]::-webkit-scrollbar-thumb {
+      background: var(--dddk-border, rgba(0,0,0,0.18));
+      border-radius: 4px;
+    }
+    [${UI_ATTR}="bar-close"] {
+      position: absolute;
+      top: 10px; right: 10px;
+      width: 32px; height: 32px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--dddk-close-bg, rgba(0,0,0,0.05));
+      color: var(--dddk-close-fg, var(--dddk-text, #1a1a1a));
+      border: 1px solid var(--dddk-close-border, rgba(0,0,0,0.08));
+      border-radius: 10px;
+      font-size: 18px; line-height: 1;
+      font-weight: 500;
+      cursor: pointer;
+      padding: 0;
+      transition: background 0.12s, color 0.12s, border-color 0.12s, transform 0.08s;
+      z-index: 2;
+      -webkit-tap-highlight-color: transparent;
+    }
+    [${UI_ATTR}="bar-close"]:hover {
+      background: var(--dddk-close-bg-hover, rgba(0,0,0,0.1));
+      border-color: var(--dddk-close-border-hover, rgba(0,0,0,0.16));
+    }
+    [${UI_ATTR}="bar-close"]:focus-visible {
+      outline: 2px solid var(--dddk-accent, #6366f1);
+      outline-offset: 2px;
+    }
+    [${UI_ATTR}="bar-close"]:active { transform: scale(0.92); }
     [${UI_ATTR}="bar-hints"] {
-      color: var(--dddk-bar-hints, var(--dddk-text-muted, #6b6b6b));
+      color: var(--dddk-bar-hints, var(--dddk-text-muted, #6b7280));
+      font-size: var(--dddk-font-size-sm, 12.5px);
+      margin-top: 2px;
     }
-    [${UI_ATTR}="bar-text"] { line-height: var(--dddk-line-height, 1.5); }
+    [${UI_ATTR}="bar-text"] { line-height: 1.65; font-size: inherit; }
+    /* Streaming mode: the bar shows live LLM output token-by-token. A
+       blinking block cursor sits at the tail of the text node so users
+       know more text is on the way. Once the agent loop ends and
+       finalizeStreamed runs, the bar flips to streaming-done and the
+       cursor is removed. */
+    [${UI_ATTR}="bar"][data-dddk-bar-mode="streaming"] [${UI_ATTR}="bar-text"] {
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    [${UI_ATTR}="streaming-cursor"] {
+      display: inline-block;
+      margin-left: 2px;
+      color: var(--dddk-accent, #6366f1);
+      animation: dddk-cursor-blink 1s steps(2) infinite;
+      font-weight: 400;
+      transform: translateY(-1px);
+    }
+    [${UI_ATTR}="bar"][data-dddk-bar-mode="streaming-done"] [${UI_ATTR}="bar-text"] {
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    @keyframes dddk-cursor-blink {
+      0%, 49% { opacity: 1; }
+      50%, 100% { opacity: 0; }
+    }
+    /* Pause hint — attached BELOW the streamed text without replacing
+       the bar. Visually a soft divider + a hint line so the user can
+       still read what just streamed before deciding to continue. */
+    [${UI_ATTR}="streaming-pause"] {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px dashed var(--dddk-border, rgba(0, 0, 0, 0.12));
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    [${UI_ATTR}="streaming-pause-text"] {
+      font-size: var(--dddk-font-size-md, 14.5px);
+      color: var(--dddk-text, #1a1a1a);
+    }
+    [${UI_ATTR}="streaming-pause-hints"] {
+      font-size: var(--dddk-font-size-sm, 12.5px);
+      color: var(--dddk-text-muted, #6b7280);
+    }
     /* Markdown rendering inside subtitle text — LLMs emit **bold** and
        bullet lists by default, so the bar needs to render them properly. */
     [${UI_ATTR}="bar-text"] strong { font-weight: 700; }

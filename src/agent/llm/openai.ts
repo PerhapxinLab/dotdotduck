@@ -10,6 +10,7 @@ import type {
   LLMMessage,
   ToolCall,
 } from './types';
+import { buildStream, type StreamHandle, type StreamingProvider } from './stream';
 import { redactSecrets } from '../../utils/redact';
 
 export interface OpenAIProviderConfig {
@@ -19,15 +20,32 @@ export interface OpenAIProviderConfig {
   organization?: string;
   /** Default request headers (e.g. for self-hosted reverse proxies). */
   headers?: Record<string, string>;
+  /**
+   * Vendor-specific request body fields merged into every request. The
+   * OpenAI Chat Completions shape is a lingua franca — DeepSeek, Qwen,
+   * Together, OpenRouter, etc. all accept it but each adds proprietary
+   * knobs. Put them here:
+   *
+   *   new OpenAIProvider({
+   *     apiKey, baseURL: 'https://api.deepseek.com/v1',
+   *     extraBody: { thinking: { type: 'disabled' } },  // DeepSeek-specific
+   *   });
+   *
+   * Values here are spread shallow-merged into the body AFTER the
+   * built-in fields, so they can override `temperature` / `max_tokens` /
+   * etc. when needed.
+   */
+  extraBody?: Record<string, unknown>;
 }
 
-export class OpenAIProvider implements LLMProvider {
+export class OpenAIProvider implements LLMProvider, StreamingProvider {
   readonly name = 'openai';
 
   private apiKey: string;
   private model: string;
   private baseURL: string;
   private headers: Record<string, string>;
+  private extraBody: Record<string, unknown>;
 
   constructor(config: OpenAIProviderConfig) {
     this.apiKey = config.apiKey;
@@ -39,14 +57,17 @@ export class OpenAIProvider implements LLMProvider {
       ...(config.organization ? { 'OpenAI-Organization': config.organization } : {}),
       ...(config.headers ?? {}),
     };
+    this.extraBody = config.extraBody ?? {};
   }
 
-  async complete(opts: CompleteOptions): Promise<CompleteResult> {
+  private buildBody(opts: CompleteOptions, stream: boolean): Record<string, unknown> {
     const model = opts.model ?? this.model;
     const body: Record<string, unknown> = {
       model,
       messages: opts.messages.map(toOpenAIMessage),
     };
+
+    if (stream) body.stream = true;
 
     // Two orthogonal model-family axes (see `usesMaxCompletionTokens`
     // and `isReasoningModel` for the matchers):
@@ -66,22 +87,6 @@ export class OpenAIProvider implements LLMProvider {
     }
 
     if (reasoning) {
-      // No custom temperature — reasoning models require the default.
-      // Reasoning intensity → reasoning_effort. Three gotchas on
-      // /v1/chat/completions in mid-2026:
-      //   1. The `'minimal'` value was retired — passing it returns
-      //      HTTP 400 "Unsupported value: ... Supported values are
-      //      'none', 'low', 'medium', 'high', 'xhigh'."
-      //   2. `reasoning_effort` is INCOMPATIBLE with `tools`: HTTP 400
-      //      "Function tools with reasoning_effort are not supported …
-      //      Please use /v1/responses instead."
-      //   3. gpt-5.4-mini and similar "mini" variants default to NO
-      //      reasoning at the API level — so when the caller asked for
-      //      `thinking: 'off'`, the cleanest path is to send nothing
-      //      and let the server default kick in (zero conflict with
-      //      tools, no risk of the parameter being renamed again).
-      // So: only send the param when the caller explicitly wants
-      // reasoning enabled, AND the request isn't sending tools.
       const hasTools = (opts.tools?.length ?? 0) > 0;
       const wantsReasoning = opts.thinking && opts.thinking !== 'off';
       if (wantsReasoning && !hasTools) {
@@ -107,6 +112,13 @@ export class OpenAIProvider implements LLMProvider {
       body.tool_choice = 'auto';
     }
 
+    // Vendor-specific knobs (DeepSeek `thinking`, etc.) layered last so
+    // they can override defaults when the host explicitly sets them.
+    return { ...body, ...this.extraBody };
+  }
+
+  async complete(opts: CompleteOptions): Promise<CompleteResult> {
+    const body = this.buildBody(opts, false);
     const response = await fetch(`${this.baseURL}/chat/completions`, {
       method: 'POST',
       headers: this.headers,
@@ -144,6 +156,170 @@ export class OpenAIProvider implements LLMProvider {
       finishReason: (choice.finish_reason as CompleteResult['finishReason']) ?? 'stop',
     };
   }
+
+  /**
+   * Streaming via OpenAI's SSE `chat/completions?stream=true`. Each event is
+   * `data: { ... }` carrying either a text delta or a tool_call fragment.
+   * Tool calls stream piecewise — `index` slots; `id` / `function.name` arrive
+   * on the first fragment, `function.arguments` accumulates JSON characters
+   * across subsequent fragments.
+   */
+  streamComplete(opts: CompleteOptions): StreamHandle {
+    const body = this.buildBody(opts, true);
+    const baseURL = this.baseURL;
+    const headers = this.headers;
+    const apiKey = this.apiKey;
+
+    return buildStream({
+      produce: () => streamOpenAI({ url: `${baseURL}/chat/completions`, headers, body, signal: opts.signal, apiKey }),
+    });
+  }
+}
+
+async function* streamOpenAI(args: {
+  url: string;
+  headers: Record<string, string>;
+  body: Record<string, unknown>;
+  signal?: AbortSignal;
+  apiKey: string;
+}): AsyncIterable<{ delta?: string; toolCall?: ToolCall; finishReason?: CompleteResult['finishReason']; usage?: CompleteResult['usage'] }> {
+  const response = await fetch(args.url, {
+    method: 'POST',
+    headers: args.headers,
+    body: JSON.stringify(args.body),
+    signal: args.signal,
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => response.statusText);
+    throw new Error(`OpenAI HTTP ${response.status}: ${redactSecrets(errText, [args.apiKey])}`);
+  }
+  if (!response.body) {
+    throw new Error('OpenAI: no response body for stream');
+  }
+
+  // Track in-progress tool calls by streaming index. OpenAI emits each
+  // tool_call as a sequence of fragments — first one carries `id` and
+  // `function.name`, subsequent ones carry `function.arguments` deltas.
+  const inflight = new Map<number, { id: string; name: string; argsBuf: string }>();
+  // Track which tool calls have been yielded already so we don't re-yield
+  // every fragment; we emit a single toolCall event when arguments parse
+  // cleanly (typically on the closing `}` or at finish_reason=tool_calls).
+  const yielded = new Set<number>();
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let finishReason: CompleteResult['finishReason'] | undefined;
+  let usage: CompleteResult['usage'] | undefined;
+
+  while (true) {
+    let value: Uint8Array | undefined;
+    let done = false;
+    try {
+      const r = await reader.read();
+      value = r.value;
+      done = r.done;
+    } catch (err) {
+      // User aborted (subtitle ×, Esc, double-tap Space). The fetch's
+      // body stream throws AbortError mid-read — treat as a clean stop
+      // and return so the loop can wind down without an unhandled
+      // rejection bubbling to the console.
+      if ((err as Error).name === 'AbortError') return;
+      throw err;
+    }
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+
+    // SSE events are separated by `\n\n`. Each event line starts with `data: `.
+    let sep: number;
+    while ((sep = buf.indexOf('\n\n')) !== -1) {
+      const event = buf.slice(0, sep);
+      buf = buf.slice(sep + 2);
+      if (!event.trim()) continue;
+
+      for (const line of event.split('\n')) {
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (payload === '[DONE]') continue;
+        let parsed: OpenAIStreamChunk;
+        try {
+          parsed = JSON.parse(payload) as OpenAIStreamChunk;
+        } catch {
+          continue;
+        }
+        if (parsed.usage) {
+          usage = {
+            promptTokens: parsed.usage.prompt_tokens,
+            completionTokens: parsed.usage.completion_tokens,
+          };
+        }
+        const choice = parsed.choices?.[0];
+        if (!choice) continue;
+        const delta = choice.delta ?? {};
+
+        if (typeof delta.content === 'string' && delta.content.length > 0) {
+          yield { delta: delta.content };
+        }
+
+        if (Array.isArray(delta.tool_calls)) {
+          for (const frag of delta.tool_calls) {
+            const idx = frag.index ?? 0;
+            let entry = inflight.get(idx);
+            if (!entry) {
+              entry = { id: frag.id ?? `call_${idx}_${Date.now()}`, name: frag.function?.name ?? '', argsBuf: '' };
+              inflight.set(idx, entry);
+            } else {
+              if (frag.id) entry.id = frag.id;
+              if (frag.function?.name) entry.name = frag.function.name;
+            }
+            if (frag.function?.arguments) entry.argsBuf += frag.function.arguments;
+
+            // Try parsing accumulated JSON. If it parses, the tool call is
+            // complete enough to dispatch — yield exactly once per index.
+            if (entry.name && !yielded.has(idx)) {
+              const parsedArgs = safeParseJson(entry.argsBuf);
+              if (parsedArgs !== null) {
+                yielded.add(idx);
+                yield { toolCall: { id: entry.id, name: entry.name, arguments: parsedArgs } };
+              }
+            }
+          }
+        }
+
+        if (choice.finish_reason) {
+          finishReason = choice.finish_reason as CompleteResult['finishReason'];
+          // Flush any tool calls that didn't get a clean JSON parse yet —
+          // emit with whatever we have (best effort, may be empty object).
+          for (const [idx, entry] of inflight) {
+            if (yielded.has(idx) || !entry.name) continue;
+            yielded.add(idx);
+            yield { toolCall: { id: entry.id, name: entry.name, arguments: safeParseJson(entry.argsBuf) ?? {} } };
+          }
+        }
+      }
+    }
+  }
+
+  if (finishReason || usage) {
+    yield { finishReason, usage };
+  }
+}
+
+interface OpenAIStreamChunk {
+  choices?: Array<{
+    delta?: {
+      content?: string;
+      tool_calls?: Array<{
+        index?: number;
+        id?: string;
+        type?: 'function';
+        function?: { name?: string; arguments?: string };
+      }>;
+    };
+    finish_reason?: string | null;
+  }>;
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
 }
 
 // ─── helpers ────────────────────────────────────────────────────────
