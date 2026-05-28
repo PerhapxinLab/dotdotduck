@@ -556,6 +556,7 @@ export class DotDotDuck {
 
     this.emitter.emit('skill_start', { skillId: skill.id });
     this.emitIntent({ kind: 'skill_started', skillId: skill.id, timestamp: Date.now() });
+    this.currentSkillId = skill.id;
 
     try {
       switch (skill.type) {
@@ -586,6 +587,7 @@ export class DotDotDuck {
     } finally {
       this.emitter.emit('skill_done', { skillId: skill.id });
       this.emitIntent({ kind: 'skill_finished', skillId: skill.id, timestamp: Date.now() });
+      if (this.currentSkillId === skill.id) this.currentSkillId = null;
     }
   }
 
@@ -833,6 +835,14 @@ export class DotDotDuck {
   // (session + intents) as one JSON blob.
   private currentRunId: string | null = null;
   private currentRunIntents: IntentEvent[] = [];
+  /**
+   * Active skill id while a skill is running. Set on skill_started and
+   * cleared on skill_finished. Read by `renderLoopClosure` so the
+   * `agent_feedback` IntentEvent can attribute satisfaction back to the
+   * skill that triggered the run — enables per-skill quality breakdown
+   * on the dashboard without after-the-fact time-window heuristics.
+   */
+  private currentSkillId: string | null = null;
 
   private beginAgentRun(task: string): void {
     this.currentRunId = `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1420,6 +1430,12 @@ export class DotDotDuck {
       return;
     }
 
+    // Snapshot the run + skill at closure render time. Both are stored
+    // on every agent_feedback IntentEvent so the dashboard can roll up
+    // satisfaction by run or by skill without time-window heuristics.
+    const runId = this.currentRunId ?? undefined;
+    const skillId = this.currentSkillId ?? undefined;
+
     if (closure.kind === 'feedback') {
       const now = (): number => Date.now();
       // `persistent: true` removes every passive dismiss path — × close
@@ -1434,11 +1450,11 @@ export class DotDotDuck {
           type: 'agent',
           persistent: true,
           onAccept: () => {
-            this.emitIntent({ kind: 'agent_feedback', satisfied: true, summary: closure.text, timestamp: now() });
+            this.emitIntent({ kind: 'agent_feedback', runId, skillId, satisfied: true, summary: closure.text, timestamp: now() });
             resolve();
           },
           onReject: () => {
-            this.emitIntent({ kind: 'agent_feedback', satisfied: false, summary: closure.text, timestamp: now() });
+            this.emitIntent({ kind: 'agent_feedback', runId, skillId, satisfied: false, summary: closure.text, timestamp: now() });
             resolve();
           },
         });
@@ -1459,6 +1475,8 @@ export class DotDotDuck {
           const picked = closure.options[index];
           this.emitIntent({
             kind: 'agent_feedback',
+            runId,
+            skillId,
             satisfied: null,
             summary: picked?.value ?? value,
             timestamp: Date.now(),
@@ -1466,7 +1484,7 @@ export class DotDotDuck {
           resolve();
         },
         onCancel: () => {
-          this.emitIntent({ kind: 'agent_feedback', satisfied: null, summary: '', timestamp: Date.now() });
+          this.emitIntent({ kind: 'agent_feedback', runId, skillId, satisfied: null, summary: '', timestamp: Date.now() });
           resolve();
         },
       });

@@ -164,7 +164,17 @@ export type IntentEvent =
    * (Esc / click-outside). Useful for measuring agent quality from
    * the intent stream.
    */
-  | { kind: 'agent_feedback'; satisfied: boolean | null; summary: string; timestamp: number };
+  /**
+   * Fired by the end-of-loop closure when the host opts into
+   * `kind: 'feedback'` or `kind: 'ask_user'` via WebAgentConfig.onLoopEnd.
+   * `satisfied: true` = Space accept; `false` = double-tap reject; `null`
+   * = ask_user picker (the chosen value lives in `summary`). `runId`
+   * ties the rating back to the agent_run_started this run came from,
+   * so dashboards can compute per-run satisfaction without time-window
+   * heuristics. `skillId` is set when a skill triggered the run, so
+   * per-skill quality breakdowns work directly off the intent stream.
+   */
+  | { kind: 'agent_feedback'; runId?: string; skillId?: string; satisfied: boolean | null; summary: string; timestamp: number };
 
 export interface DddkEventMap {
   subtitle_show: SubtitleShowOptions;
