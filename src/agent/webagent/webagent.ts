@@ -570,7 +570,7 @@ export class WebAgent {
 
   /**
    * CoT-mode loop — every turn returns a single `agent_turn` tool call
-   * whose args carry `{ memory, next_goal, actions[] }`. The runtime
+   * whose args carry `{ memory, todos_remaining, actions[]? }`. The runtime
    * parses the envelope, then iterates actions in order:
    *   - `narrate` → typewriter-stream to the subtitle bar
    *   - `tool` → confirm-gate (if destructive) + dispatch through the
@@ -664,7 +664,6 @@ export class WebAgent {
         url: this.session.currentPage,
         memory: turn.memory,
         todos_remaining: turn.todos_remaining,
-        next_goal: turn.next_goal,
         actions: turn.actions.map((a) =>
           isNarrateAction(a)
             ? { narrate: a.narrate.length > 100 ? a.narrate.slice(0, 100) + '…' : a.narrate }
@@ -685,6 +684,21 @@ export class WebAgent {
         w.__dddkDebug.lastTurnAt = new Date().toISOString();
       }
 
+      // Structural normalization. The envelope is a two-field chain:
+      //   todos_remaining  →  actions
+      // (what's still owed  → how to clear the head of the queue)
+      //
+      // When `todos_remaining` is empty the chain has no head — actions
+      // is inert by definition. The schema makes `actions` optional, so
+      // a well-behaved model omits it; we still defensively force it to
+      // [] here for the rare case a model emits an actions field anyway.
+      if (turn.todos_remaining.length === 0 && turn.actions.length > 0) {
+        if (typeof console !== 'undefined') {
+          console.info('[dddk webagent] todos empty → ' + turn.actions.length + ' queued actions normalized away; loop ends');
+        }
+        turn.actions = [];
+      }
+
       if (turn.actions.length === 0) {
         // Empty actions[] = task complete. Record the envelope so history
         // replays cleanly, then end the loop.
@@ -696,7 +710,6 @@ export class WebAgent {
             data: {
               memory: turn.memory,
               todos_remaining: turn.todos_remaining,
-              next_goal: turn.next_goal,
               action_count: 0,
               action_results: [],
             },
@@ -925,7 +938,6 @@ export class WebAgent {
       const envelopeData = {
         memory: turn.memory,
         todos_remaining: turn.todos_remaining,
-        next_goal: turn.next_goal,
         action_results: actionResults,
         page_changed: pageChanged,
       };

@@ -143,12 +143,11 @@ function renderCotDefault(ctx: PromptContext): string {
 
 # Envelope
 
-Each turn call \`agent_turn\` with four fields:
+Each turn call \`agent_turn\` with these fields. The shape is a chain — todos_remaining describes the queue, actions does the work on its head item:
 
 - **memory** — 1-2 sentences of progress. Private, not shown.
 - **todos_remaining** — concrete SECTION-LEVEL items still owed to the user's ORIGINAL request. Each item = one section / one page / one operation. NOT detail-level (don't write "explain contact INCLUDING mailto AND response time AND working days" — that's one section, one item: "explain contact section"). Each turn: REMOVE items whose section has been bordered or narrated, ADD newly-discovered sections, KEEP unfinished ones. Forbidden: "verify user", "confirm needed", "supplementary explanation", "refine for precision/completeness", "add missing detail to already-covered section".
-- **next_goal** — what THIS turn accomplishes, sized to fit in the actions[] you're about to emit. Avoid multi-turn ambitions like "introduce everything".
-- **actions** — ordered list of \`{narrate}\` or \`{tool, args}\`. Quote real text from the DOM dump; don't paraphrase. Empty array ends the loop — use when todos_remaining is empty.
+- **actions** — ordered list of \`{narrate}\` or \`{tool, args}\` that clear the FIRST item in todos_remaining. Quote real text from the DOM dump; don't paraphrase. **Omit this field entirely (or set to \`[]\`) when todos_remaining is empty — that ends the loop.**
 
 The runtime auto-pauses after each narrate (waits for user Space). Pacing is automatic.
 

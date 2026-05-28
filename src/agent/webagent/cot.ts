@@ -36,20 +36,28 @@ export type TurnAction =
   | { narrate: string }
   | { tool: string; args?: Record<string, unknown> };
 
-/** Full parsed turn response. */
+/** Full parsed turn response.
+ *
+ *  Three-field envelope by design. Earlier versions had a separate
+ *  `next_goal` field but it was redundant with `todos_remaining[0]` and
+ *  became a load-bearing source of inconsistency — when `todos_remaining`
+ *  was empty the JSON Schema's `required` constraint forced the model
+ *  to invent a "wrap-up" goal, which then justified a final summary
+ *  narrate that the user had no use for. Dropping the field removes the
+ *  buffer where that pathology lived. The chain now is literally
+ *  `todos_remaining → actions`. */
 export interface TurnResponse {
   /** Short progress note. ~1-2 sentences. Not shown to the user. */
   memory: string;
   /** Explicit checklist of what still needs to happen for the user's
    *  ORIGINAL request to be fully addressed. Evolves each turn — items
-   *  added as discovered, removed as completed. When empty, emit
-   *  `actions: []` to end the loop. */
+   *  added as discovered, removed as completed. When empty, this run
+   *  is done and `actions` should be empty / omitted. */
   todos_remaining: string[];
-  /** One sentence describing what this turn aims to do. Not shown to
-   *  the user; goes to the analytics intent stream. */
-  next_goal: string;
-  /** Ordered list of actions. Empty array ends the loop — use when
-   *  `todos_remaining` is empty. */
+  /** Ordered list of actions for THIS turn — the operations needed to
+   *  knock the next item off `todos_remaining`. Optional: when there's
+   *  nothing left to do (`todos_remaining` is empty), omit this field
+   *  or set it to `[]` and the loop ends. */
   actions: TurnAction[];
 }
 
@@ -87,7 +95,11 @@ ${toolReference}`,
     parameters: {
       type: 'object',
       additionalProperties: false,
-      required: ['memory', 'todos_remaining', 'next_goal', 'actions'],
+      // `actions` is intentionally NOT in `required` — when
+      // todos_remaining is empty the run is done and the model should
+      // be able to commit to an empty / omitted actions field WITHOUT
+      // the schema pressuring it to fabricate a "wrap-up" entry.
+      required: ['memory', 'todos_remaining'],
       properties: {
         memory: {
           type: 'string',
@@ -96,11 +108,7 @@ ${toolReference}`,
         todos_remaining: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Concrete items still owed to the user\'s original request. Each turn: remove completed items, add newly-revealed items. No "verify user" / "confirm needed" / "supplementary" items.',
-        },
-        next_goal: {
-          type: 'string',
-          description: 'What THIS turn accomplishes — sized to fit in this turn\'s actions[]. Not a multi-turn ambition.',
+          description: 'Concrete items still owed to the user\'s original request. Each turn: remove completed items, add newly-revealed items. No "verify user" / "confirm needed" / "supplementary" items. Empty array means the run is done — omit `actions` or set to [].',
         },
         actions: {
           type: 'array',
@@ -149,33 +157,31 @@ export function parseTurnResponse(rawArgs: string | Record<string, unknown>): Tu
   if (!obj || typeof obj !== 'object') return null;
   const r = obj as Partial<TurnResponse> & Record<string, unknown>;
 
-  // Required string fields. If memory / next_goal missing → bail.
+  // The only hard parse requirement: a memory string. todos_remaining
+  // and actions are both tolerated as missing — the chain naturally
+  // terminates when either is empty.
   if (typeof r.memory !== 'string') return null;
-  if (typeof r.next_goal !== 'string') return null;
-  if (!Array.isArray(r.actions)) return null;
 
-  // Tolerate the array being missing/null — backfill to [] rather than
-  // failing the whole parse. memory / next_goal / actions are still
-  // required for parse to succeed (checked above).
   const todos_remaining: string[] = Array.isArray(r.todos_remaining)
     ? r.todos_remaining.filter((t): t is string => typeof t === 'string')
     : [];
 
   const actions: TurnAction[] = [];
-  for (const a of r.actions) {
-    if (!a || typeof a !== 'object') continue;
-    const obj = a as Record<string, unknown>;
-    if (typeof obj.narrate === 'string') {
-      actions.push({ narrate: obj.narrate });
-    } else if (typeof obj.tool === 'string') {
-      const args = (obj.args && typeof obj.args === 'object') ? obj.args as Record<string, unknown> : {};
-      actions.push({ tool: obj.tool, args });
+  if (Array.isArray(r.actions)) {
+    for (const a of r.actions) {
+      if (!a || typeof a !== 'object') continue;
+      const obj = a as Record<string, unknown>;
+      if (typeof obj.narrate === 'string') {
+        actions.push({ narrate: obj.narrate });
+      } else if (typeof obj.tool === 'string') {
+        const args = (obj.args && typeof obj.args === 'object') ? obj.args as Record<string, unknown> : {};
+        actions.push({ tool: obj.tool, args });
+      }
     }
   }
   return {
     memory: r.memory,
     todos_remaining,
-    next_goal: r.next_goal,
     actions,
   };
 }

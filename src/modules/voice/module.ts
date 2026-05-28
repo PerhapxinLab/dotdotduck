@@ -67,6 +67,7 @@ export class VoiceModule {
       let timer: ReturnType<typeof setTimeout> | null = null;
       const cleanup = () => {
         this.stt.off('final', handler);
+        this.stt.off('start', onStart);
         if (timer != null) clearTimeout(timer);
         subtitle?.hideIndicator();
       };
@@ -76,6 +77,19 @@ export class VoiceModule {
         cleanup();
         resolve(String(text ?? ''));
       };
+      // The STT engine fires `start` when the mic is actually captured —
+      // that's AFTER the permission grant + browser-side warmup. We
+      // delay the "Listening" indicator until that moment so the first-
+      // use case (user holds the button, browser is prompting for mic
+      // permission) doesn't show a label promising audio capture before
+      // any audio is actually being captured. Until then we show the
+      // generic processing indicator so the bar isn't empty during the
+      // ~hundreds-of-ms preparing window.
+      const onStart = (): void => {
+        if (settled) return;
+        subtitle?.showIndicator('listening', this.listeningLabel);
+      };
+      this.stt.on('start', onStart);
       this.stt.on('final', handler);
       // Failsafe: some STT engines (or denied permissions) never fire 'final'.
       // Caller-configurable upper bound so the indicator doesn't hang forever.
@@ -86,7 +100,7 @@ export class VoiceModule {
         try { this.stt.stop(); } catch { /* ignore */ }
         resolve('');
       }, this.captureTimeoutMs);
-      subtitle?.showIndicator('listening', this.listeningLabel);
+      subtitle?.showIndicator('processing');
       this.stt.start();
     });
   }
