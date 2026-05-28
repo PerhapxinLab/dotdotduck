@@ -5,7 +5,7 @@
 import { inferSelector } from '../utils/selector';
 import { escapeHtml } from '../utils/dom';
 import { genId } from '../utils/id';
-import { sdkString } from '../utils/sdk-i18n';
+import { sdkString, type SdkI18nKey } from '../utils/sdk-i18n';
 import { ensurePaletteStyles, UI_ATTR } from './command-palette/styles';
 
 /**
@@ -525,22 +525,30 @@ export class CommandPalette {
     this.locale = locale;
     this.placeholder = sdkString(locale, 'palette.placeholder');
     if (this.input) this.input.placeholder = this.placeholder;
-    if (this.root) {
-      const footer = this.root.querySelector<HTMLElement>(`[${UI_ATTR}="palette-footer"]`);
-      if (footer) {
-        footer.innerHTML = `
-          <span data-dddk-ui="palette-footer-group">
-            <kbd>↑</kbd><kbd>↓</kbd> <span>${escapeHtml(sdkString(this.locale, 'palette.footer.navigate'))}</span>
-          </span>
-          <span data-dddk-ui="palette-footer-group">
-            <kbd>↵</kbd> <span>${escapeHtml(sdkString(this.locale, 'palette.footer.select'))}</span>
-          </span>
-          <span data-dddk-ui="palette-footer-group">
-            <kbd>esc</kbd> <span>${escapeHtml(sdkString(this.locale, 'palette.footer.close'))}</span>
-          </span>
-        `;
-      }
-    }
+    this.refreshFooter();
+  }
+
+  /** Rebuild the kbd hint row to match the current locale + state.
+   *  Esc flips between "close" (root level) and "back" (inside a result
+   *  surface or a sub-menu — anywhere Esc unwinds one layer instead of
+   *  closing the whole palette). Idempotent; safe to call on every
+   *  state transition. */
+  private refreshFooter(): void {
+    if (!this.root) return;
+    const footer = this.root.querySelector<HTMLElement>(`[${UI_ATTR}="palette-footer"]`);
+    if (!footer) return;
+    const escKey: SdkI18nKey = this.hasInternalEsc() ? 'palette.footer.back' : 'palette.footer.close';
+    footer.innerHTML = `
+      <span data-dddk-ui="palette-footer-group">
+        <kbd>↑</kbd><kbd>↓</kbd> <span>${escapeHtml(sdkString(this.locale, 'palette.footer.navigate'))}</span>
+      </span>
+      <span data-dddk-ui="palette-footer-group">
+        <kbd>↵</kbd> <span>${escapeHtml(sdkString(this.locale, 'palette.footer.select'))}</span>
+      </span>
+      <span data-dddk-ui="palette-footer-group">
+        <kbd>esc</kbd> <span>${escapeHtml(sdkString(this.locale, escKey))}</span>
+      </span>
+    `;
   }
 
   toggle(initialSelection?: string): void {
@@ -548,7 +556,18 @@ export class CommandPalette {
     else this.open(initialSelection);
   }
 
-  open(initialSelection?: string): void {
+  /** Programmatically set the palette's search input value (and refilter
+   *  the visible list). Used by hosts driving the palette from outside —
+   *  e.g. the webagent's `open_palette({ initialInput })` tool seeds a
+   *  prefix command like `docs:` so the user lands on the right sub-list. */
+  setInputValue(value: string): void {
+    if (this.input) {
+      this.input.value = value;
+      this.refilter();
+    }
+  }
+
+  open(initialSelection?: string, opts?: { focusInput?: boolean }): void {
     if (this.isOpen()) return;
     ensurePaletteStyles();
     // Every open is a fresh root-state palette — discard any sub-menu the
@@ -560,7 +579,16 @@ export class CommandPalette {
     this.captureContextOnOpen(initialSelection);
     this.render();
     this.refilter();
-    requestAnimationFrame(() => this.input?.focus());
+    // Default behaviour: auto-focus the input so the user can start typing
+    // immediately. Programmatic openers (the webagent's `open_palette` tool)
+    // pass `focusInput: false` to keep focus on body — that way the user can
+    // still press Space to advance the agent without typing literal spaces
+    // into the palette input, and the agent's narration / pause flow keeps
+    // working naturally.
+    const focusInput = opts?.focusInput ?? true;
+    if (focusInput) {
+      requestAnimationFrame(() => this.input?.focus());
+    }
   }
 
   close(): void {
@@ -840,6 +868,7 @@ export class CommandPalette {
     this.resultHost.style.display = 'block';
     this.resultHost.textContent = '';
     if (this.listSplit) this.listSplit.style.display = 'none';
+    this.refreshFooter();
 
     let value: Awaited<Exclude<ResultSurface, (...args: never) => unknown>>;
     try {
@@ -900,6 +929,7 @@ export class CommandPalette {
       this.resultHost.textContent = '';
     }
     if (this.listSplit) this.listSplit.style.display = 'flex';
+    this.refreshFooter();
   }
 
   /**
@@ -1123,6 +1153,12 @@ export class CommandPalette {
       // palette" so we don't wrongly close. (The row's own mousedown also
       // stopPropagation's now, so this is suspenders + belt.)
       if (!document.contains(e.target)) return;
+      // Narrow exemption — ONLY the subtitle bar. The agent narrates
+      // while the user interacts with the palette, and clicking the
+      // narration to read it should NOT kill the palette mid-task.
+      // Other outside clicks (page body, other dddk UI) close as
+      // normal — that's the user signalling "I'm moving on".
+      if (e.target instanceof Element && e.target.closest('[data-dddk-ui="bar"]')) return;
       e.preventDefault();
       this.close();
     };
@@ -1257,6 +1293,7 @@ export class CommandPalette {
         this.clearInputContext();
         if (this.input) this.input.value = '';
         this.refilter();
+        this.refreshFooter();
       } else {
         this.close();
       }
@@ -1822,6 +1859,14 @@ export class CommandPalette {
 
       const li = document.createElement('li');
       li.setAttribute(UI_ATTR, 'palette-item');
+      // `role="option"` is what makes the row clickable from the webagent's
+      // perspective — without it the DOM walker treats <li> as a content
+      // line (no index, no hash id), and the agent has no handle to call
+      // `click` on. With role=option, the walker indexes it like any
+      // other interactive element and the agent can drive the palette
+      // exactly like a user would. Also semantically correct: the palette
+      // panel is a listbox of options.
+      li.setAttribute('role', 'option');
       li.dataset.idx = String(idx);
       if (idx === this.cursor) li.setAttribute('data-active', 'true');
       const prefixLabel = displayPrefix(item.prefix);
@@ -1868,6 +1913,18 @@ export class CommandPalette {
       li.addEventListener('mousedown', (e) => {
         e.preventDefault();    // keep input focus
         e.stopPropagation();   // do NOT bubble to the backdrop close handler
+        this.activate(idx);
+      });
+      // Also listen for `click` events so programmatic invocations
+      // (webagent's `click` action → `el.click()`) activate the row.
+      // Real user mousedown calls `activate` then `<li>` is usually
+      // detached (palette closes / replaces). The `isConnected` guard
+      // prevents a second activation when click fires on the detached
+      // node a moment later.
+      li.addEventListener('click', (e) => {
+        if (!li.isConnected) return;
+        e.preventDefault();
+        e.stopPropagation();
         this.activate(idx);
       });
       this.list!.appendChild(li);
@@ -1981,6 +2038,7 @@ export class CommandPalette {
         this.items = items;
         if (this.input) this.input.value = '';
         this.refilter();
+        this.refreshFooter();
       },
       get input() {
         return inputRef?.value ?? '';

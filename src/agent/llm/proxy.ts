@@ -271,6 +271,7 @@ function defaultBody(opts: CompleteOptions): Record<string, unknown> {
   return {
     messages: opts.messages,
     tools: opts.tools,
+    toolChoice: opts.toolChoice,
     temperature: opts.temperature,
     maxTokens: opts.maxTokens,
     model: opts.model,

@@ -28,8 +28,14 @@ const STYLE_ID = 'dddk-placement-style';
 
 const PLACEMENT_CSS = `
   /* Z-index ladder, low → high:
-     fab(9200) < banner(9300) < dock(9400) < subtitle(9500) <
-     indicator(9510) < palette(9600) < modal(9700) < toast(9800) */
+     fab(9200) < banner(9300) < dock(9400) < palette(9900) <
+     modal(9700) < subtitle(9950) < indicator(9960) < toast(9999)
+
+     Note: subtitle sits ABOVE palette / modal. The agent narrates
+     into the subtitle bar while the user interacts with palette / form
+     surfaces — both must stay visible. If subtitle were below the
+     palette backdrop the user would lose the narration the moment the
+     agent opens a palette / modal. */
 
   [${PLACEMENT_ATTR}="subtitle"] {
     position: fixed;
@@ -38,7 +44,7 @@ const PLACEMENT_CSS = `
     transform: translateX(-50%);
     max-width: var(--dddk-bar-max-width, 720px);
     width: calc(100% - 48px);
-    z-index: var(--dddk-z-bar, 9500);
+    z-index: var(--dddk-z-bar, 9950);
     box-sizing: border-box;
   }
 
@@ -47,7 +53,7 @@ const PLACEMENT_CSS = `
     left: 50%;
     bottom: var(--dddk-indicator-bottom, 88px);
     transform: translateX(-50%);
-    z-index: calc(var(--dddk-z-bar, 9500) + 10);
+    z-index: calc(var(--dddk-z-bar, 9950) + 10);
     box-sizing: border-box;
   }
 

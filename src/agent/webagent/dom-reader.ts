@@ -187,9 +187,14 @@ export interface DomReadOptions {
 export interface IndexedDomResult {
   /** Tab-indented text dump for the LLM. */
   text: string;
-  /** Map from emitted index → live DOM element. Tool handlers look up
-   *  here when the LLM passes an `[N]` index as the target. */
-  indexMap: Map<number, Element>;
+  /** Map from emitted stable ID → live DOM element. Tool handlers look
+   *  up here when the LLM passes an `[id]` reference as the target.
+   *  IDs are short alphanumeric hashes (e.g. `e4f3a`) computed from the
+   *  element's tag + role + sibling position + first 30 chars of text,
+   *  so the same element keeps the same ID across turns — fixing the
+   *  cross-turn drift where `[5]` in turn N pointed at a different
+   *  element than `[5]` in turn N+1. */
+  indexMap: Map<string, Element>;
   /** Total bytes emitted (post-truncation). */
   bytes: number;
 }
@@ -228,7 +233,6 @@ export function readDOM(opts: DomReadOptions = {}): IndexedDomResult {
   lines.push('');
 
   const ctx: WalkCtx = {
-    nextIndex: 1,
     indexMap: new Map(),
     seenLinkSigs: new Set(),
     seenContentSigs: new Set(),
@@ -246,7 +250,7 @@ export function readDOM(opts: DomReadOptions = {}): IndexedDomResult {
   // the agent saw at any given turn.
   if (typeof window !== 'undefined') {
     const w = window as unknown as {
-      __dddkDebug?: { lastDom?: string; lastDomAt?: string; lastDomBytes?: number; lastIndexMap?: Map<number, Element> };
+      __dddkDebug?: { lastDom?: string; lastDomAt?: string; lastDomBytes?: number; lastIndexMap?: Map<string, Element> };
     };
     w.__dddkDebug = w.__dddkDebug ?? {};
     w.__dddkDebug.lastDom = out;
@@ -259,8 +263,7 @@ export function readDOM(opts: DomReadOptions = {}): IndexedDomResult {
 }
 
 interface WalkCtx {
-  nextIndex: number;
-  indexMap: Map<number, Element>;
+  indexMap: Map<string, Element>;
   /** href|text — second occurrence of the same link is skipped. */
   seenLinkSigs: Set<string>;
   /** tag|text — second occurrence of the same content line is skipped
@@ -409,12 +412,50 @@ function walk(
   }
 }
 
-/** Assign + record a new index for `node`. Tool handlers later look
- *  this up to resolve `[N]` references to real elements. */
-function takeIndex(node: Element, ctx: WalkCtx): number {
-  const idx = ctx.nextIndex++;
-  ctx.indexMap.set(idx, node);
-  return idx;
+/** Assign + record a stable ID for `node`. Tool handlers later look
+ *  this up to resolve `[id]` references to real elements. The ID is
+ *  a short alphanumeric hash derived from the element's structural +
+ *  textual signature, so the same element keeps the same ID across
+ *  turns. Collisions (rare but possible) get a `-2`, `-3` suffix. */
+function takeIndex(node: Element, ctx: WalkCtx): string {
+  const base = stableElementId(node);
+  let id = base;
+  let n = 2;
+  while (ctx.indexMap.has(id)) {
+    id = `${base}-${n++}`;
+  }
+  ctx.indexMap.set(id, node);
+  return id;
+}
+
+/** Compute a stable 5-char ID for an element. Inputs that make this
+ *  cross-turn stable: tag, ARIA role, sibling position among same-tag
+ *  siblings, first 30 chars of text content, and href for anchors.
+ *  Outputs of the form `e<4 base36 chars>` so the ID never starts
+ *  with a digit (keeps it distinguishable from legacy numeric refs). */
+function stableElementId(node: Element): string {
+  const tag = node.tagName;
+  const role = node.getAttribute('role') ?? '';
+  const text = (node.textContent ?? '').slice(0, 30).replace(/\s+/g, ' ').trim();
+  const href = node instanceof HTMLAnchorElement ? node.getAttribute('href') ?? '' : '';
+  let siblingIdx = 0;
+  const parent = node.parentElement;
+  if (parent) {
+    const same = Array.from(parent.children).filter((c) => c.tagName === tag);
+    siblingIdx = same.indexOf(node);
+  }
+  const sig = `${tag}|${role}|${siblingIdx}|${text}|${href}`;
+  return 'e' + fnv1a32(sig).toString(36).padStart(4, '0').slice(-4);
+}
+
+/** FNV-1a 32-bit hash. Deterministic, fast, no crypto needs. */
+function fnv1a32(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
 }
 
 /** Last-resort accessible name for icon-only buttons / image-only links:

@@ -38,6 +38,17 @@ export interface CompleteOptions {
    * itself should still say "Reply with JSON only" as a fallback.
    */
   jsonMode?: boolean;
+  /**
+   * Force which tool the model must call.
+   *   - `'auto'` (default) — model picks zero or one tool
+   *   - `'required'` — model must call exactly one tool (any tool in `tools`)
+   *   - `{ name: 'foo' }` — model must call the named tool
+   *
+   * Used by the WebAgent's CoT mode to force the wrapping `agent_turn`
+   * tool every turn. Providers that don't support targeted tool_choice
+   * fall back to `'required'` or `'auto'`.
+   */
+  toolChoice?: 'auto' | 'required' | { name: string };
 }
 
 export interface CompleteResult {

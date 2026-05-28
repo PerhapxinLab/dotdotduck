@@ -32,9 +32,10 @@ import { I18N, DEFAULT_TRANSLATE_TARGETS } from './i18n';
 import {
   SYSTEM_PROMPT,
   extractReplacement,
+  findEndMarker,
+  REPLACEMENT_END_VARIANTS,
   buildContextPrompt,
   REPLACEMENT_START,
-  REPLACEMENT_END,
 } from './parse';
 import { ensureInlineAgentStyles, UI_ATTR } from './styles';
 
@@ -322,7 +323,12 @@ export class InlineAgent {
       },
       { id: 'shorter', icon: '↤',
         label: { en: I18N.en.shorter, 'zh-TW': I18N['zh-TW'].shorter },
-        instruction: `Make the text ~30% shorter while keeping all key information and language. Output only the result.`,
+        // Aggressive shortening — the previous prompt ("~30% shorter while
+        // keeping all key information") asked the model to do two opposing
+        // things at once, so most outputs only trimmed a couple of filler
+        // words. We name concrete things to drop (hedging, repetition,
+        // examples, qualifiers) and set a HARD floor of "at least half".
+        instruction: `Aggressively shorten this text to AT MOST half its original length. Keep only the core point. Drop: filler words, hedging ("perhaps", "I think", "可能", "或許"), repetition, redundant clauses, examples, qualifiers, and any sentence that merely restates a previous one. If two sentences can be one, make it one. Keep the same language as the input. Output ONLY the shortened text — no preamble, no explanation, no quotes.`,
       },
       { id: 'longer', icon: '↦',
         label: { en: I18N.en.longer, 'zh-TW': I18N['zh-TW'].longer },
@@ -957,21 +963,28 @@ export class InlineAgent {
         }
       }
 
-      // Process whatever's new since last iteration, watching for END.
+      // Process whatever's new since last iteration, watching for any
+      // recognised end-marker variant (canonical `<<<END>>>` plus the
+      // hybrid SEL-style variants small models sometimes emit).
       const newRaw = totalText.slice(processedLen);
-      const endIdx = newRaw.indexOf(REPLACEMENT_END);
+      const end = findEndMarker(newRaw);
 
       let safeChunk: string;
       let consumeLen: number;
       let finished = false;
-      if (endIdx >= 0) {
-        safeChunk = newRaw.slice(0, endIdx);
-        consumeLen = endIdx + REPLACEMENT_END.length;
+      if (end !== null) {
+        safeChunk = newRaw.slice(0, end.idx);
+        consumeLen = end.idx + end.len;
         finished = true;
       } else {
-        // Hold back the tail if it could be the start of "<<<END>>>".
-        const partialIdx = findPartialMarkerTail(newRaw, REPLACEMENT_END);
-        const safeEnd = partialIdx >= 0 ? partialIdx : newRaw.length;
+        // Hold back the tail if it could be the start of ANY end-marker
+        // variant. Otherwise a chunk boundary mid-marker would leak the
+        // marker's leading characters into the input.
+        let safeEnd = newRaw.length;
+        for (const variant of REPLACEMENT_END_VARIANTS) {
+          const partialIdx = findPartialMarkerTail(newRaw, variant);
+          if (partialIdx >= 0 && partialIdx < safeEnd) safeEnd = partialIdx;
+        }
         safeChunk = newRaw.slice(0, safeEnd);
         consumeLen = safeEnd;
       }

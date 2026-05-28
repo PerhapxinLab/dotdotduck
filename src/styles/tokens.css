@@ -169,13 +169,14 @@
   --dddk-palette-kbd-color: var(--dddk-text-muted);
 
   /* ─── z-index ──────────────────────────────────────────────────── */
-  /* Palette is the user's escape hatch — must sit ABOVE the subtitle
-     bar so a mid-agent palette open visually wins. Cursor on top so
-     the agent's pointer ghost reads as the foreground layer. */
-  --dddk-z-bar: 9500;
+  /* Subtitle bar sits ABOVE the palette backdrop — the agent narrates
+     while the user interacts with the palette, both must stay visible.
+     Cursor on top so the agent's pointer ghost reads as the foreground
+     layer. */
+  --dddk-z-bar: 9950;
   --dddk-z-palette: 9700;
   --dddk-z-pointer: 9400;
-  --dddk-z-cursor: 9800;
+  --dddk-z-cursor: 9990;
 }
 
 /* ─── dark mode ──────────────────────────────────────────────────── */

@@ -55,13 +55,16 @@ import {
   renderSelectionBlock,
   renderPageStateBlock,
   renderUserReminder,
+  renderPaletteCommandsForToolDescription,
 } from './prompt';
-import { builtinActions } from './actions';
+import { builtinActions, presentSurface } from './actions';
 import { readDOM } from './dom-reader';
 import { captureScreenshots, type ScreenshotConfig } from './screenshot';
 import { setupCrossTabSync, publishCrossTab } from './cross-tab';
 import { executeAction } from './execute-action';
 import { DEFAULT_DESTRUCTIVE_PATTERNS, isDestructiveByPattern } from './destructive';
+import { sdkString } from '../../utils/sdk-i18n';
+import { AGENT_TURN_TOOL, buildAgentTurnTool, parseTurnResponse, isNarrateAction, isToolAction } from './cot';
 
 const DEFAULT_MAX_STEPS = 30;
 const DEFAULT_MAX_ERRORS = 3;
@@ -110,6 +113,10 @@ export class WebAgent {
     };
 
     for (const action of builtinActions) this.actions.set(action.name, action);
+    // Opt-in: surface presentation. Only registered when the host enables
+    // it AND will wire `setSurfaceMounter` — otherwise the action exists
+    // in the registry but execute-action's intercept fails-fast.
+    if (config.allowPresent) this.actions.set(presentSurface.name, presentSurface as ActionDefinition);
     for (const action of config.customActions ?? []) this.actions.set(action.name, action);
 
     this.destructivePatterns = config.destructivePatterns ?? DEFAULT_DESTRUCTIVE_PATTERNS;
@@ -130,6 +137,25 @@ export class WebAgent {
 
   registerAction(action: ActionDefinition): void {
     this.actions.set(action.name, action);
+  }
+
+  /** Update the locale used for confirmation copy + system-prompt
+   *  output-language hint. Called by the orchestrator when the host
+   *  flips language at runtime. The currently-running turn keeps its
+   *  prompt; the next turn picks up the new locale. */
+  setLocale(locale: string): void {
+    this.config.locale = locale;
+  }
+
+  /** Set by the orchestrator — invoked per turn to fetch the host's
+   *  current palette commands. Returning items inlines them in the
+   *  system prompt so the agent sees what host-registered commands
+   *  exist without having to call `list_palette` first. Optional;
+   *  hosts running WebAgent standalone (no palette UI) just leave it
+   *  unset. */
+  private paletteContextProvider: (() => import('./prompt').PaletteCommandSummary[]) | null = null;
+  setPaletteContextProvider(fn: () => import('./prompt').PaletteCommandSummary[]): void {
+    this.paletteContextProvider = fn;
   }
 
   /** Set by the orchestrator — called when the agent picks `navigate`.
@@ -160,13 +186,12 @@ export class WebAgent {
    * action handler dispatches.
    */
   resolveSelector(target: string | number): Element | null {
-    if (typeof target === 'number') return this.currentIndexMap.get(target) ?? null;
+    if (typeof target === 'number') return this.currentIndexMap.get(String(target)) ?? null;
     if (typeof target !== 'string') return null;
     const trimmed = target.trim();
-    const m = /^[↑↓]?\s*\[?(\d+)\]?$/.exec(trimmed);
+    const m = /^[↑↓]?\s*\[?([A-Za-z0-9_-]+)\]?$/.exec(trimmed);
     if (m) {
-      const idx = parseInt(m[1]!, 10);
-      const el = this.currentIndexMap.get(idx);
+      const el = this.currentIndexMap.get(m[1]!);
       if (el) return el;
     }
     if (typeof document === 'undefined') return null;
@@ -304,7 +329,9 @@ export class WebAgent {
 
   private startLoop(): AsyncIterable<AgentEvent> {
     this.currentAbort = new AbortController();
-    return this.executeLoop(this.currentAbort.signal);
+    return this.config.cotMode
+      ? this.executeCotLoop(this.currentAbort.signal)
+      : this.executeLoop(this.currentAbort.signal);
   }
 
   private async *executeLoop(signal: AbortSignal): AsyncIterable<AgentEvent> {
@@ -370,8 +397,11 @@ export class WebAgent {
       // Confirm gate for destructive actions.
       const needsConfirm = await this.needsConfirmation(toolCall, matched, signal);
       if (needsConfirm) {
+        const locale = this.config.locale ?? 'en';
+        // Precedence: per-action override → host-level override → SDK default.
         const message = matched?.confirmationMessage?.(toolCall.arguments as never)
-          ?? narrateAction(toolCall.name, toolCall.arguments);
+          ?? this.config.buildConfirmMessage?.(toolCall.name, toolCall.arguments, locale)
+          ?? narrateAction(toolCall.name, toolCall.arguments, locale);
         let resolveConfirm!: (ok: boolean) => void;
         const approvedPromise = new Promise<boolean>((r) => { resolveConfirm = r; });
         this.setStatus('waiting');
@@ -488,8 +518,10 @@ export class WebAgent {
                 payload.resolve('');
               }
             },
+            emitPresentSurface: this.surfaceMounter ? (payload) => this.surfaceMounter!(payload) : undefined,
             session: this.session,
-            defaultPauseNote: this.config.defaultPauseNote,
+            defaultPauseNote:
+              this.config.defaultPauseNote ?? sdkString(this.config.locale, 'agent.press_space_continue'),
           },
           toolCall.name,
           toolCall.arguments,
@@ -522,6 +554,338 @@ export class WebAgent {
     this.setStatus('failed');
   }
 
+  /**
+   * CoT-mode loop — every turn returns a single `agent_turn` tool call
+   * whose args carry `{ memory, next_goal, actions[] }`. The runtime
+   * parses the envelope, then iterates actions in order:
+   *   - `narrate` → typewriter-stream to the subtitle bar
+   *   - `tool` → confirm-gate (if destructive) + dispatch through the
+   *     same `executeAction` path as the classic loop
+   * Empty `actions[]` signals task complete (no need for an explicit
+   * `done` tool — the empty array IS the done signal).
+   */
+  private async *executeCotLoop(signal: AbortSignal): AsyncIterable<AgentEvent> {
+    if (!this.session) return;
+    let errorCount = 0;
+
+    for (let stepIdx = 0; stepIdx < this.config.maxSteps; stepIdx++) {
+      if (signal.aborted) { this.setStatus('idle'); return; }
+
+      // SPA nav detection between iterations.
+      const nowUrl = typeof location !== 'undefined' ? location.pathname + location.search : null;
+      if (nowUrl && this.session.currentPage !== nowUrl) {
+        const from = this.session.currentPage;
+        this.session.currentPage = nowUrl;
+        this.persistSession();
+        yield { kind: 'navigated', from, to: nowUrl };
+      }
+
+      this.setStatus('thinking');
+      yield { kind: 'thinking' };
+
+      // Single forced tool call to `agent_turn`. Stray text deltas are
+      // ignored — the schema doesn't allow them, but we tolerate misbehaving
+      // providers.
+      let agentTurnCall: ToolCall | undefined;
+      try {
+        for await (const ev of this.callLlmStream(signal)) {
+          if (signal.aborted) { this.setStatus('idle'); return; }
+          if (ev.kind === 'tool-call' && ev.call.name === AGENT_TURN_TOOL) {
+            agentTurnCall = ev.call;
+          }
+        }
+        errorCount = 0;
+      } catch (err) {
+        if (signal.aborted) { this.setStatus('idle'); return; }
+        errorCount += 1;
+        const retrying = errorCount < this.config.maxErrors;
+        yield { kind: 'error', error: err as Error, retrying };
+        if (!retrying) { this.setStatus('failed'); return; }
+        await sleep(400 * Math.pow(2, errorCount - 1));
+        continue;
+      }
+
+      if (!agentTurnCall) {
+        // Provider didn't comply with toolChoice — treat as done so the
+        // user isn't stuck in an empty loop.
+        this.setStatus('idle');
+        yield { kind: 'final' };
+        return;
+      }
+
+      const turn = parseTurnResponse(agentTurnCall.arguments);
+      if (!turn) {
+        errorCount += 1;
+        const result: ActionResult = { ok: false, reason: 'unknown', message: 'invalid agent_turn envelope' };
+        pushAgentStep(this.session, {
+          toolCall: { name: AGENT_TURN_TOOL, arguments: agentTurnCall.arguments },
+          toolCallId: agentTurnCall.id,
+          result,
+        });
+        this.persistSession();
+        yield { kind: 'tool-end', name: AGENT_TURN_TOOL, result, toolCallId: agentTurnCall.id };
+        if (errorCount >= this.config.maxErrors) { this.setStatus('failed'); return; }
+        continue;
+      }
+
+      if (turn.actions.length === 0) {
+        // Empty actions[] = task complete. Record the envelope so history
+        // replays cleanly, then end the loop.
+        pushAgentStep(this.session, {
+          toolCall: { name: AGENT_TURN_TOOL, arguments: agentTurnCall.arguments },
+          toolCallId: agentTurnCall.id,
+          result: { ok: true, data: { memory: turn.memory, next_goal: turn.next_goal, action_count: 0, action_results: [] } },
+        });
+        this.persistSession();
+        this.setStatus('idle');
+        yield { kind: 'final' };
+        return;
+      }
+
+      // Iterate actions in order. Collect per-action outcomes into
+      // `actionResults` so the next LLM turn can see what actually happened
+      // (not just "action_count: N") and reason about it. Without this, the
+      // model re-issues actions it already executed.
+      const actionResults: Array<{ type: 'narrate'; text: string } | { type: 'tool'; name: string; ok: boolean; reason?: string; data?: unknown }> = [];
+      let actionErrorThisTurn = 0;
+      let pageChanged = false;
+      for (let ai = 0; ai < turn.actions.length; ai++) {
+        const action = turn.actions[ai]!;
+        if (signal.aborted) { this.setStatus('idle'); return; }
+
+        if (isNarrateAction(action)) {
+          this.setStatus('executing');
+          for (const ch of action.narrate) {
+            if (signal.aborted) { this.setStatus('idle'); return; }
+            yield { kind: 'text-delta', delta: ch };
+            await sleep(12);
+          }
+          actionResults.push({ type: 'narrate', text: action.narrate });
+
+          // Auto-pause after every narration — the rhythm the user expects
+          // is `border → narrate → pause → ...`. Runtime inserts the pause
+          // so the model never has to manage cadence with explicit `pause`
+          // tool calls.
+          //
+          // Three skip conditions:
+          //
+          // 1. The very next action is a confirm-required tool (navigate,
+          //    destructive). The confirm modal IS the next pause point;
+          //    stacking would force two Space presses for one decision.
+          //
+          // 2. Focus is inside the open command palette's input AND user
+          //    is in editing state. Palette is the one place where the
+          //    user is expected to be typing INTO the SDK's own surface
+          //    while the agent is running (e.g. the agent opened the
+          //    palette to let the user pick / fill). Skipping pause here
+          //    lets the agent loop continue while the user types.
+          //
+          //    Deliberately NOT skipped for page-level inputs — the user
+          //    can leave a page form temporarily, blur it, and Space then
+          //    advances the agent normally. Always-skip would mean Space
+          //    "has no effect" when the user finishes filling, which is
+          //    confusing.
+          const next = turn.actions[ai + 1];
+          let skipPause = false;
+          if (next && isToolAction(next)) {
+            const matched = this.actions.get(next.tool);
+            const reqConfirm = matched?.requireConfirmation;
+            if (reqConfirm === true) {
+              skipPause = true;
+            } else if (typeof reqConfirm === 'function') {
+              // Function form: peek-evaluate without dispatching. Best-effort
+              // since the predicate may rely on context the runtime can't
+              // synthesize cheaply — default to skipping pause if unsure.
+              skipPause = true;
+            } else if (isDestructiveByPattern(next.tool, this.destructivePatterns)) {
+              skipPause = true;
+            }
+          }
+          if (!skipPause && isUserEditingInPalette()) {
+            skipPause = true;
+          }
+
+          if (!skipPause && this.pauseHandler) {
+            this.setStatus('waiting');
+            const pauseHint = sdkString(this.config.locale, 'agent.press_space_continue');
+            const resolution = await new Promise<string>((resolve) => {
+              this.pauseHandler!({ hint: pauseHint, resolve });
+            });
+            if (signal.aborted || resolution === '') {
+              this.setStatus('idle');
+              return;
+            }
+          }
+          continue;
+        }
+
+        if (isToolAction(action)) {
+          // Synthesize a ToolCall and route through the same confirm-gate
+          // + dispatch path the classic loop uses. We don't extract this
+          // into a shared helper yet — once CoT mode is the default we
+          // can collapse classic into a thin wrapper.
+          const synth: ToolCall = {
+            id: `cot_${stepIdx}_${Math.random().toString(36).slice(2, 8)}`,
+            name: action.tool,
+            arguments: action.args ?? {},
+          };
+          const matched = this.actions.get(synth.name);
+
+          const needsConfirm = await this.needsConfirmation(synth, matched, signal);
+          if (needsConfirm) {
+            const locale = this.config.locale ?? 'en';
+            const message = matched?.confirmationMessage?.(synth.arguments as never)
+              ?? this.config.buildConfirmMessage?.(synth.name, synth.arguments, locale)
+              ?? narrateAction(synth.name, synth.arguments, locale);
+            let resolveConfirm!: (ok: boolean) => void;
+            const approvedPromise = new Promise<boolean>((r) => { resolveConfirm = r; });
+            this.setStatus('waiting');
+            yield {
+              kind: 'confirm',
+              actionName: synth.name,
+              args: synth.arguments,
+              message,
+              decide: resolveConfirm,
+            };
+            const approved = await Promise.race([
+              approvedPromise,
+              new Promise<boolean>((_, reject) => {
+                const onAbort = (): void => { signal.removeEventListener('abort', onAbort); reject(new Error('aborted')); };
+                signal.addEventListener('abort', onAbort, { once: true });
+              }),
+            ]).catch(() => false);
+            if (!approved) {
+              const result: ActionResult = { ok: false, reason: 'user_declined' };
+              yield { kind: 'tool-end', name: synth.name, result, toolCallId: synth.id };
+              actionResults.push({ type: 'tool', name: synth.name, ok: false, reason: 'user_declined' });
+              continue;
+            }
+          }
+
+          const targetSelector = extractTargetSelector(synth.arguments);
+          yield { kind: 'tool-start', name: synth.name, args: synth.arguments, targetSelector, toolCallId: synth.id };
+
+          let result: ActionResult;
+          if (synth.name === 'navigate') {
+            const path = String(synth.arguments.path ?? '').trim();
+            if (!path) {
+              // Model called navigate without a path. Reject loudly so
+              // the next turn sees the failure in history and self-corrects
+              // (rather than the bridge silently no-op'ing and the user
+              // staring at a hung confirm).
+              result = { ok: false, reason: 'unknown', message: 'navigate requires a non-empty `path` arg (e.g. "/docs")' };
+              yield { kind: 'tool-end', name: 'navigate', result, toolCallId: synth.id };
+              actionResults.push({ type: 'tool', name: 'navigate', ok: false, reason: 'missing path' });
+              actionErrorThisTurn += 1;
+              continue;
+            }
+            this.setStatus('navigating');
+            const from = this.session.currentPage;
+            yield { kind: 'navigating', from, to: path };
+            try {
+              const bridgeResult = this.navigateBridge?.(path);
+              if (bridgeResult && typeof (bridgeResult as Promise<void>).then === 'function') {
+                await bridgeResult;
+              }
+            } catch (err) {
+              result = { ok: false, reason: 'navigation', message: (err as Error).message };
+              yield { kind: 'tool-end', name: 'navigate', result, toolCallId: synth.id };
+              actionResults.push({ type: 'tool', name: synth.name, ok: false, reason: 'navigation' });
+              actionErrorThisTurn += 1;
+              continue;
+            }
+            await awaitNavSettle(2500);
+            yield { kind: 'navigated', from, to: path };
+            result = { ok: true, data: { path, arrivedAt: path } };
+            // Page has changed — the remaining actions in this envelope
+            // were planned against the OLD DOM and would mis-target. Mark
+            // the turn as page-changed; we break the action loop below
+            // and let the next outer iteration re-read DOM + re-plan.
+            pageChanged = true;
+          } else {
+            const wasUserFacing = synth.name === 'ask_user' || synth.name === 'ask_user_choice';
+            this.setStatus(wasUserFacing ? 'waiting' : 'executing');
+            result = await executeAction(
+              {
+                actions: this.actions,
+                indexMap: this.currentIndexMap,
+                registerPendingResolver: (r) => this.registerPendingResolver(r),
+                emitAskUser: (payload) => {
+                  if (this.askUserHandler) this.askUserHandler(payload);
+                  else payload.resolve('');
+                },
+                emitAskUserChoice: (payload) => {
+                  if (this.askUserChoiceHandler) this.askUserChoiceHandler(payload);
+                  else payload.resolve('');
+                },
+                emitPause: (payload) => {
+                  if (this.pauseHandler) this.pauseHandler(payload);
+                  else if (this.askUserHandler) {
+                    this.askUserHandler({ question: payload.hint, resolve: payload.resolve });
+                  } else {
+                    payload.resolve('');
+                  }
+                },
+                emitPresentSurface: this.surfaceMounter ? (payload) => this.surfaceMounter!(payload) : undefined,
+                session: this.session,
+                defaultPauseNote:
+                  this.config.defaultPauseNote ?? sdkString(this.config.locale, 'agent.press_space_continue'),
+              },
+              synth.name,
+              synth.arguments,
+              signal,
+            );
+          }
+
+          yield { kind: 'tool-end', name: synth.name, result, toolCallId: synth.id };
+          actionResults.push({
+            type: 'tool',
+            name: synth.name,
+            ok: result.ok,
+            reason: result.ok ? undefined : result.reason,
+            data: result.ok ? result.data : undefined,
+          });
+          if (!result.ok) actionErrorThisTurn += 1;
+          if (pageChanged) break;
+        }
+      }
+
+      // Record the whole envelope + per-action outcomes as ONE history
+      // step. The next LLM turn sees the agent_turn assistant message,
+      // the tool reply with these results, and can reason about what
+      // actually happened — without this the model re-issues actions it
+      // already executed (e.g. re-asking to navigate after the page
+      // already switched).
+      const envelopeData = {
+        memory: turn.memory,
+        next_goal: turn.next_goal,
+        action_results: actionResults,
+        page_changed: pageChanged,
+      };
+      pushAgentStep(this.session, {
+        toolCall: { name: AGENT_TURN_TOOL, arguments: agentTurnCall.arguments },
+        toolCallId: agentTurnCall.id,
+        result: actionErrorThisTurn === 0
+          ? { ok: true, data: envelopeData }
+          : { ok: false, reason: 'unknown', message: JSON.stringify(envelopeData) },
+      });
+      this.persistSession();
+
+      if (actionErrorThisTurn > 0) {
+        errorCount += 1;
+        if (errorCount >= this.config.maxErrors) {
+          this.setStatus('failed');
+          return;
+        }
+      } else {
+        errorCount = 0;
+      }
+    }
+
+    // maxSteps hit.
+    this.setStatus('failed');
+  }
+
   // ─── ask_user wiring — surfaced via a second-channel host hook ──
   //
   // executeAction's `emitAskUser` / `emitAskUserChoice` need a way to reach
@@ -532,6 +896,7 @@ export class WebAgent {
   private askUserHandler: ((payload: import('./execute-action').AskUserPayload) => void) | null = null;
   private askUserChoiceHandler: ((payload: import('./execute-action').AskUserChoicePayload) => void) | null = null;
   private pauseHandler: ((payload: import('./execute-action').PausePayload) => void) | null = null;
+  private surfaceMounter: ((payload: import('./execute-action').PresentSurfacePayload) => void) | null = null;
 
   /** Orchestrator wires the UI route for ask_user. */
   setAskUserHandler(fn: (payload: import('./execute-action').AskUserPayload) => void): void {
@@ -544,6 +909,14 @@ export class WebAgent {
    *  behaviour (no handler set) falls back to the ask_user envelope. */
   setPauseHandler(fn: (payload: import('./execute-action').PausePayload) => void): void {
     this.pauseHandler = fn;
+  }
+  /** Orchestrator wires the host mounter for `present_surface`. The
+   *  mounter receives a PieceSurface + placement and is expected to
+   *  render the surface and call `resolve({ value, cancelled })` once
+   *  the user picks or dismisses. Only consulted when the agent's
+   *  `allowPresent: true`. */
+  setSurfaceMounter(fn: (payload: import('./execute-action').PresentSurfacePayload) => void): void {
+    this.surfaceMounter = fn;
   }
 
   private registerPendingResolver(resolver: (raw: string) => void): string {
@@ -583,6 +956,12 @@ export class WebAgent {
       tools,
       signal,
       thinking: this.config.thinking ?? 'off' as const,
+      // CoT mode forces the model to call the single wrapping tool every
+      // turn. Without this, smaller models occasionally emit a free-text
+      // turn that has no actions to dispatch.
+      toolChoice: this.config.cotMode
+        ? ({ name: AGENT_TURN_TOOL } as const)
+        : undefined,
     };
 
     const streamProvider = llm as unknown as StreamingProvider;
@@ -645,12 +1024,11 @@ export class WebAgent {
           session: this.session,
           signal,
           resolveTarget: (target: string | number) => {
-            if (typeof target === 'number') return this.currentIndexMap.get(target) ?? null;
+            if (typeof target === 'number') return this.currentIndexMap.get(String(target)) ?? null;
             const trimmed = target.trim();
-            const m = /^\[?(\d+)\]?$/.exec(trimmed);
+            const m = /^\[?([A-Za-z0-9_-]+)\]?$/.exec(trimmed);
             if (m) {
-              const idx = parseInt(m[1]!, 10);
-              const el = this.currentIndexMap.get(idx);
+              const el = this.currentIndexMap.get(m[1]!);
               if (el) return el;
             }
             try { return document.querySelector(trimmed); } catch { return null; }
@@ -666,8 +1044,8 @@ export class WebAgent {
   // ─── messages assembly ─────────────────────────────────────────
 
   /** Last DOM index map from readDOM — used by action handlers to
-   *  resolve `[N]` style numeric targets back to live elements. */
-  private currentIndexMap: Map<number, Element> = new Map();
+   *  resolve `[id]` style hash targets back to live elements. */
+  private currentIndexMap: Map<string, Element> = new Map();
 
   private async buildMessages(): Promise<LLMMessage[]> {
     if (!this.session) return [];
@@ -700,12 +1078,14 @@ export class WebAgent {
       siteName: this.config.siteName,
       systemPrompt: this.config.systemPrompt,
       brand: this.config.brand,
+      persona: this.config.persona,
       appendSystemPrompt: this.config.appendSystemPrompt,
       sitemap: this.config.sitemap,
       session: this.session,
       pageContext,
       selection: this.currentSelection ?? undefined,
       previousUrl: undefined,
+      cotMode: this.config.cotMode,
     });
 
     const messages: LLMMessage[] = [{ role: 'system', content: systemPrompt }];
@@ -798,6 +1178,7 @@ export class WebAgent {
       latestUserText: latestUser?.text ?? '',
       stepsSoFar: this.session.turns,
       currentUrl: this.session.currentPage,
+      cotMode: this.config.cotMode,
     }));
     envParts.push(renderPageStateBlock({
       currentPage: this.session.currentPage,
@@ -833,11 +1214,51 @@ export class WebAgent {
 
   private buildToolDefinitions(): ToolDefinition[] {
     if (this.config.toolDefinitions) return this.config.toolDefinitions;
+
+    // Live palette listing → appended to `open_palette`'s description so
+    // the model sees the available commands RIGHT INSIDE the tool it's
+    // about to call. The agent opens the palette, then operates it via
+    // normal `click` / `fill_input` on the rendered DOM — same as a
+    // user would. Having the listing co-located with `open_palette`
+    // means the model decides whether to open AND which command to
+    // pre-fill / look for in one step.
+    const palette = this.paletteContextProvider?.() ?? [];
+    const paletteSuffix = palette.length > 0
+      ? renderPaletteCommandsForToolDescription(palette)
+      : '';
+    const describeAction = (action: ActionDefinition): string =>
+      action.name === 'open_palette' && paletteSuffix
+        ? action.description + '\n' + paletteSuffix
+        : action.description;
+
+    if (this.config.cotMode) {
+      // CoT mode: a single wrapping tool. Each built-in action is
+      // surfaced inside the `agent_turn` description with its own
+      // `{ name, description, parameters }` so the model sees the per-
+      // tool arg schemas (without these it had to guess, which caused
+      // `navigate` calls with empty `path`, etc.).
+      //
+      // We strip `pause` — every narration auto-pauses for Space at
+      // runtime, so giving the model `pause` only invites a double-pause
+      // that manifests as "user pressed Space but nothing happened".
+      // Destructive actions still gate on confirm; user input still
+      // goes through ask_user / ask_user_choice.
+      const refs: { name: string; description: string; parameters: Record<string, unknown> }[] = [];
+      for (const action of this.actions.values()) {
+        if (action.name === 'pause') continue;
+        refs.push({
+          name: action.name,
+          description: describeAction(action),
+          parameters: action.parameters,
+        });
+      }
+      return [buildAgentTurnTool(refs)];
+    }
     const defs: ToolDefinition[] = [];
     for (const action of this.actions.values()) {
       defs.push({
         name: action.name,
-        description: action.description,
+        description: describeAction(action),
         parameters: action.parameters,
       });
     }
@@ -871,24 +1292,43 @@ function extractTargetSelector(params: Record<string, unknown>): string | undefi
 }
 
 /**
- * SDK-default confirmation copy for built-in actions. English-only by
- * design; hosts that want localised or fully custom prompts override
+ * SDK-default confirmation copy for built-in actions. Bundled in
+ * en + zh-TW (via `sdk-i18n`); other locales fall back to en. Hosts
+ * that ship other languages override at the config level via
+ * `WebAgentConfig.buildConfirmMessage(action, params, locale)`, or
  * per-action via `ActionDefinition.confirmationMessage(params)`.
  */
 function narrateAction(
   actionName: string,
   params: Record<string, unknown>,
+  locale: string,
 ): string {
   const str = (k: string): string => (typeof params[k] === 'string' ? (params[k] as string) : '');
   const trim = (s: string, n = 40): string => (s.length > n ? s.slice(0, n - 1) + '…' : s);
   const path = trim(str('path'), 50);
   const target = trim(str('selector') || str('target') || str('element'), 50);
+  const suffix = ` ${sdkString(locale, 'agent.confirm.suffix')}`;
   switch (actionName) {
-    case 'navigate':    return path ? `Take you to ${path} — press space to confirm` : 'Switch page — press space to confirm';
-    case 'click':       return target ? `Click ${target} — press space to confirm` : 'Click — press space to confirm';
-    case 'fill_input':  return `Fill ${target || 'field'} — press space to confirm`;
-    case 'delete':      return `Delete ${target} — press space to confirm`;
-    default:            return `Run ${actionName}${target ? ` → ${target}` : ''} — press space to confirm`;
+    case 'navigate':
+      return (path
+        ? sdkString(locale, 'agent.confirm.navigate.with_path', { path })
+        : sdkString(locale, 'agent.confirm.navigate.no_path')) + suffix;
+    case 'click':
+      return (target
+        ? sdkString(locale, 'agent.confirm.click.with_target', { target })
+        : sdkString(locale, 'agent.confirm.click.no_target')) + suffix;
+    case 'fill_input':
+      return (target
+        ? sdkString(locale, 'agent.confirm.fill_input.with_target', { target })
+        : sdkString(locale, 'agent.confirm.fill_input.no_target')) + suffix;
+    case 'delete':
+      return (target
+        ? sdkString(locale, 'agent.confirm.delete.with_target', { target })
+        : sdkString(locale, 'agent.confirm.delete.no_target')) + suffix;
+    default:
+      return (target
+        ? sdkString(locale, 'agent.confirm.generic.with_target', { action: actionName, target })
+        : sdkString(locale, 'agent.confirm.generic.no_target', { action: actionName })) + suffix;
   }
 }
 
@@ -905,6 +1345,35 @@ function narrateAction(
  * a half-rendered new page (just the route shell with headings) — which
  * shows up as the agent saying "I only see the title, no content".
  */
+/**
+ * `true` when the user currently has focus on an editable surface
+ * INSIDE the open command palette specifically. Used by the CoT
+ * auto-pause to skip the "press Space to continue" gate ONLY in that
+ * narrow case.
+ *
+ * Why scope it to palette and not all inputs: the space-gesture handler
+ * intercepts Space inside any input as literal typing, so the pause
+ * watcher would never resolve. Skipping in any input would mean the
+ * agent never waits if the user happens to have focus on a page form
+ * field — which is the wrong behaviour for normal page forms (the user
+ * expects to click outside or blur the field, then Space advances the
+ * agent like usual).
+ *
+ * Palette is the one place where "user has focus in input + agent is
+ * mid-run" is the explicit, persistent state. So scope the skip there.
+ */
+function isUserEditingInPalette(): boolean {
+  if (typeof document === 'undefined') return false;
+  const el = document.activeElement as (HTMLElement & { isContentEditable?: boolean }) | null;
+  if (!el || el === document.body) return false;
+  const tag = el.tagName;
+  const isEditable = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !!el.isContentEditable;
+  if (!isEditable) return false;
+  // Must be inside the open palette panel — keyed by the data-dddk-ui
+  // attribute the palette stamps on its root.
+  return !!el.closest('[data-dddk-ui="palette"]');
+}
+
 async function awaitNavSettle(maxMs: number): Promise<void> {
   if (typeof window === 'undefined') return;
   if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') {

@@ -228,6 +228,27 @@ export interface WebAgentConfig {
   systemPrompt?: import('./prompt').SystemPromptOverride;
   /** Structured brand context layered into the default prompt. */
   brand?: import('./prompt').BrandPrompt;
+  /**
+   * First-person identity for the agent — who it IS and on whose behalf
+   * it speaks. Without this, the agent narrates the page in third-person
+   * observer voice ("the site states X"); with it, the agent speaks as
+   * the site's representative ("we offer X").
+   *
+   * Default: `undefined` (no persona section in the prompt).
+   *
+   * Pass a string for a quick identity line, or a structured
+   * `PersonaConfig` for separate voice / constraint fields:
+   *
+   *   persona: "You are the dotdotduck assistant, speaking on behalf
+   *             of perhapxin. Use 'we' for what perhapxin does."
+   *
+   *   persona: {
+   *     identity: "You are Acme's support assistant...",
+   *     voice: "Warm, decisive, never speculative.",
+   *     constraints: ["Never promise refunds without confirming with the team."],
+   *   }
+   */
+  persona?: import('./prompt').PersonaInput;
   /** Plain text appended after the default prompt. */
   appendSystemPrompt?: string;
 
@@ -265,6 +286,65 @@ export interface WebAgentConfig {
    * rely only on per-action `requireConfirmation`.
    */
   destructivePatterns?: RegExp[];
+
+  /**
+   * Opt the agent in to the `present_surface` tool — lets the model
+   * render a PieceSurface (image+text cards, option grids, etc.) and
+   * await the user's pick.
+   *
+   * Default `false` because rich surfaces can leak host-private UI to
+   * the model's planning context (the agent decides what image src to
+   * use, what option labels to show). Enable when the host wants
+   * recommendation-style flows and trusts the brand / persona / prompt
+   * to keep the model on-rails.
+   *
+   * The host MUST ALSO call `agent.setSurfaceMounter(fn)` to wire the
+   * actual mounting code — otherwise `present_surface` returns a
+   * `not_wired` error and the model falls back to manual narration.
+   */
+  allowPresent?: boolean;
+
+  /**
+   * Force every turn through a structured CoT envelope. The model is
+   * required to call a single `agent_turn` tool whose args contain
+   * `memory`, `next_goal`, and an ordered `actions[]` of narrations +
+   * tool calls. The runtime parses the envelope and dispatches actions
+   * in order — fixing the "border-then-skip" failure mode where the
+   * classic per-turn-one-tool-call loop can short-circuit early.
+   *
+   * Default: `false` (classic streaming loop). When `true`, this also
+   * disables the per-turn-pause pacing rules in the prompt — pause is
+   * runtime-managed (auto-pause after each narration) rather than
+   * model-managed.
+   */
+  cotMode?: boolean;
+
+  /**
+   * Override the confirmation copy shown when a `requireConfirmation`
+   * action is about to run. Receives the action name + its params and
+   * the agent's locale. Return a string to use it; return `undefined`
+   * to fall back to the SDK's built-in copy.
+   *
+   * The SDK ships en + zh-TW. Use this for `ja` / `es` / `fr` etc., or
+   * when you want host-branded wording ("Approve the transfer? Press
+   * space to confirm").
+   *
+   *   buildConfirmMessage: (action, params, locale) => {
+   *     if (locale === 'ja') {
+   *       if (action === 'navigate') return `${params.path} に移動します — スペースキーで確認`;
+   *       return undefined;  // fall back to default English for the rest
+   *     }
+   *     return undefined;
+   *   }
+   *
+   * Per-action `ActionDefinition.confirmationMessage(params)` still
+   * wins when set — that override is action-scoped and runs first.
+   */
+  buildConfirmMessage?: (
+    actionName: string,
+    params: Record<string, unknown>,
+    locale: string,
+  ) => string | undefined;
 
   /**
    * Subtraction filter applied to every visible element the DOM reader

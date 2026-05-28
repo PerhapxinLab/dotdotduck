@@ -8,7 +8,7 @@
 import type { ReactNode } from 'react';
 import type { PieceCatalog, PieceDefinition, PieceNode, PieceContext } from './types';
 import { PieceCatalog as Catalog } from './types';
-import { resolveValue } from './renderer';
+import { resolveValue, readPointer } from './renderer';
 
 const UI = 'data-dddk-piece';
 
@@ -594,11 +594,299 @@ const Slot: PieceDefinition = {
   },
 };
 
+// ─── Rich layout + selection (4) ──────────────────────────────────
+//
+// These pieces are designed to play well together for proactive
+// recommendations and rich agent responses, without falling into the
+// "every piece is a Card-with-border, nest them and the borders stack"
+// trap. Rules of thumb:
+//
+//   - `Group` is a borderless flex container for grouping. Use it INSIDE
+//     a Card / surface when you want to cluster related children without
+//     a second visible container.
+//   - `MediaCard` is a presentation block (image + text + optional CTA).
+//     Itself transparent — looks like a tile, not a card. Compose multiple
+//     MediaCards inside an `OptionGroup` to get a "3-up recommendation"
+//     surface.
+//   - `OptionGroup` is the keyboard-navigable picker. Built-in roving
+//     tabindex, arrow-key navigation (left/right when `layout: 'row'`,
+//     up/down when `'column'`), Enter / Space to confirm, click also
+//     works. Fires `trigger('choose', { value, index })`.
+//   - `ChoiceList` is the simpler text-only sibling — same keyboard
+//     model, no image slot.
+
+const Group: PieceDefinition = {
+  kind: 'Group',
+  meta: { category: 'layout', description: 'Transparent visual grouping container — flex column with gap, NO border / shadow / background. Use inside a Card or surface envelope when you want to cluster related children without adding a second framed container (which would stack borders and look heavy). Children render edge-to-edge against the surrounding envelope.' },
+  render: (node, ctx) => (
+    <div
+      {...{ [UI]: 'group' }}
+      style={{
+        display: 'flex',
+        flexDirection: (node.direction as string) === 'horizontal' ? 'row' : 'column',
+        gap: (node.gap as string | number) ?? 8,
+        alignItems: (node.align as string) ?? 'stretch',
+      }}
+    >
+      {renderChildren(node, ctx)}
+    </div>
+  ),
+};
+
+const MediaCard: PieceDefinition = {
+  kind: 'MediaCard',
+  meta: { category: 'layout', description: 'Image + text composition for one item (a recommendation tile, a product summary, a destination preview). Transparent by default — does not draw its own border or shadow. Place inside an OptionGroup for "pick one of these" UX, or use standalone as the body of a Card. Props: `image: { src, alt?, aspectRatio? }`, `title`, `description?`, `meta?: string[]`, `orientation?: "top" | "left"` (image position).' },
+  render: (node) => {
+    const orientation = (node.orientation as 'top' | 'left') ?? 'top';
+    const image = node.image as { src: string; alt?: string; aspectRatio?: string } | undefined;
+    const title = (node.title as string) ?? '';
+    const description = node.description as string | undefined;
+    const meta = (node.meta as string[]) ?? [];
+    const isLeft = orientation === 'left';
+    return (
+      <div
+        {...{ [UI]: 'media-card' }}
+        data-orientation={orientation}
+        style={{
+          display: 'flex',
+          flexDirection: isLeft ? 'row' : 'column',
+          gap: isLeft ? 12 : 8,
+          alignItems: isLeft ? 'flex-start' : 'stretch',
+        }}
+      >
+        {image?.src && (
+          <div style={{
+            flex: isLeft ? '0 0 96px' : '0 0 auto',
+            width: isLeft ? 96 : '100%',
+            aspectRatio: image.aspectRatio ?? (isLeft ? '1' : '16/9'),
+            overflow: 'hidden',
+            borderRadius: 'var(--dddk-radius-sm, 6px)',
+            background: 'var(--dddk-bg-subtle, rgba(0,0,0,0.04))',
+          }}>
+            <img
+              src={image.src}
+              alt={image.alt ?? ''}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            />
+          </div>
+        )}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+          {title && <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.3 }}>{title}</div>}
+          {description && (
+            <div style={{ fontSize: 13, color: 'var(--dddk-text-muted, #64748b)', lineHeight: 1.45 }}>{description}</div>
+          )}
+          {meta.length > 0 && (
+            <div style={{ display: 'flex', gap: 8, fontSize: 11.5, color: 'var(--dddk-text-muted, #64748b)', marginTop: 2 }}>
+              {meta.map((m, i) => <span key={i}>{m}</span>)}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  },
+};
+
+interface OptionSpec {
+  value: string;
+  title: string;
+  description?: string;
+  meta?: string[];
+  image?: { src: string; alt?: string; aspectRatio?: string };
+}
+
+const OptionGroup: PieceDefinition = {
+  kind: 'OptionGroup',
+  meta: { category: 'input', description: 'Keyboard-navigable, click-selectable list of options — each option is a MediaCard-shaped tile (title + description + optional image + meta). Arrow keys move focus (left/right in `layout: "row"`, up/down in `"column"`); Enter or Space confirms; click also works. Bound value is the chosen option\'s `value`. Fires `trigger("choose", { value, index })` on selection. Props: `options: OptionSpec[]`, `layout: "row" | "column"`, `columns?: number` (row mode), `bind: string`.' },
+  render: (node, ctx) => {
+    const options = (node.options as OptionSpec[]) ?? [];
+    const bind = (node.bind as string) ?? '';
+    const layout = (node.layout as 'row' | 'column') ?? 'column';
+    const columns = node.columns as number | undefined;
+    const selected = bind ? readPointer(ctx.data, bind) : undefined;
+    const isRow = layout === 'row';
+    const gridCols = isRow ? (columns ?? options.length) : 1;
+
+    const handleKey = (e: React.KeyboardEvent<HTMLDivElement>, idx: number): void => {
+      const key = e.key;
+      let next = idx;
+      if (isRow) {
+        if (key === 'ArrowLeft' || key === 'ArrowUp') next = (idx - 1 + options.length) % options.length;
+        else if (key === 'ArrowRight' || key === 'ArrowDown') next = (idx + 1) % options.length;
+      } else {
+        if (key === 'ArrowUp' || key === 'ArrowLeft') next = (idx - 1 + options.length) % options.length;
+        else if (key === 'ArrowDown' || key === 'ArrowRight') next = (idx + 1) % options.length;
+      }
+      if (key === 'Enter' || key === ' ') {
+        e.preventDefault();
+        if (bind) ctx.setBinding(bind, options[idx]!.value);
+        ctx.trigger('choose', { value: options[idx]!.value, index: idx });
+        return;
+      }
+      if (next !== idx) {
+        e.preventDefault();
+        const parent = e.currentTarget.parentElement;
+        const nextEl = parent?.children[next] as HTMLElement | undefined;
+        nextEl?.focus();
+      }
+    };
+
+    return (
+      <div
+        {...{ [UI]: 'option-group' }}
+        role="radiogroup"
+        data-layout={layout}
+        style={{
+          display: 'grid',
+          gridTemplateColumns: isRow ? `repeat(${gridCols}, minmax(0, 1fr))` : '1fr',
+          gap: 8,
+        }}
+      >
+        {options.map((opt, i) => {
+          const isSelected = opt.value === selected || (selected === undefined && i === 0);
+          return (
+            <div
+              key={opt.value}
+              role="radio"
+              aria-checked={isSelected}
+              tabIndex={isSelected ? 0 : -1}
+              onClick={() => {
+                if (bind) ctx.setBinding(bind, opt.value);
+                ctx.trigger('choose', { value: opt.value, index: i });
+              }}
+              onKeyDown={(e) => handleKey(e, i)}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                padding: 12,
+                cursor: 'pointer',
+                outline: 'none',
+                borderRadius: 'var(--dddk-radius, 10px)',
+                border: '1px solid',
+                borderColor: isSelected ? 'var(--dddk-accent, #6366f1)' : 'var(--dddk-border, rgba(0,0,0,0.08))',
+                background: isSelected ? 'var(--dddk-accent-soft, rgba(99,102,241,0.08))' : 'transparent',
+                transition: 'border-color 120ms, background 120ms',
+              }}
+              onFocus={(e) => { (e.currentTarget as HTMLDivElement).style.boxShadow = '0 0 0 2px var(--dddk-accent-soft, rgba(99,102,241,0.2))'; }}
+              onBlur={(e) => { (e.currentTarget as HTMLDivElement).style.boxShadow = 'none'; }}
+            >
+              {opt.image?.src && (
+                <div style={{
+                  width: '100%',
+                  aspectRatio: opt.image.aspectRatio ?? '16/9',
+                  overflow: 'hidden',
+                  borderRadius: 'var(--dddk-radius-sm, 6px)',
+                  background: 'var(--dddk-bg-subtle, rgba(0,0,0,0.04))',
+                }}>
+                  <img src={opt.image.src} alt={opt.image.alt ?? ''} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                </div>
+              )}
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{opt.title}</div>
+              {opt.description && (
+                <div style={{ fontSize: 13, color: 'var(--dddk-text-muted, #64748b)', lineHeight: 1.45 }}>{opt.description}</div>
+              )}
+              {opt.meta && opt.meta.length > 0 && (
+                <div style={{ display: 'flex', gap: 8, fontSize: 11.5, color: 'var(--dddk-text-muted, #64748b)' }}>
+                  {opt.meta.map((m, mi) => <span key={mi}>{m}</span>)}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  },
+};
+
+const ChoiceList: PieceDefinition = {
+  kind: 'ChoiceList',
+  meta: { category: 'input', description: 'Text-only siblings of OptionGroup — same arrow-key navigation, Enter/Space confirm, click works. No image slot, denser by default. Use for "pick one of these" UX where each option fits in one line + optional one-line description. Props: `options: { value, label, description? }[]`, `orientation: "row" | "column"`, `bind: string`. Fires `trigger("choose", { value, index })`.' },
+  render: (node, ctx) => {
+    const options = (node.options as Array<{ value: string; label: string; description?: string }>) ?? [];
+    const bind = (node.bind as string) ?? '';
+    const orientation = (node.orientation as 'row' | 'column') ?? 'column';
+    const selected = bind ? readPointer(ctx.data, bind) : undefined;
+    const isRow = orientation === 'row';
+
+    const handleKey = (e: React.KeyboardEvent<HTMLDivElement>, idx: number): void => {
+      const key = e.key;
+      let next = idx;
+      if (isRow) {
+        if (key === 'ArrowLeft' || key === 'ArrowUp') next = (idx - 1 + options.length) % options.length;
+        else if (key === 'ArrowRight' || key === 'ArrowDown') next = (idx + 1) % options.length;
+      } else {
+        if (key === 'ArrowUp' || key === 'ArrowLeft') next = (idx - 1 + options.length) % options.length;
+        else if (key === 'ArrowDown' || key === 'ArrowRight') next = (idx + 1) % options.length;
+      }
+      if (key === 'Enter' || key === ' ') {
+        e.preventDefault();
+        if (bind) ctx.setBinding(bind, options[idx]!.value);
+        ctx.trigger('choose', { value: options[idx]!.value, index: idx });
+        return;
+      }
+      if (next !== idx) {
+        e.preventDefault();
+        const parent = e.currentTarget.parentElement;
+        const nextEl = parent?.children[next] as HTMLElement | undefined;
+        nextEl?.focus();
+      }
+    };
+
+    return (
+      <div
+        {...{ [UI]: 'choice-list' }}
+        role="radiogroup"
+        data-orientation={orientation}
+        style={{
+          display: 'flex',
+          flexDirection: isRow ? 'row' : 'column',
+          gap: 6,
+        }}
+      >
+        {options.map((opt, i) => {
+          const isSelected = opt.value === selected || (selected === undefined && i === 0);
+          return (
+            <div
+              key={opt.value}
+              role="radio"
+              aria-checked={isSelected}
+              tabIndex={isSelected ? 0 : -1}
+              onClick={() => {
+                if (bind) ctx.setBinding(bind, opt.value);
+                ctx.trigger('choose', { value: opt.value, index: i });
+              }}
+              onKeyDown={(e) => handleKey(e, i)}
+              style={{
+                flex: isRow ? '1 1 0' : '0 0 auto',
+                padding: '10px 14px',
+                cursor: 'pointer',
+                outline: 'none',
+                borderRadius: 'var(--dddk-radius-sm, 6px)',
+                border: '1px solid',
+                borderColor: isSelected ? 'var(--dddk-accent, #6366f1)' : 'var(--dddk-border, rgba(0,0,0,0.08))',
+                background: isSelected ? 'var(--dddk-accent-soft, rgba(99,102,241,0.08))' : 'transparent',
+                transition: 'border-color 120ms, background 120ms',
+              }}
+              onFocus={(e) => { (e.currentTarget as HTMLDivElement).style.boxShadow = '0 0 0 2px var(--dddk-accent-soft, rgba(99,102,241,0.2))'; }}
+              onBlur={(e) => { (e.currentTarget as HTMLDivElement).style.boxShadow = 'none'; }}
+            >
+              <div style={{ fontWeight: 500, fontSize: 14 }}>{opt.label}</div>
+              {opt.description && (
+                <div style={{ fontSize: 12.5, color: 'var(--dddk-text-muted, #64748b)', marginTop: 2 }}>{opt.description}</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  },
+};
+
 // ─── catalog assembly ─────────────────────────────────────────────
 
 export const builtinPieces: PieceDefinition[] = [
   // layout
-  Stack, Grid, Split, Card, Tabs,
+  Stack, Grid, Split, Card, Tabs, Group,
   // content
   Heading, Text, Code, Image, Tag, Divider, Markdown,
   // data
@@ -606,6 +894,8 @@ export const builtinPieces: PieceDefinition[] = [
   // input
   TextField, TextArea, NumberField, PasswordField,
   Checkbox, Switch, Picker, DatePicker, Slider, FilePicker,
+  // rich layout + selection
+  MediaCard, OptionGroup, ChoiceList,
   // action
   Button, Link, IconButton,
   // feedback

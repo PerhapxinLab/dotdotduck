@@ -19,9 +19,26 @@ const STRINGS = {
     'agent.loading': 'Loading the page…',
     'agent.done': '✓ Done',
     'agent.press_space_close': 'press space to close',
+    'agent.press_space_continue': 'press space to continue',
+    'agent.tap_to_continue': 'tap to continue · double-tap to exit',
+    'agent.space_continue_reject': 'space continue · double-tap to exit',
+    'agent.tap_to_dismiss': 'tap to dismiss',
     'agent.stop_close': 'Agent stopped — say something new when you\'re ready',
     'agent.stop_esc': 'Esc received — agent stopped',
     'agent.stop_reject': 'Double-tap reject received — agent stopped',
+    // Confirmation copy for destructive / requireConfirmation tool calls.
+    // `{target}` / `{path}` / `{action}` placeholders interpolated at call time.
+    'agent.confirm.suffix': '— press space to confirm',
+    'agent.confirm.navigate.with_path': 'Take you to {path}',
+    'agent.confirm.navigate.no_path': 'Switch page',
+    'agent.confirm.click.with_target': 'Click {target}',
+    'agent.confirm.click.no_target': 'Click',
+    'agent.confirm.fill_input.with_target': 'Fill {target}',
+    'agent.confirm.fill_input.no_target': 'Fill field',
+    'agent.confirm.delete.with_target': 'Delete {target}',
+    'agent.confirm.delete.no_target': 'Delete',
+    'agent.confirm.generic.with_target': 'Run {action} → {target}',
+    'agent.confirm.generic.no_target': 'Run {action}',
     'palette.theme.light': 'Theme: light',
     'palette.theme.dark': 'Theme: dark',
     'palette.theme.system': 'Theme: follow system',
@@ -38,6 +55,7 @@ const STRINGS = {
     'palette.footer.navigate': 'to navigate',
     'palette.footer.select': 'to select',
     'palette.footer.close': 'to close',
+    'palette.footer.back': 'to go back',
     'palette.section.settings': 'Settings',
     'palette.section.go_to': 'Go to',
     'palette.section.ai': 'AI',
@@ -51,9 +69,24 @@ const STRINGS = {
     'agent.loading': '頁面載入中…',
     'agent.done': '✓ 執行完畢',
     'agent.press_space_close': '按 space 關閉',
+    'agent.press_space_continue': '按 space 繼續',
+    'agent.tap_to_continue': '點一下繼續 ｜ 雙擊結束',
+    'agent.space_continue_reject': 'space 繼續 ｜ 雙擊 space 結束',
+    'agent.tap_to_dismiss': '點一下關閉',
     'agent.stop_close': 'Agent 已停下，想到新的就直接打或按住 space',
     'agent.stop_esc': '收到 esc，agent 已停下',
     'agent.stop_reject': '收到雙擊 space 拒絕，agent 已停下',
+    'agent.confirm.suffix': '— 按 space 確認',
+    'agent.confirm.navigate.with_path': '帶你到 {path}',
+    'agent.confirm.navigate.no_path': '切換頁面',
+    'agent.confirm.click.with_target': '點擊 {target}',
+    'agent.confirm.click.no_target': '點擊',
+    'agent.confirm.fill_input.with_target': '填寫 {target}',
+    'agent.confirm.fill_input.no_target': '填寫欄位',
+    'agent.confirm.delete.with_target': '刪除 {target}',
+    'agent.confirm.delete.no_target': '刪除',
+    'agent.confirm.generic.with_target': '執行 {action} → {target}',
+    'agent.confirm.generic.no_target': '執行 {action}',
     'palette.theme.light': '主題:亮色',
     'palette.theme.dark': '主題:暗色',
     'palette.theme.system': '主題:跟隨系統',
@@ -70,6 +103,7 @@ const STRINGS = {
     'palette.footer.navigate': '上下移動',
     'palette.footer.select': '選取',
     'palette.footer.close': '關閉',
+    'palette.footer.back': '上一頁',
     'palette.section.settings': '設定',
     'palette.section.go_to': '前往',
     'palette.section.ai': 'AI',
@@ -84,9 +118,23 @@ export type SdkI18nKey = keyof typeof STRINGS['en'];
  * Look up the bundled string for `key` in the given locale. Falls back
  * to English when the locale isn't bundled. Hosts that want native
  * strings for `ja` / `es` / `fr` etc. should NOT call this — they
- * override at the module config level instead.
+ * override at the module config level (e.g. WebAgentConfig.confirmStrings).
+ *
+ * `vars` interpolates `{name}` placeholders, e.g.
+ *   sdkString('en', 'agent.confirm.click.with_target', { target: 'button[3]' })
+ *   → "Click button[3]"
  */
-export function sdkString(locale: string | undefined, key: SdkI18nKey): string {
+export function sdkString(
+  locale: string | undefined,
+  key: SdkI18nKey,
+  vars?: Record<string, string | number>,
+): string {
   const dict = (STRINGS as unknown as Record<string, Record<string, string>>)[locale ?? 'en'];
-  return dict?.[key] ?? STRINGS.en[key];
+  let s = dict?.[key] ?? STRINGS.en[key];
+  if (vars) {
+    for (const [k, v] of Object.entries(vars)) {
+      s = s.replaceAll(`{${k}}`, String(v));
+    }
+  }
+  return s;
 }

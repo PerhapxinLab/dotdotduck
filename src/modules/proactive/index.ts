@@ -36,6 +36,23 @@ export type PromptSurface = {
   noLabel?: string;
   dismissable?: boolean;
   autoTimeoutMs?: number;
+  /**
+   * Rich content surface. When provided, the renderer ignores `text` /
+   * `yesLabel` / `noLabel` and renders this PieceSurface tree directly.
+   * Use for recommendation grids (`OptionGroup` of `MediaCard`s),
+   * confirm summaries, multi-option pickers — anything that benefits
+   * from image + structured layout instead of plain text + yes/no.
+   *
+   * The piece tree should `trigger('choose', { value, index })` (or a
+   * similar action) — the bridge maps any non-`yes` / non-`no` action
+   * to `'dismiss'` for the standard 3-way response. Host can use the
+   * `data` model to capture the picked value separately via analytics.
+   */
+  pieces?: {
+    /** Standard PieceSurface shape: { root: PieceNode, data?: object } */
+    root: { kind: string; [k: string]: unknown };
+    data?: Record<string, unknown>;
+  };
 };
 
 export type PromptDefinition = {

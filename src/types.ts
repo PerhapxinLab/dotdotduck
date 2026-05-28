@@ -116,6 +116,34 @@ export type IntentEvent =
   | { kind: 'skill_started'; skillId: string; timestamp: number }
   | { kind: 'skill_finished'; skillId: string; timestamp: number }
   /**
+   * Fired when an agent run begins (user submitted a query, either
+   * fresh or as a follow-up). `runId` ties every downstream intent in
+   * the same run together so dashboards can group by run without
+   * relying on time-windowing.
+   */
+  | { kind: 'agent_run_started'; runId: string; task: string; sessionId: string; timestamp: number }
+  /**
+   * Fired when an agent run terminates cleanly (the loop ended on its
+   * own — empty actions / no tool call). Pairs with `agent_run_started`
+   * via `runId`.
+   */
+  | { kind: 'agent_run_completed'; runId: string; sessionId: string; turnCount: number; timestamp: number }
+  /**
+   * Fired when the user explicitly halts a running agent (× button on
+   * the bar, Esc, double-tap Space reject, palette open mid-run,
+   * long-press voice mid-run). `reason` names which path triggered the
+   * stop so dashboards can distinguish "user changed their mind" from
+   * "user got frustrated".
+   */
+  | { kind: 'agent_run_stopped'; runId: string; sessionId: string; reason: 'close' | 'esc' | 'reject' | 'palette' | 'voice' | 'unknown'; timestamp: number }
+  /**
+   * Fired after every CoT-mode narration when the runtime's auto-pause
+   * resolves. `decision: 'continue'` = user pressed Space; `'stop'` =
+   * user double-tapped Space to reject. Lets dashboards see WHERE in
+   * the run the user got bored / chose to stop.
+   */
+  | { kind: 'agent_pause_decision'; runId: string; decision: 'continue' | 'stop'; timestamp: number }
+  /**
    * Fired when the SDK's `gateAgentSubtitles` mode is on and the user
    * responds to the final done summary. `satisfied: true` = Space
    * accept, `false` = double-tap reject, `null` = explicit cancel

@@ -94,6 +94,14 @@ export async function* streamGemini(args: {
         })),
       },
     ];
+    const choice = args.opts.toolChoice;
+    if (choice === 'required') {
+      body.tool_config = { function_calling_config: { mode: 'ANY' } };
+    } else if (typeof choice === 'object' && typeof choice.name === 'string') {
+      body.tool_config = {
+        function_calling_config: { mode: 'ANY', allowed_function_names: [choice.name] },
+      };
+    }
   }
 
   const response = await fetch(url, {

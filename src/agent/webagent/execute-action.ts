@@ -43,6 +43,27 @@ export interface PausePayload {
   resolve: (answer: string) => void;
 }
 
+/**
+ * Surface presentation — agent emits a PieceSurface (image+text card,
+ * option group, etc.) and waits for the user to pick or cancel. The
+ * host renders into a PlacementSlot and resolves with the chosen
+ * option's value (or null on cancel).
+ *
+ * Only fires when the host has opted in via `WebAgentConfig.allowPresent`
+ * AND has wired the surface mounter via `setSurfaceMounter`.
+ */
+export interface PresentSurfacePayload {
+  /** Piece tree the host renders. The agent built it; the host trusts
+   *  its catalog won't include unsafe pieces (Slot's `render` fn etc.). */
+  surface: unknown;
+  /** Where on screen to render. Subset of PlacementSlot — agent isn't
+   *  given access to fab / banner / toast since those have semantics
+   *  the agent shouldn't be allowed to choose. */
+  placement: 'subtitle' | 'modal' | 'dock' | 'inline';
+  /** Resolves with the chosen option's value, or null on cancel. */
+  resolve: (pick: { value: string | null; cancelled: boolean }) => void;
+}
+
 export interface ExecuteActionBindings {
   actions: Map<string, ActionDefinition>;
   /** Register a host-interaction resolver and return its id. */
@@ -56,10 +77,17 @@ export interface ExecuteActionBindings {
    *  subtitle bar rather than spawning a separate prompt — so the
    *  text the agent just streamed stays visible while the user reads. */
   emitPause(payload: PausePayload): void;
-  /** Index → element map from the latest readDOM. Action handlers
-   *  resolve `[N]` style selectors via this map so the LLM doesn't have
-   *  to invent CSS selectors. */
-  indexMap: Map<number, Element>;
+  /** Surface a structured PieceSurface to the host. Returns the user's
+   *  pick (or cancellation). `undefined` here means the host hasn't
+   *  wired the mounter — `present_surface` then fails fast with a
+   *  clear `reason: 'unknown'` so the model knows to fall back to
+   *  manual narration. */
+  emitPresentSurface?: (payload: PresentSurfacePayload) => void;
+  /** Stable-ID → element map from the latest readDOM. Action handlers
+   *  resolve `[id]` style selectors via this map so the LLM doesn't have
+   *  to invent CSS selectors. IDs are short alphanumeric hashes (e.g.
+   *  `e4f3a`) — they stay stable across turns for the same element. */
+  indexMap: Map<string, Element>;
   session: AgentSession;
   /** Subtitle-bar fallback shown when the `pause` tool is called with
    *  no `note`. Hosts pass their own string here for a localised UX;
@@ -82,23 +110,24 @@ export async function executeAction(
     session: bindings.session,
     signal,
     resolveTarget: (target: string | number): Element | null => {
-      // Numeric index path — `3`, `"3"`, or `"[3]"` all resolve via
-      // the per-turn indexMap.
       if (typeof target === 'number') {
-        return bindings.indexMap.get(target) ?? null;
+        // Legacy numeric path — keep working for old sessions persisted
+        // before the hash-ID change; new sessions never call with number.
+        return bindings.indexMap.get(String(target)) ?? null;
       }
       if (typeof target === 'string') {
         const trimmed = target.trim();
-        // Accept the bare number (`"5"`), bracketed (`"[5]"`), or with
-        // a leading viewport marker the dump emits (`"↓[5]"` / `"↑5"`).
-        const m = /^[↑↓]?\s*\[?(\d+)\]?$/.exec(trimmed);
+        // Stable-ID path — `[e4f3a]`, `e4f3a`, or with a viewport marker
+        // (`↓[e4f3a]`). Also accepts legacy numeric refs (`"5"`) for
+        // session-replay compatibility, though the new DOM dump never
+        // emits those.
+        const m = /^[↑↓]?\s*\[?([A-Za-z0-9_-]+)\]?$/.exec(trimmed);
         if (m) {
-          const idx = parseInt(m[1]!, 10);
-          const el = bindings.indexMap.get(idx);
+          const id = m[1]!;
+          const el = bindings.indexMap.get(id);
           if (el) return el;
-          // Fall through — index didn't match, try as CSS selector.
+          // Fall through — id didn't match, try as CSS selector.
         }
-        // CSS selector path — passed verbatim to querySelector.
         if (typeof document !== 'undefined') {
           try {
             return document.querySelector(trimmed);
@@ -148,6 +177,38 @@ export async function executeAction(
       });
     });
     return { ok: true, data: answer };
+  }
+
+  if (name === 'present_surface') {
+    // Intercepted here so the action runtime can route a PieceSurface to
+    // the host's mounter and await the user's pick. The host wires the
+    // mounter via `WebAgent.setSurfaceMounter`; without that wire, we
+    // fail fast so the model falls back to manual narration / ask_user.
+    if (!bindings.emitPresentSurface) {
+      return {
+        ok: false,
+        reason: 'unknown',
+        message: 'present_surface requires the host to wire a surface mounter (WebAgent.setSurfaceMounter). Falling back: narrate the options manually or use ask_user_choice.',
+      };
+    }
+    const surface = params.surface;
+    if (!surface || typeof surface !== 'object') {
+      return { ok: false, reason: 'unknown', message: 'present_surface requires a `surface` object (a PieceSurface tree).' };
+    }
+    const placement = (typeof params.placement === 'string'
+      ? params.placement
+      : 'subtitle') as 'subtitle' | 'modal' | 'dock' | 'inline';
+    const result = await new Promise<{ value: string | null; cancelled: boolean }>((resolve) => {
+      bindings.registerPendingResolver((raw) => {
+        try { resolve(JSON.parse(raw)); } catch { resolve({ value: null, cancelled: true }); }
+      });
+      bindings.emitPresentSurface!({
+        surface,
+        placement,
+        resolve: (pick) => resolve(pick),
+      });
+    });
+    return { ok: true, data: result };
   }
 
   try {

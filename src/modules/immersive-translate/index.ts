@@ -61,15 +61,23 @@ const DEFAULT_IGNORE = [
   '.dddk-imm-translate',
 ];
 
+// Translatable block tags. `div` is included because many design systems
+// (Tailwind UI, custom card components, SvelteKit pages, etc.) use bare
+// `<div>` for card titles / bodies / sections instead of semantic `<p>` /
+// `<h*>` — without `div` we silently skip those texts. The walker's
+// "skip if contains a block child" rule (see `collectBlocks`) prevents
+// double-translation of div-wrapped paragraphs, since the outer div is
+// SKIPped (descend) when its children are also blocks.
 const BLOCK_TAGS = new Set([
   'p', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote',
   'figcaption', 'td', 'th', 'dt', 'dd', 'summary', 'caption',
+  'div',
 ]);
 
-const SYSTEM_PROMPT = `You are a translation engine. The user gives you a JSON array of strings (one source paragraph per element). Return a JSON array of EXACTLY THE SAME LENGTH where index N is the translation of index N into the requested target language.
+const SYSTEM_PROMPT = `You are a translation engine. The user gives you a JSON array of strings (one source paragraph per element). Return an object \`{"translations": [...]}\` where \`translations\` is an array of EXACTLY THE SAME LENGTH as the input, and index N is the translation of input[N] into the requested target language.
 
 ABSOLUTE RULES:
-- Output ONLY the JSON array. No markdown code fences. No commentary. No keys or wrapping object.
+- Output ONLY the JSON object \`{"translations": [...]}\`. No markdown code fences. No commentary.
 - Preserve inline tags like <a>, <strong>, <em>, <code>, <span> verbatim and around the same content.
 - Do NOT add bullets / numbering that weren't in the source.
 - Keep numbers, dates, URLs, and proper nouns (especially product/brand names) as-is unless they have an established translation.
@@ -269,9 +277,10 @@ export class ImmersiveTranslate {
     const cleaned = stripCodeFence(raw);
     try {
       const parsed = JSON.parse(cleaned);
-      if (!Array.isArray(parsed)) throw new Error('not an array');
-      if (parsed.length !== blocks.length) throw new Error(`length mismatch ${parsed.length} vs ${blocks.length}`);
-      return parsed.map((s) => String(s));
+      const arr = extractTranslationsArray(parsed);
+      if (!arr) throw new Error('no translations array found in response');
+      if (arr.length !== blocks.length) throw new Error(`length mismatch ${arr.length} vs ${blocks.length}`);
+      return arr.map((s: unknown) => String(s));
     } catch (err) {
       console.warn('[immersive-translate] JSON parse failed:', err, 'raw:', raw);
       return blocks.map(() => '');
@@ -317,6 +326,28 @@ function ensureStyles(): void {
     }
     br.${WRAPPER_CLASS} { display: block; margin-top: 4px; }
   `);
+}
+
+/**
+ * Tolerantly extract the translations array from an LLM JSON response.
+ *
+ * `jsonMode: true` (OpenAI's `response_format: json_object`) forces a
+ * top-level object, so the model can't return a bare array. We ask for
+ * `{"translations": [...]}` but accept several common drift shapes:
+ *   - `[...]` — model ignored jsonMode (rare).
+ *   - `{"translations": [...]}` — the requested shape.
+ *   - `{"<langCode>": [...]}` — model keyed by the target lang (`{"ja": [...]}`).
+ *   - `{"result": [...]}` / `{"data": [...]}` — generic fallback keys.
+ *   - Any object with exactly one array-valued property — use that array.
+ */
+function extractTranslationsArray(parsed: unknown): unknown[] | null {
+  if (Array.isArray(parsed)) return parsed;
+  if (!parsed || typeof parsed !== 'object') return null;
+  const obj = parsed as Record<string, unknown>;
+  if (Array.isArray(obj.translations)) return obj.translations;
+  const arrayValues = Object.values(obj).filter((v) => Array.isArray(v)) as unknown[][];
+  if (arrayValues.length === 1) return arrayValues[0]!;
+  return null;
 }
 
 /** Tiny non-crypto hash for the translation cache key. 32-bit FNV-1a. */

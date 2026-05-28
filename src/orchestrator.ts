@@ -38,7 +38,9 @@ import type {
   DddkEventName,
   DddkEventMap,
   DddkEventHandler,
+  IntentEvent,
 } from './types';
+import type { AgentSession } from './agent/webagent/types';
 
 export interface DotDotDuckConfig {
   locale?: Locale;
@@ -393,6 +395,7 @@ export class DotDotDuck {
     this.config.locale = locale;
     this.subtitle.setLocale(locale);
     try { this.palette.setLocale(locale); } catch { /* palette torn down */ }
+    try { this.agentInstance?.setLocale(locale); } catch { /* agent not built */ }
   }
 
   // ─── lifecycle ──────────────────────────────────────────────────
@@ -589,6 +592,11 @@ export class DotDotDuck {
   /** Emit a structured intent event. Public so other modules can push too. */
   emitIntent(event: import('./types').IntentEvent): void {
     this.emitter.emit('intent', event);
+    // Buffer into the current run so `exportAgentRun()` returns the full
+    // sequence of decisions alongside the session turn log. We accept
+    // anything emitted between `beginAgentRun` and the next one — that
+    // includes confirm gates, ask_user answers, pause decisions, etc.
+    if (this.currentRunId) this.currentRunIntents.push(event);
   }
 
   // ─── highlight (frame any DOM element) ──────────────────────────
@@ -806,6 +814,7 @@ export class DotDotDuck {
     }
 
     this.emitter.emit('agent_start', { task });
+    this.beginAgentRun(task);
     this.runAgentStream(task, selection ? { selection } : {});
   }
 
@@ -813,6 +822,76 @@ export class DotDotDuck {
     const agent = this.agentInstance;
     if (!agent) return;
     void this.pumpAgentStream(agent.runStream(task, opts));
+  }
+
+  // ─── per-run intent bookkeeping ─────────────────────────────────────
+  //
+  // A "run" is one user query and everything that follows it — narrations,
+  // tool calls, confirms, pauses, until the loop ends (final / stopped).
+  // We give it an id at start time and buffer every intent emitted while
+  // it's active. Hosts call `exportAgentRun()` to get the whole thing
+  // (session + intents) as one JSON blob.
+  private currentRunId: string | null = null;
+  private currentRunIntents: IntentEvent[] = [];
+
+  private beginAgentRun(task: string): void {
+    this.currentRunId = `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    this.currentRunIntents = [];
+    this.emitIntent({
+      kind: 'agent_run_started',
+      runId: this.currentRunId,
+      task,
+      sessionId: this.agentInstance?.getSession()?.id ?? '',
+      timestamp: Date.now(),
+    });
+  }
+
+  private endAgentRunCompleted(): void {
+    if (!this.currentRunId) return;
+    this.emitIntent({
+      kind: 'agent_run_completed',
+      runId: this.currentRunId,
+      sessionId: this.agentInstance?.getSession()?.id ?? '',
+      turnCount: this.agentInstance?.getSession()?.turns.length ?? 0,
+      timestamp: Date.now(),
+    });
+    // Keep runId / intents around until next run starts so an
+    // `exportAgentRun()` call right after the loop ends still works.
+  }
+
+  private endAgentRunStopped(reason: 'close' | 'esc' | 'reject' | 'palette' | 'voice' | 'unknown'): void {
+    if (!this.currentRunId) return;
+    this.emitIntent({
+      kind: 'agent_run_stopped',
+      runId: this.currentRunId,
+      sessionId: this.agentInstance?.getSession()?.id ?? '',
+      reason,
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * Snapshot the current (or most-recent) agent run as a single JSON
+   * blob — session turns + every intent emitted during the run. Useful
+   * for shipping a complete query record to a dashboard / DB after the
+   * loop ends. Returns `null` if no agent has ever run in this session.
+   */
+  exportAgentRun(): {
+    runId: string;
+    sessionId: string;
+    session: AgentSession;
+    intents: IntentEvent[];
+    exportedAt: number;
+  } | null {
+    const session = this.agentInstance?.getSession();
+    if (!session) return null;
+    return {
+      runId: this.currentRunId ?? '',
+      sessionId: session.id,
+      session: JSON.parse(JSON.stringify(session)) as AgentSession,
+      intents: this.currentRunIntents.slice(),
+      exportedAt: Date.now(),
+    };
   }
 
   /** Resume a saved session — used by the host's onMount after a full
@@ -898,6 +977,10 @@ export class DotDotDuck {
   private handleUserStopAgent(reason: 'close' | 'esc' | 'palette' | 'reject' | 'voice'): void {
     const agent = this.agentInstance;
     if (!agent || !agent.isRunning()) return;
+    // Emit BEFORE stop so the run still has its runId and dashboards
+    // see the cancellation cleanly. The Push goes into currentRunIntents
+    // too via emitIntent, so exportAgentRun() returns it.
+    this.endAgentRunStopped(reason);
     // `palette` / `voice` are interruptions that come WITH a new prompt
     // attached — the user wants to redirect mid-task, not abandon the
     // conversation. Soft-stop so the next runStream() appends as a
@@ -1019,6 +1102,36 @@ export class DotDotDuck {
     // this BEFORE the SPA settle window).
     agent.setNavigateBridge((path: string) => this.navigate(path));
 
+    // Palette context — every turn the agent's system prompt shows
+    // the host's currently-registered palette commands, so the model
+    // can `run_palette({id})` directly without needing to discover them
+    // first. Filters out fallback / search-only items (recursive Ask AI
+    // call, hidden doc-flat rows).
+    agent.setPaletteContextProvider(() =>
+      this.palette.getItems()
+        .filter((it) => !it.fallback && !it.searchOnly && !!it.handler)
+        .map((it) => {
+          // Prefix shape on PaletteItem is `string | string[] | { match, label? }`.
+          // Flatten to a single representative string for prompt display —
+          // the agent only needs to recognise the command, not list every alias.
+          let prefix: string | undefined;
+          if (typeof it.prefix === 'string') prefix = it.prefix;
+          else if (Array.isArray(it.prefix)) prefix = it.prefix[0];
+          else if (it.prefix && typeof it.prefix === 'object') {
+            const m = it.prefix.match;
+            prefix = typeof m === 'string' ? m : (Array.isArray(m) ? m[0] : undefined);
+          }
+          return {
+            id: it.id,
+            name: it.name,
+            description: it.description,
+            prefix,
+            section: typeof it.section === 'string' ? it.section : undefined,
+            acceptsArg: it.prefixAcceptsAnyArg === true,
+          };
+        }),
+    );
+
     // ask_user / ask_user_choice are dispatched via the action handler;
     // the handler calls back into these to render the host UI.
     agent.setAskUserHandler(({ question, resolve }) => {
@@ -1066,6 +1179,15 @@ export class DotDotDuck {
     // active (e.g. agent called pause as its first action), fall back
     // to a regular ask_user-style prompt so the gesture still works.
     agent.setPauseHandler(({ hint, resolve }) => {
+      const emitPauseDecision = (decision: 'continue' | 'stop'): void => {
+        if (!this.currentRunId) return;
+        this.emitIntent({
+          kind: 'agent_pause_decision',
+          runId: this.currentRunId,
+          decision,
+          timestamp: Date.now(),
+        });
+      };
       if (this.subtitle.isStreaming()) {
         this.subtitle.applyStreamingPauseHint({
           hint,
@@ -1077,9 +1199,11 @@ export class DotDotDuck {
             // itself stays mounted so the next text-delta appends
             // smoothly with no visible flicker.)
             this.subtitle.replaceStreamed('');
+            emitPauseDecision('continue');
             resolve('continue');
           },
           onReject: () => {
+            emitPauseDecision('stop');
             resolve('');
             this.handleUserStopAgent('reject');
           },
@@ -1089,8 +1213,9 @@ export class DotDotDuck {
         this.subtitle.show({
           text: hint,
           type: 'agent',
-          onAccept: () => resolve('continue'),
+          onAccept: () => { emitPauseDecision('continue'); resolve('continue'); },
           onReject: () => {
+            emitPauseDecision('stop');
             resolve('');
             this.handleUserStopAgent('reject');
           },
@@ -1208,6 +1333,7 @@ export class DotDotDuck {
             this.clearHighlight();
             clearWebagentOverlays();
             this.emitter.emit('agent_final', undefined);
+            this.endAgentRunCompleted();
             break;
 
           case 'error':
@@ -1297,6 +1423,9 @@ export class DotDotDuck {
    */
   private collectPaletteTools(): NonNullable<WebAgentConfig['customActions']> {
     const tools: NonNullable<WebAgentConfig['customActions']> = [];
+
+    // Per-item exposure — items the host opted into via `agentTool: {...}`
+    // become their own named agent tools. Same shape as before.
     for (const item of this.palette.getItems()) {
       if (!item.agentTool || !item.handler) continue;
       tools.push({
@@ -1328,6 +1457,42 @@ export class DotDotDuck {
         },
       });
     }
+
+    // Open the palette UI — and nothing else. This tool does ONE thing:
+    // it renders the palette panel on screen. It does NOT pick a command,
+    // does NOT pre-fill the search input, does NOT execute anything.
+    //
+    // Once the palette is visible, all the standard DOM actions (`click`,
+    // `fill_input`, `border`, etc.) work on the palette items, the search
+    // input, and the language sub-menus the same way they would for any
+    // other on-page element. The host's available palette commands are
+    // listed below for reference, but invoking one of them is done by
+    // clicking its row in the next turn's DOM dump — never by passing it
+    // as an argument here.
+    tools.push({
+      name: 'open_palette',
+      description: 'Open the command palette UI. This is equivalent to the user pressing Ctrl+K — the panel opens with all top-level commands visible and focus stays on the page (not on the search input), so subsequent Space / accept gestures still work. The tool takes NO arguments — to filter the list, follow up with `fill_input` on the palette\'s search input; to invoke a command, follow up with `click` on the matching row from the next turn\'s DOM dump. The host\'s available palette commands are listed below — read them BEFORE opening so you know what to click for.',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {},
+      },
+      handler: async () => {
+        try {
+          // Open WITHOUT focusing the palette input. Reason: if focus
+          // landed in the input, Space presses would become literal
+          // characters instead of resolving the runtime's auto-pause /
+          // accept gesture. With focus on body, Space still advances the
+          // agent through whatever comes next. The user can click the
+          // input themselves to start typing.
+          this.palette.open(undefined, { focusInput: false });
+          return { ok: true as const };
+        } catch (err) {
+          return { ok: false, reason: 'unknown' as const, message: (err as Error).message };
+        }
+      },
+    });
+
     return tools;
   }
 

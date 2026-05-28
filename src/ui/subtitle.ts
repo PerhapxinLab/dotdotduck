@@ -6,6 +6,7 @@
 import type { SubtitleChoiceOptions, SubtitleShowOptions, SubtitleType } from '../types';
 import { escapeHtml, injectScopedStyle } from '../utils/dom';
 import { applyPlacement } from './placement';
+import { sdkString } from '../utils/sdk-i18n';
 
 const UI_ATTR = 'data-dddk-ui';
 const STYLE_ID = 'dddk-subtitle-style';
@@ -224,10 +225,18 @@ export class Subtitle {
         // Clicks on the bar itself = let the bar's button handler fire.
         const target = e.target as Element | null;
         if (target && this.el && this.el.contains(target)) return;
-        // Click-outside is treated as an explicit user dismissal —
-        // same semantics as the × button. Route through handleCloseClick
-        // so the host's closeHandler (stop the agent loop + clear any
-        // running indicator) fires alongside the hide.
+        // Action subtitles (have onAccept / onReject — confirms, pause
+        // hints, choice pickers) and streaming bars must NOT cancel on
+        // outside clicks. Users routinely click around (focus a text
+        // box, scroll-click a link) while the agent is running and an
+        // accidental cancel feels like the agent is fragile. Explicit
+        // dismissal still works via the × button, Esc, or double-tap
+        // Space — all routed through the gesture manager.
+        const hasAction = !!(this.currentOpts?.onAccept || this.currentOpts?.onReject);
+        const isStreaming = this.el?.getAttribute('data-dddk-bar-mode') === 'streaming';
+        if (hasAction || isStreaming) return;
+        // Pure info subtitle (no accept/reject, not streaming) — click
+        // outside is the same as the × button.
         this.handleCloseClick();
       };
       const onKey = (e: KeyboardEvent): void => {
@@ -326,6 +335,13 @@ export class Subtitle {
     // Flush any tail text the model left in the buffer before going silent.
     this.flushStreamingTts(true);
     if (!this.el) return;
+    // Nothing was streamed (the agent finished without narration — e.g.
+    // the last turn was an empty `actions: []`). Showing a static "press
+    // space to close" hint on an empty bar is noise. Just hide.
+    if (!this.streamingFullText.trim()) {
+      this.hide();
+      return;
+    }
     this.el.setAttribute('data-dddk-bar-mode', 'streaming-done');
     if (this.streamingCursor) {
       this.streamingCursor.remove();
@@ -335,7 +351,7 @@ export class Subtitle {
     // discoverable dismiss gesture (in addition to the × button).
     const scroll = this.el.querySelector<HTMLDivElement>(`[${UI_ATTR}="bar-scroll"]`);
     if (scroll && !scroll.querySelector(`[${UI_ATTR}="bar-hints"]`)) {
-      const hintText = this.locale === 'zh-TW' ? '按 space 關閉' : 'press space to close';
+      const hintText = sdkString(this.locale, 'agent.press_space_close');
       const hintEl = document.createElement('div');
       hintEl.setAttribute(UI_ATTR, 'bar-hints');
       hintEl.textContent = hintText;
@@ -436,14 +452,10 @@ export class Subtitle {
   }
 
   private defaultPauseRejectHint(): string {
-    if (isTouchOnlyDevice()) {
-      return this.locale === 'zh-TW'
-        ? '點一下繼續 ｜ 雙擊結束'
-        : 'tap to continue · double-tap to exit';
-    }
-    return this.locale === 'zh-TW'
-      ? 'space 繼續 ｜ 雙擊 space 結束'
-      : 'space continue · double-tap to exit';
+    return sdkString(
+      this.locale,
+      isTouchOnlyDevice() ? 'agent.tap_to_continue' : 'agent.space_continue_reject',
+    );
   }
 
   /** Keep the scrollable inner pinned to the bottom as new text streams
@@ -1087,10 +1099,10 @@ export class Subtitle {
     // dismiss gesture without having to find the × button.
     const isDecisionless = !opts.onAccept && !opts.onReject;
     if (isDecisionless && opts.type !== 'agent') {
-      const touch = isTouchOnlyDevice();
-      const text = touch
-        ? (this.locale === 'zh-TW' ? '點一下關閉' : 'tap to dismiss')
-        : (this.locale === 'zh-TW' ? '按 space 關閉' : 'press space to close');
+      const text = sdkString(
+        this.locale,
+        isTouchOnlyDevice() ? 'agent.tap_to_dismiss' : 'agent.press_space_close',
+      );
       return `<div ${UI_ATTR}="bar-hints">${text}</div>`;
     }
 
@@ -1664,6 +1676,22 @@ function ensureStyles(): void {
       font-size: var(--dddk-font-size-md, 14px);
       font-weight: 600;
       border: 1px solid rgba(255,255,255,0.15);
+    }
+    /* Mobile: pill was visually too tall — the desktop 10/20 padding
+       wasted vertical space on narrow viewports. Tighter padding +
+       smaller dots keeps the capsule readable but less obtrusive. */
+    @media (max-width: 480px) {
+      [${UI_ATTR}="indicator"] {
+        padding: 6px 14px;
+        gap: 8px;
+        font-size: var(--dddk-font-size-sm, 13px);
+      }
+      [${UI_ATTR}="indicator-dots"] span {
+        width: 6px; height: 6px;
+      }
+      [${UI_ATTR}="indicator-check"] {
+        font-size: 14px;
+      }
     }
     [${UI_ATTR}="indicator"][data-state="listening"] {
       animation: dddk-indicator-pulse 1.4s ease-in-out infinite;

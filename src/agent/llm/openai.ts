@@ -109,7 +109,12 @@ export class OpenAIProvider implements LLMProvider, StreamingProvider {
           parameters: t.parameters,
         },
       }));
-      body.tool_choice = 'auto';
+      const choice = opts.toolChoice ?? 'auto';
+      if (choice === 'auto' || choice === 'required') {
+        body.tool_choice = choice;
+      } else if (typeof choice === 'object' && typeof choice.name === 'string') {
+        body.tool_choice = { type: 'function', function: { name: choice.name } };
+      }
     }
 
     // Vendor-specific knobs (DeepSeek `thinking`, etc.) layered last so

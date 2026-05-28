@@ -29,6 +29,51 @@ export interface BrandPrompt {
   constraints?: string[];
 }
 
+/**
+ * Persona — tells the agent who it IS and on whose behalf it speaks.
+ * Without this, the agent narrates the page in third-person observer
+ * voice ("the site states X"); with this, it speaks as the site's
+ * representative ("we offer X").
+ *
+ * Default is `undefined` — no persona section is injected. Hosts that
+ * want a representative voice supply either a free-form `string` or a
+ * structured `PersonaConfig`.
+ */
+export interface PersonaConfig {
+  /**
+   * First-person identity statement. Required. The model is given this
+   * verbatim under a `# Who you are` heading, so write it as a direct
+   * instruction:
+   *
+   *   "You are the dotdotduck assistant, speaking on behalf of
+   *    perhapxin. Use 'we' for things this product / company does."
+   */
+  identity: string;
+  /** Optional voice / tone notes — concrete examples beat adjectives. */
+  voice?: string;
+  /** Hard rules — things the persona must never do or say. */
+  constraints?: string[];
+}
+
+export type PersonaInput = string | PersonaConfig;
+
+/**
+ * Summary of one palette command shown to the agent. The orchestrator
+ * builds this list from `palette.getItems()` and passes it through to
+ * the prompt so the agent sees what host-registered commands exist
+ * BEFORE deciding to do anything manually. With this, "translate the
+ * page" picks up `/immersive_translate`; "switch theme" picks up
+ * `/theme`; etc. — no need to call list_palette first.
+ */
+export interface PaletteCommandSummary {
+  id: string;
+  name: string;
+  description?: string;
+  prefix?: string;
+  section?: string;
+  acceptsArg?: boolean;
+}
+
 export interface PromptContext {
   locale?: string;
   agentName: string;
@@ -38,8 +83,12 @@ export interface PromptContext {
   pageContext: string;
   selection?: SelectionContext;
   brand?: BrandPrompt;
+  persona?: PersonaInput;
   appendSystemPrompt?: string;
   previousUrl?: string;
+  /** When true, render the CoT-mode prompt (no procedural rules, schema
+   *  enforces structure). When false, render the classic narrator prompt. */
+  cotMode?: boolean;
 }
 
 export type SystemPromptOverride =
@@ -61,13 +110,71 @@ export function assembleSystemPrompt(input: AssemblePromptInput): string {
 // ─── default system prompt — narrator persona ─────────────────────────
 
 function renderDefault(ctx: PromptContext): string {
+  if (ctx.cotMode) return renderCotDefault(ctx);
   const sections: string[] = [];
   sections.push(renderHeader(ctx));
+  // Persona, if supplied, comes RIGHT AFTER the header so identity
+  // framing dominates downstream rules. Without this it tends to lose
+  // to the more concrete narration / safety rules below.
+  const personaBlock = renderPersona(ctx.persona);
+  if (personaBlock) sections.push(personaBlock);
   sections.push(renderNarrationRules());
+  // (Palette command list is injected into `run_palette`'s tool
+  // description, not here — keeping it next to the tool means the
+  // model sees the available ids when it's deciding which tool to
+  // call, instead of a separate section it might overlook.)
   sections.push(renderSafety());
   if (ctx.brand) sections.push(renderBrand(ctx.brand));
   sections.push(renderOutputLanguage(ctx.locale));
   if (ctx.appendSystemPrompt) sections.push(ctx.appendSystemPrompt);
+  return sections.filter(Boolean).join('\n\n');
+}
+
+/**
+ * CoT-mode system prompt — concise context block, no procedural rules.
+ * The schema (`agent_turn` tool) enforces structure; this prompt just
+ * tells the model what the situation is and what each field means.
+ */
+function renderCotDefault(ctx: PromptContext): string {
+  const siteClause = ctx.siteName ? ` on ${ctx.siteName}` : '';
+  const sections: string[] = [];
+
+  sections.push(`You are ${ctx.agentName}${siteClause}, an in-page assistant.
+
+Each turn call \`agent_turn\` with:
+- **memory** — rolling scratchpad. Read your prior turn's memory + the action_results in tool history; extend with this turn's outcome + what's left. Don't reset it each turn, and don't re-introduce / re-border something already done — completed steps are in your own history.
+- **next_goal** — one sentence, this turn's aim.
+- **actions** — ordered list. Each item is \`{narrate: "..."}\` (streams a sentence to the subtitle bar) or \`{tool: "...", args: {...}}\` (dispatches a tool). Quote real text from the DOM dump; don't paraphrase.
+
+The runtime auto-pauses after every narrate (waits for Space). No \`pause\` tool exists — pacing is automatic.
+
+\`actions: []\` ends the loop. Use when the user's request is fully addressed.`);
+
+  const personaBlock = renderPersona(ctx.persona);
+  if (personaBlock) sections.push(personaBlock);
+
+  sections.push(`# DOM dump
+
+\`\`\`
+URL: https://...
+VIEWPORT: 240px above · 900px visible · 1820px below
+[ea3f]<a href="/">Home</a>
+[ec18]<section> Pricing
+\t[e7b2]<h2>Plans</h2>
+↓[eb1c]<section> FAQ
+\`\`\`
+
+\`[id]\` is a stable hash — pass \`"ea3f"\` or \`"[ea3f]"\` as a tool's \`selector\`. Same element keeps the same id across turns. \`↑\`/\`↓\` markers = above/below viewport — scroll_to first. The URL line is ground truth: don't narrate a destination you haven't actually navigated to.`);
+
+  sections.push(`# Stuck
+
+Same selector/action failing twice = stop. Pick a different selector, different action, or \`ask_user_choice\` with two concrete options. Don't retry blindly.`);
+
+  sections.push(renderSafety());
+  if (ctx.brand) sections.push(renderBrand(ctx.brand));
+  sections.push(renderOutputLanguage(ctx.locale));
+  if (ctx.appendSystemPrompt) sections.push(ctx.appendSystemPrompt);
+
   return sections.filter(Boolean).join('\n\n');
 }
 
@@ -113,16 +220,16 @@ URL: https://...
 TITLE: ...
 VIEWPORT: 240px above · 900px visible · 1820px below
 
-[1]<a href="/">Home</a>
-[2]<section> Pricing
-\t[3]<h2>Plans</h2>
-\t[4]<table>
-\t\t[5]<tr>
+[ea3f]<a href="/">Home</a>
+[ec18]<section> Pricing
+\t[e7b2]<h2>Plans</h2>
+\t[e0d4]<table>
+\t\t[e9af]<tr>
 \t\t\t<td>Hobby</td><td>Free</td>
-↓[6]<section> FAQ
+↓[eb1c]<section> FAQ
 \`\`\`
 
-Numeric \`[N]\` is the element's id for tool calls — pass \`"5"\` or \`"[5]"\` as the \`selector\` arg, no CSS needed. Tab indent = parent/child. Leading \`↑\` / \`↓\` = above / below the current viewport, so \`scroll_to\` first if you want to talk about it. The VIEWPORT line tells you the user's current vertical position on the page.
+\`[id]\` is the element's stable hash ID for tool calls — pass \`"ea3f"\` or \`"[ea3f]"\` as the \`selector\` arg, no CSS needed. Tab indent = parent/child. Leading \`↑\` / \`↓\` = above / below the current viewport, so \`scroll_to\` first if you want to talk about it. The VIEWPORT line tells you the user's current vertical position on the page.
 
 # Voice and format
 
@@ -153,34 +260,74 @@ function renderBrand(brand: BrandPrompt): string {
   return lines.join('\n');
 }
 
+/**
+ * Render the persona block when the host provides one. Empty / undefined
+ * input returns '' so the section is silently skipped — the SDK ships
+ * with NO default persona, hosts opt in.
+ *
+ * The block is intentionally directive ("you ARE …, speak as 'we'") so
+ * smaller models actually shift voice. Without this, models default to
+ * a third-person observer narrating the page DOM — which reads to users
+ * as the agent being unaware of its own context.
+ */
+function renderPersona(persona: PersonaInput | undefined): string {
+  if (!persona) return '';
+  const cfg: PersonaConfig = typeof persona === 'string'
+    ? { identity: persona }
+    : persona;
+  if (!cfg.identity?.trim()) return '';
+  const lines: string[] = ['# Who you are', '', cfg.identity.trim()];
+  lines.push('');
+  lines.push('Speak as this identity — first-person ("we"), never "the site says…".');
+  if (cfg.voice?.trim()) {
+    lines.push('');
+    lines.push(`Voice: ${cfg.voice.trim()}`);
+  }
+  if (cfg.constraints?.length) {
+    lines.push('');
+    lines.push('Hard constraints:');
+    for (const c of cfg.constraints) lines.push(`- ${c}`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Render the host's palette as the body of the `run_palette` tool
+ * description. Caller (the runtime, when rebuilding tool defs) appends
+ * this to the static description so the model sees the available
+ * command ids WITHIN the tool it's about to call — not in a separate
+ * system prompt section it might overlook.
+ *
+ * Returns '' when the palette is empty / unavailable; callers should
+ * skip appending in that case.
+ */
+export function renderPaletteCommandsForToolDescription(items: PaletteCommandSummary[] | undefined): string {
+  if (!items || items.length === 0) return '';
+  const lines: string[] = ['', 'Registered palette commands:'];
+  for (const it of items) {
+    const desc = it.description ? ` — ${it.description}` : '';
+    const arg = it.acceptsArg ? ' (takes arg)' : '';
+    const prefix = it.prefix ? ` [${it.prefix}]` : '';
+    lines.push(`- ${it.name}${prefix}${arg}${desc}`);
+  }
+  lines.push('');
+  lines.push('After open, items appear in DOM dump — `click` the one that matches.');
+  return lines.join('\n');
+}
+
 function renderOutputLanguage(locale?: string): string {
   const hint = locale
-    ? `Host locale hint: **${locale}**. Use only as a tiebreaker when the user's input is symbol-only or ambiguous. The user's INPUT language ALWAYS wins.`
-    : `Detect the reply language from the user's first clear sentence and stay in it.`;
+    ? `Host locale hint: \`${locale}\` — only a tiebreaker when input is ambiguous.`
+    : `Detect reply language from the user's first clear sentence.`;
   return `# Language
 
-Two independent axes — never collapse them:
+Reply language = user's input language. ${hint} Page DOM language doesn't decide it.
 
-## Content language (HIGHEST priority — translation / rewrite / summarise payloads)
-
-If the user names a target language anywhere in their request — "translate to French", "rewrite in Japanese", "summarise in Spanish", or any equivalent in any language — the payload of that content task is in THAT TARGET LANGUAGE. No exceptions. Not the user's input language, not the host locale.
-
-Common failure mode to avoid: user types a Chinese question asking for a French translation, and the model gives Chinese because "the user spoke Chinese". Wrong. The French translation must go out as French. Only the optional wrapper around it ("here is the translation") follows the reply-language rule.
-
-This applies to French, German, Japanese, Korean, Spanish, Arabic, Hindi, Vietnamese, Thai, Russian, and every other human language. The model is multilingual — use that capacity.
-
-## Reply language (for narration / wrappers / non-translation answers)
-
-${hint}
-- English query → English narration. Chinese query → Chinese narration. Japanese query → Japanese narration. Detect from input.
-- Do NOT default to English just because the page DOM is English. Page-content language ≠ reply language.
+If the user asks to translate / rewrite into a target language, the payload goes in THAT language; only the wrapper ("here it is") follows reply language.
 
 # Style
 
-- Conversational, like talking to a friend. No essays, no preambles, no "hope that helps" closers.
-- No markdown formatting (no bold, italic, headings, bullets) — the subtitle bar renders prose, not docs.
-- No emoji.
-- Each segment between tool calls: 1–3 sentences. Save room for the next step.`;
+Plain prose, conversational, no markdown, no emoji. Each narrate: 1–3 short sentences.`;
 }
 
 // ─── helpers used by webagent.buildMessages for the per-turn user msg ─
@@ -259,7 +406,9 @@ export function renderUserReminder(opts: {
   latestUserText: string;
   stepsSoFar: AgentTurn[];
   currentUrl?: string;
+  cotMode?: boolean;
 }): string {
+  if (opts.cotMode) return renderCotReminder(opts);
   const stepLines: string[] = [];
   let pauseCount = 0;
   let lastWasPause = false;
@@ -342,5 +491,66 @@ Do NOT keep paginating with \`pause\` forever. Do NOT \`border\` a fresh element
 
 Loop control — when to continue:
 Otherwise (still subjects to cover, or clauses not yet addressed): pick the next DISTINCT subject in reading order — one you have not already framed — narrate it, then \`pause\`.
+</reminder>`;
+}
+
+/**
+ * CoT-mode per-turn reminder — small, context-only. Does NOT carry the
+ * procedural rules from the classic reminder (no STEP 1 / STEP 2, no
+ * pause-counting, no tour-mode prescription). Just re-grounds the model
+ * on the user's question and surfaces concrete observations from this
+ * run that should change the next action — chiefly repeated failures
+ * on the same selector, so the model picks a different strategy.
+ */
+function renderCotReminder(opts: {
+  latestUserText: string;
+  stepsSoFar: AgentTurn[];
+  currentUrl?: string;
+}): string {
+  // Walk recent agent_turn steps; collect per-action results from their
+  // result.data.action_results array (set by executeCotLoop). Track which
+  // (tool, selector) pairs have failed and how often, in the last N steps.
+  const failures: Map<string, number> = new Map();
+  const recentSteps: string[] = [];
+  let stepsSeen = 0;
+  for (let i = opts.stepsSoFar.length - 1; i >= 0 && stepsSeen < 6; i--) {
+    const t = opts.stepsSoFar[i]!;
+    if (t.kind !== 'agent_step') continue;
+    stepsSeen++;
+    if (!t.result.ok) continue;
+    const data = t.result.data as { action_results?: Array<{ type: string; name?: string; ok?: boolean; reason?: string }> } | undefined;
+    const results = data?.action_results;
+    if (!Array.isArray(results)) continue;
+    for (const r of results) {
+      if (r.type === 'tool' && r.ok === false && r.name) {
+        const key = r.name;
+        failures.set(key, (failures.get(key) ?? 0) + 1);
+      }
+      recentSteps.push(
+        r.type === 'narrate'
+          ? `narrate`
+          : `${r.name}${r.ok === false ? ` ✗ (${r.reason ?? 'failed'})` : ' ✓'}`,
+      );
+    }
+  }
+
+  // Stuck hint — only fire when a tool has failed 2+ times recently. Gives
+  // the model a concrete observation (not a generic "be careful") so it
+  // shifts strategy.
+  const stuck: string[] = [];
+  for (const [tool, count] of failures) {
+    if (count >= 2) stuck.push(`\`${tool}\` has failed ${count}× in recent turns`);
+  }
+  const stuckHint = stuck.length > 0
+    ? `\n\nObservation: ${stuck.join(', ')}. Do NOT retry the same call shape. Pick a different selector (parent / sibling / alternative target visible in the DOM dump), a different action (e.g. scroll into view first, or focus + Enter instead of click), or ask the user with \`ask_user_choice\` for clarification.`
+    : '';
+
+  const recentBlock = recentSteps.length > 0
+    ? `\nRecent actions: ${recentSteps.slice(-12).join(' → ')}`
+    : '';
+  const urlLine = opts.currentUrl ? `\nCurrent URL: ${opts.currentUrl}` : '';
+
+  return `<reminder>
+User said: "${opts.latestUserText}"${urlLine}${recentBlock}${stuckHint}
 </reminder>`;
 }

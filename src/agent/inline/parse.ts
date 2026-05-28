@@ -24,10 +24,45 @@ OUTPUT FORMAT — emit ONLY the replacement text, wrapped in these exact markers
 <the new fragment text>
 <<<END>>>
 
+The closing marker is literally <<<END>>> (three angle-brackets, the word END, three angle-brackets). DO NOT emit any of these instead: <<</REPLACEMENT>>>, [[/REPLACEMENT]], [[/REPLACEMENT>>>, <<<REPLACEMENT/>>>, or any other variant. The brackets you used for [[SEL]] are NOT the brackets used here — these markers use <<<...>>> only.
+
 The text between the markers replaces ONLY the original fragment between [[SEL]] and [[/SEL]]. Keep punctuation and whitespace clean. Stream-friendly: the runtime starts inserting your text into the user's input the moment <<<REPLACEMENT>>> closes, character by character. Don't put leading newlines after <<<REPLACEMENT>>> unless they belong in the replacement.`;
 
 export const REPLACEMENT_START = '<<<REPLACEMENT>>>';
 export const REPLACEMENT_END = '<<<END>>>';
+
+/**
+ * End-marker variants the streaming parser will accept. The canonical
+ * form is `<<<END>>>`, but small / fast models confuse the SEL marker
+ * style (`[[/SEL]]`) with the REPLACEMENT marker style and emit hybrids
+ * like `[[/REPLACEMENT>>>` or `<<</REPLACEMENT>>>`. Treating any of these
+ * as "end of replacement" keeps the leak out of the user's input.
+ *
+ * Order matters only for tie-breaking when two variants overlap — we
+ * pick the earliest occurrence (lowest indexOf), so collisions are rare.
+ */
+export const REPLACEMENT_END_VARIANTS: readonly string[] = [
+  '<<<END>>>',
+  '<<</REPLACEMENT>>>',
+  '[[/REPLACEMENT>>>',
+  '[[/REPLACEMENT]]',
+  '<<<REPLACEMENT/>>>',
+  '<<<END_REPLACEMENT>>>',
+  '<<</END>>>',
+];
+
+/** Scan `text` for the earliest end-marker variant. Returns the match
+ *  position and the matched marker's length, or null if none. */
+export function findEndMarker(text: string): { idx: number; len: number } | null {
+  let best: { idx: number; len: number } | null = null;
+  for (const m of REPLACEMENT_END_VARIANTS) {
+    const idx = text.indexOf(m);
+    if (idx >= 0 && (best === null || idx < best.idx)) {
+      best = { idx, len: m.length };
+    }
+  }
+  return best;
+}
 
 /**
  * Extract the replacement payload from the model's marker-wrapped
@@ -42,8 +77,8 @@ export function extractReplacement(raw: string): string {
   const startIdx = trimmed.indexOf(REPLACEMENT_START);
   if (startIdx >= 0) {
     const after = trimmed.slice(startIdx + REPLACEMENT_START.length);
-    const endIdx = after.indexOf(REPLACEMENT_END);
-    const body = endIdx >= 0 ? after.slice(0, endIdx) : after;
+    const end = findEndMarker(after);
+    const body = end !== null ? after.slice(0, end.idx) : after;
     return trimMarkerEdges(body);
   }
   // Legacy JSON fallback (in case any caller still sends old SYSTEM_PROMPT).

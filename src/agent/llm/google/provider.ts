@@ -76,6 +76,17 @@ export class GoogleProvider implements LLMProvider, StreamingProvider {
           })),
         },
       ];
+      // Gemini's tool_choice equivalent is `tool_config.function_calling_config`.
+      // mode: 'AUTO' (default) | 'ANY' (must call any tool) | 'NONE' (no tools)
+      // ANY with allowed_function_names = ['agent_turn'] forces the named tool.
+      const choice = opts.toolChoice;
+      if (choice === 'required') {
+        body.tool_config = { function_calling_config: { mode: 'ANY' } };
+      } else if (typeof choice === 'object' && typeof choice.name === 'string') {
+        body.tool_config = {
+          function_calling_config: { mode: 'ANY', allowed_function_names: [choice.name] },
+        };
+      }
     }
 
     // generativelanguage.googleapis.com occasionally returns transient
