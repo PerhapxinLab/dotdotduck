@@ -38,13 +38,18 @@ export type TurnAction =
 
 /** Full parsed turn response. */
 export interface TurnResponse {
-  /** Combined evaluation + progress + todo. One short paragraph
-   *  separated by '.' or '|' — no markdown. Not shown to the user. */
+  /** Short progress note. ~1-2 sentences. Not shown to the user. */
   memory: string;
-  /** One sentence describing what this turn aims to do. Not shown
-   *  to the user; goes to the analytics intent stream. */
+  /** Explicit checklist of what still needs to happen for the user's
+   *  ORIGINAL request to be fully addressed. Evolves each turn — items
+   *  added as discovered, removed as completed. When empty, emit
+   *  `actions: []` to end the loop. */
+  todos_remaining: string[];
+  /** One sentence describing what this turn aims to do. Not shown to
+   *  the user; goes to the analytics intent stream. */
   next_goal: string;
-  /** Ordered list of actions. Empty array = task complete. */
+  /** Ordered list of actions. Empty array ends the loop — use when
+   *  `todos_remaining` is empty. */
   actions: TurnAction[];
 }
 
@@ -74,13 +79,7 @@ export function buildAgentTurnTool(availableTools: readonly CotToolRef[]): ToolD
 
   return {
     name: AGENT_TURN_TOOL,
-    description: `Your full response for this turn. Call exactly once; don't call other tools directly.
-
-- **memory** — last action result + progress so far + what's left.
-- **next_goal** — one sentence for this turn.
-- **actions** — ordered list of \`{narrate}\` or \`{tool, args}\`. \`actions: []\` ends the loop.
-
-Include all required args from each tool's schema below. Empty args for a tool that needs them will be rejected.
+    description: `Your full response for this turn. Call exactly once; don't call any other tool directly. Field semantics live in the system prompt — keep the values aligned with what's described there. Include all required args from each tool's schema below; empty args for a tool that needs them will be rejected.
 
 # Tools
 
@@ -88,10 +87,21 @@ ${toolReference}`,
     parameters: {
       type: 'object',
       additionalProperties: false,
-      required: ['memory', 'next_goal', 'actions'],
+      required: ['memory', 'todos_remaining', 'next_goal', 'actions'],
       properties: {
-        memory: { type: 'string' },
-        next_goal: { type: 'string' },
+        memory: {
+          type: 'string',
+          description: '1-2 sentences of progress notes. Private.',
+        },
+        todos_remaining: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Concrete items still owed to the user\'s original request. Each turn: remove completed items, add newly-revealed items. No "verify user" / "confirm needed" / "supplementary" items.',
+        },
+        next_goal: {
+          type: 'string',
+          description: 'What THIS turn accomplishes — sized to fit in this turn\'s actions[]. Not a multi-turn ambition.',
+        },
         actions: {
           type: 'array',
           items: {
@@ -137,10 +147,20 @@ export function parseTurnResponse(rawArgs: string | Record<string, unknown>): Tu
     obj = rawArgs;
   }
   if (!obj || typeof obj !== 'object') return null;
-  const r = obj as Partial<TurnResponse>;
+  const r = obj as Partial<TurnResponse> & Record<string, unknown>;
+
+  // Required string fields. If memory / next_goal missing → bail.
   if (typeof r.memory !== 'string') return null;
   if (typeof r.next_goal !== 'string') return null;
   if (!Array.isArray(r.actions)) return null;
+
+  // Tolerate the array being missing/null — backfill to [] rather than
+  // failing the whole parse. memory / next_goal / actions are still
+  // required for parse to succeed (checked above).
+  const todos_remaining: string[] = Array.isArray(r.todos_remaining)
+    ? r.todos_remaining.filter((t): t is string => typeof t === 'string')
+    : [];
+
   const actions: TurnAction[] = [];
   for (const a of r.actions) {
     if (!a || typeof a !== 'object') continue;
@@ -152,7 +172,12 @@ export function parseTurnResponse(rawArgs: string | Record<string, unknown>): Tu
       actions.push({ tool: obj.tool, args });
     }
   }
-  return { memory: r.memory, next_goal: r.next_goal, actions };
+  return {
+    memory: r.memory,
+    todos_remaining,
+    next_goal: r.next_goal,
+    actions,
+  };
 }
 
 /** Type guards. */

@@ -36,6 +36,20 @@ export interface SubtitleShowOptions {
    * lines on the standard subtitle bar.
    */
   maxCharsPerPage?: number;
+  /**
+   * When `true`, the subtitle bar refuses every dismissal except the
+   * explicit accept / reject gestures (Space / double-tap Space) wired
+   * via `onAccept` / `onReject`. The × close button is hidden, Esc is
+   * ignored, click-outside is ignored, and any-key dismiss is disabled.
+   *
+   * Use for cases where the host MUST collect a user signal before the
+   * bar can go — the end-of-loop feedback closure is the canonical
+   * example. Don't use for normal action subtitles; users expect Esc
+   * to work as an escape valve everywhere else.
+   *
+   * Default `false`.
+   */
+  persistent?: boolean;
 }
 
 /**

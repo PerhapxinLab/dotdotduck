@@ -169,14 +169,19 @@
   --dddk-palette-kbd-color: var(--dddk-text-muted);
 
   /* ─── z-index ──────────────────────────────────────────────────── */
-  /* Subtitle bar sits ABOVE the palette backdrop — the agent narrates
-     while the user interacts with the palette, both must stay visible.
-     Cursor on top so the agent's pointer ghost reads as the foreground
-     layer. */
-  --dddk-z-bar: 9950;
-  --dddk-z-palette: 9700;
+  /* Layer order (low → high):
+     - pointer overlays (border / highlight around DOM targets)
+     - palette modal + backdrop
+     - subtitle bar (always visible while agent runs, even with palette open)
+     - cursor (agent's pointer ghost reads as foreground)
+     - mobile FAB (user's primary accept/reject input — must stay reachable
+       even when palette / modal is open, otherwise mobile users have no way
+       to confirm or dismiss the agent). */
   --dddk-z-pointer: 9400;
+  --dddk-z-palette: 9700;
+  --dddk-z-bar: 9950;
   --dddk-z-cursor: 9990;
+  --dddk-z-fab: 10000;
 }
 
 /* ─── dark mode ──────────────────────────────────────────────────── */

@@ -208,6 +208,32 @@ export interface RunOptions {
   freshSession?: boolean;
 }
 
+// ─── End-of-loop closure ────────────────────────────────────────────
+
+/**
+ * Behaviour when the agent loop finishes (CoT `actions: []` /
+ * classic-mode no-tool-call turn / maxSteps cap). Without an
+ * `onLoopEnd` the subtitle bar disappears the moment the loop ends,
+ * which reads as broken — there's no signal that the work completed.
+ *
+ *  - `silent`   — legacy: subtitle just disappears.
+ *  - `text`     — stream a final closing line (e.g. "✓ Done") then
+ *                 dismiss after `autoHide` ms.
+ *  - `feedback` — closing line + Space (satisfied) / double-tap (not) /
+ *                 Esc (skipped) gestures, emitted as `agent_feedback`
+ *                 on the intent stream.
+ *  - `ask_user` — option picker (e.g. 1-5 rating); the chosen value
+ *                 flows into `agent_feedback.summary`.
+ *
+ * SDK default: `{ kind: 'text', text: i18n('agent.done'), autoHide: 3000 }`.
+ * Hosts opt into `feedback` / `ask_user` for post-run satisfaction signal.
+ */
+export type OnLoopEnd =
+  | { kind: 'silent' }
+  | { kind: 'text'; text: string; autoHide?: number }
+  | { kind: 'feedback'; text: string }
+  | { kind: 'ask_user'; question: string; options: Array<{ value: string; label: string }> };
+
 // ─── WebAgent config ────────────────────────────────────────────────
 
 export interface WebAgentConfig {
@@ -422,4 +448,35 @@ export interface WebAgentConfig {
    * available the agent runs text-only without erroring.
    */
   screenshot?: boolean | import('./screenshot').ScreenshotConfig;
+
+  /**
+   * What happens when the agent loop ends. See `OnLoopEnd` for the
+   * union; SDK default is `{ kind: 'text', text: i18n('agent.done'),
+   * autoHide: 3000 }` so the subtitle bar doesn't just vanish.
+   *
+   * Pass `{ kind: 'silent' }` for the legacy "subtitle disappears"
+   * behaviour; pass `{ kind: 'feedback', text: ... }` to collect a
+   * satisfied / not-satisfied signal via `agent_feedback`.
+   */
+  onLoopEnd?: OnLoopEnd;
+
+  /**
+   * Names of built-in actions to NOT expose to the agent. The default
+   * builtin set is intentionally broad (navigate / scroll_to / wait /
+   * click / fill_input / select_option / clear_input / border / pause /
+   * ask_user / ask_user_choice) so any host works out of the box —
+   * but most sites only need a subset. Listing names here removes them
+   * from the agent's tool list entirely, which:
+   *   1. Shrinks the schema the LLM has to read each turn (fewer tokens).
+   *   2. Removes "wrong tool" failure modes (the agent can't pick a tool
+   *      that isn't relevant to your site).
+   *
+   * Example: a marketing demo with no `<select>` elements and a one-shot
+   * Q&A style (agent never asks the user) would pass
+   * `['pause', 'wait', 'select_option', 'clear_input', 'ask_user', 'ask_user_choice']`.
+   *
+   * Hosts can still re-add specific actions (or custom ones) via
+   * `customActions`, which run AFTER this filter.
+   */
+  disableBuiltinActions?: string[];
 }

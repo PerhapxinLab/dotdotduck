@@ -213,11 +213,15 @@ export class Subtitle {
    * 120ms attach delay so the click that OPENED the subtitle (a palette
    * row click etc.) doesn't immediately dismiss it.
    */
-  private installInteractionDismiss(_opts: SubtitleShowOptions): void {
+  private installInteractionDismiss(opts: SubtitleShowOptions): void {
     if (this.dismissTeardown) {
       this.dismissTeardown();
       this.dismissTeardown = null;
     }
+    // Persistent bars opt out of every passive dismiss path — host has
+    // declared the user MUST answer via accept/reject before the bar
+    // closes. No outside-click hide, no any-key hide, no Esc handling.
+    if (opts.persistent) return;
     const ac = new AbortController();
     setTimeout(() => {
       if (ac.signal.aborted) return;
@@ -346,6 +350,17 @@ export class Subtitle {
     if (this.streamingCursor) {
       this.streamingCursor.remove();
       this.streamingCursor = null;
+    }
+    // Render markdown now that the stream is complete. During streaming
+    // we use a raw Text node (cheap, no parsing per token) and CSS
+    // `white-space: pre-wrap` already preserves `\n` line breaks. At
+    // finalize time we run the same renderInlineMarkdown pipeline as
+    // static `show()` subtitles so lists (`- foo`), bold, inline code,
+    // and bare URLs all render properly — agents often emit structured
+    // explanations and they used to flatten into a wall of text.
+    const barText = this.el.querySelector<HTMLDivElement>(`[${UI_ATTR}="bar-text"]`);
+    if (barText && this.streamingFullText) {
+      barText.innerHTML = renderInlineMarkdown(this.streamingFullText);
     }
     // Append a faint "press space to close" hint so the user has a
     // discoverable dismiss gesture (in addition to the × button).
@@ -917,6 +932,10 @@ export class Subtitle {
     return true;
   }
   invokeCancel(): boolean {
+    // Persistent bars (e.g. end-of-loop feedback closure) refuse Esc /
+    // outside-cancel. The host has declared the user must explicitly
+    // pick accept or reject — let the bar sit.
+    if (this.currentOpts?.persistent) return false;
     const cb = this.currentOpts?.onCancel;
     if (!cb) return false;
     this.hide();
@@ -1030,10 +1049,18 @@ export class Subtitle {
    *      always reachable even when long content scrolls
    *   2. a `bar-scroll` inner container so the content can be max-height
    *      capped + scrolled without losing the close button
+   *
+   * The × button is skipped entirely when the current opts are
+   * `persistent: true` — the host has declared the user MUST answer
+   * before the bar can go (e.g. end-of-loop feedback).
    */
   private wrapBarShell(innerHtml: string): string {
+    const persistent = this.currentOpts?.persistent === true;
+    const closeBtn = persistent
+      ? ''
+      : `<button ${UI_ATTR}="bar-close" data-dddk-action="close" aria-label="${escapeHtml(this.closeLabel())}" title="${escapeHtml(this.closeLabel())}">×</button>`;
     return `
-      <button ${UI_ATTR}="bar-close" data-dddk-action="close" aria-label="${escapeHtml(this.closeLabel())}" title="${escapeHtml(this.closeLabel())}">×</button>
+      ${closeBtn}
       <div ${UI_ATTR}="bar-scroll">${innerHtml}</div>
     `;
   }

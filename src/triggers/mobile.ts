@@ -649,12 +649,14 @@ function ensureStyles(): void {
        Hosts can fully override via MobileFABConfig.style or by passing
        className and writing their own CSS.
 
-       z-index sits between the subtitle bar (9500) and the palette
-       (9700) so the FAB stays reachable while the agent's confirm /
-       pause bar is up, but the palette modal still wins when open. */
+       z-index = 10000 — ABOVE every other dddk surface (palette 9700,
+       subtitle 9950, cursor 9990). The FAB is the user's only way to
+       accept/reject the agent on mobile (replaces Space gesture), so
+       any surface that hides it strands the user with no input path.
+       Stays on top even when palette / confirm modal is open. */
     [${UI_ATTR}="mobile-fab"] {
       position: fixed;
-      z-index: 9650;
+      z-index: 10000;
       background: var(--dddk-accent, #ec4899);
       color: var(--dddk-text-on-accent, #fff);
       border: 0;

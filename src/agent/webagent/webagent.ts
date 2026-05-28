@@ -112,11 +112,22 @@ export class WebAgent {
       ...config,
     };
 
-    for (const action of builtinActions) this.actions.set(action.name, action);
+    // Filter builtins by host's `disableBuiltinActions` list. Use a Set
+    // for O(1) lookup; missing entry = include the action. Hosts that
+    // know their site doesn't need (say) select_option / ask_user / pause
+    // pass those names here and the agent never sees them — fewer tools
+    // in the schema = less attention pressure on small models.
+    const disabled = new Set(config.disableBuiltinActions ?? []);
+    for (const action of builtinActions) {
+      if (!disabled.has(action.name)) this.actions.set(action.name, action);
+    }
     // Opt-in: surface presentation. Only registered when the host enables
     // it AND will wire `setSurfaceMounter` — otherwise the action exists
-    // in the registry but execute-action's intercept fails-fast.
-    if (config.allowPresent) this.actions.set(presentSurface.name, presentSurface as ActionDefinition);
+    // in the registry but execute-action's intercept fails-fast. Still
+    // respects disableBuiltinActions for symmetry.
+    if (config.allowPresent && !disabled.has(presentSurface.name)) {
+      this.actions.set(presentSurface.name, presentSurface as ActionDefinition);
+    }
     for (const action of config.customActions ?? []) this.actions.set(action.name, action);
 
     this.destructivePatterns = config.destructivePatterns ?? DEFAULT_DESTRUCTIVE_PATTERNS;
@@ -550,8 +561,11 @@ export class WebAgent {
       }
     }
 
-    // maxSteps hit.
+    // maxSteps hit. Yield `final` so the orchestrator's closure hook
+    // still renders the closing UI (otherwise the subtitle bar just
+    // disappears, which reads as broken).
     this.setStatus('failed');
+    yield { kind: 'final' };
   }
 
   /**
@@ -617,6 +631,17 @@ export class WebAgent {
       if (!turn) {
         errorCount += 1;
         const result: ActionResult = { ok: false, reason: 'unknown', message: 'invalid agent_turn envelope' };
+        // Debug surface for invalid envelopes — the user can copy this
+        // from devtools console to diagnose why a turn failed parse.
+        console.warn('[dddk webagent] turn parse failed', {
+          rawArguments: agentTurnCall.arguments,
+        });
+        if (typeof window !== 'undefined') {
+          const w = window as unknown as { __dddkDebug?: { lastParseFailure?: unknown; lastParseFailureAt?: string } };
+          w.__dddkDebug = w.__dddkDebug ?? {};
+          w.__dddkDebug.lastParseFailure = agentTurnCall.arguments;
+          w.__dddkDebug.lastParseFailureAt = new Date().toISOString();
+        }
         pushAgentStep(this.session, {
           toolCall: { name: AGENT_TURN_TOOL, arguments: agentTurnCall.arguments },
           toolCallId: agentTurnCall.id,
@@ -628,13 +653,54 @@ export class WebAgent {
         continue;
       }
 
+      // Per-turn debug log. Prints a structured row to the devtools
+      // console (the user can right-click → "Copy object" or screenshot)
+      // AND appends it to window.__dddkDebug.turnLog for later inspection.
+      // Diagnostics goal: when the agent loops on the same content the
+      // user can SEE that todos_remaining never empties despite the
+      // page already being fully covered in action_results.
+      const turnSummary = {
+        turn: stepIdx + 1,
+        url: this.session.currentPage,
+        memory: turn.memory,
+        todos_remaining: turn.todos_remaining,
+        next_goal: turn.next_goal,
+        actions: turn.actions.map((a) =>
+          isNarrateAction(a)
+            ? { narrate: a.narrate.length > 100 ? a.narrate.slice(0, 100) + '…' : a.narrate }
+            : { tool: (a as { tool: string }).tool, args: (a as { args?: unknown }).args },
+        ),
+      };
+      console.info('[dddk webagent] turn', turnSummary);
+      if (typeof window !== 'undefined') {
+        const w = window as unknown as { __dddkDebug?: { turnLog?: unknown[]; lastTurnResponse?: unknown; lastTurnAt?: string } };
+        w.__dddkDebug = w.__dddkDebug ?? {};
+        w.__dddkDebug.turnLog = w.__dddkDebug.turnLog ?? [];
+        (w.__dddkDebug.turnLog as unknown[]).push(turnSummary);
+        // Cap log at 50 entries so long sessions don't bloat memory.
+        if ((w.__dddkDebug.turnLog as unknown[]).length > 50) {
+          w.__dddkDebug.turnLog = (w.__dddkDebug.turnLog as unknown[]).slice(-50);
+        }
+        w.__dddkDebug.lastTurnResponse = turn;
+        w.__dddkDebug.lastTurnAt = new Date().toISOString();
+      }
+
       if (turn.actions.length === 0) {
         // Empty actions[] = task complete. Record the envelope so history
         // replays cleanly, then end the loop.
         pushAgentStep(this.session, {
           toolCall: { name: AGENT_TURN_TOOL, arguments: agentTurnCall.arguments },
           toolCallId: agentTurnCall.id,
-          result: { ok: true, data: { memory: turn.memory, next_goal: turn.next_goal, action_count: 0, action_results: [] } },
+          result: {
+            ok: true,
+            data: {
+              memory: turn.memory,
+              todos_remaining: turn.todos_remaining,
+              next_goal: turn.next_goal,
+              action_count: 0,
+              action_results: [],
+            },
+          },
         });
         this.persistSession();
         this.setStatus('idle');
@@ -858,6 +924,7 @@ export class WebAgent {
       // already switched).
       const envelopeData = {
         memory: turn.memory,
+        todos_remaining: turn.todos_remaining,
         next_goal: turn.next_goal,
         action_results: actionResults,
         page_changed: pageChanged,
@@ -882,8 +949,11 @@ export class WebAgent {
       }
     }
 
-    // maxSteps hit.
+    // maxSteps hit. Yield `final` so the orchestrator's loop-closure
+    // hook still renders the "✓ done" UI — without this the subtitle
+    // bar just disappears when the agent caps out.
     this.setStatus('failed');
+    yield { kind: 'final' };
   }
 
   // ─── ask_user wiring — surfaced via a second-channel host hook ──

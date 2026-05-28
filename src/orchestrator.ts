@@ -40,7 +40,7 @@ import type {
   DddkEventHandler,
   IntentEvent,
 } from './types';
-import type { AgentSession } from './agent/webagent/types';
+import type { AgentSession, OnLoopEnd } from './agent/webagent/types';
 
 export interface DotDotDuckConfig {
   locale?: Locale;
@@ -1323,16 +1323,17 @@ export class DotDotDuck {
             break;
 
           case 'final':
-            // No auto-hide by default — the user explicitly dismisses
-            // via × / Space / Esc. Auto-hiding mid-read steals the
-            // answer; if the host wants timed dismiss they can set
-            // `agentSubtitleAutoHideMs` to a positive number.
+            // Close the streamed narration first, then render the
+            // host-configured loop-closure (text / feedback / ask_user
+            // / silent). Without this the bar just disappears, which
+            // reads as a broken UI rather than a finished run.
             this.subtitle.finalizeStreamed(
               finalAutoHide > 0 ? { autoHide: finalAutoHide } : {},
             );
             this.clearHighlight();
             clearWebagentOverlays();
             this.emitter.emit('agent_final', undefined);
+            await this.renderLoopClosure();
             this.endAgentRunCompleted();
             break;
 
@@ -1373,6 +1374,103 @@ export class DotDotDuck {
       // hook the thinking indicator stayed up forever.
       safeCleanup();
     }
+  }
+
+  /**
+   * Resolve the active `onLoopEnd` config — host override, or the SDK
+   * default of a temperate "✓ Done" line. Returning `{kind: 'silent'}`
+   * means legacy "subtitle disappears" behaviour.
+   */
+  private resolveLoopEnd(): OnLoopEnd {
+    const hostCfg = this.config.webAgent?.onLoopEnd;
+    if (hostCfg) return hostCfg;
+    return {
+      kind: 'text',
+      text: sdkString(this.config.locale, 'agent.done'),
+      autoHide: 3000,
+    };
+  }
+
+  /**
+   * Render the configured loop closure when the agent loop ends. Sits
+   * between `finalizeStreamed` and `endAgentRunCompleted` in
+   * pumpAgentStream.
+   *
+   * Each kind maps onto an existing subtitle surface:
+   *   text     → subtitle.show with autoHide; no gesture wiring.
+   *   feedback → subtitle.show with onAccept/onReject/onCancel, emits
+   *              `agent_feedback` with satisfied = true / false / null.
+   *   ask_user → subtitle.showChoice; the picked value flows into
+   *              `agent_feedback.summary`.
+   *   silent   → no-op; legacy "subtitle disappears" behavior.
+   */
+  private async renderLoopClosure(): Promise<void> {
+    const closure = this.resolveLoopEnd();
+    if (closure.kind === 'silent') return;
+
+    if (closure.kind === 'text') {
+      const autoHide = closure.autoHide ?? 3000;
+      this.subtitle.show({
+        text: closure.text,
+        type: 'agent',
+        autoHide,
+      });
+      // Don't block endAgentRunCompleted on the autoHide window — the
+      // run is logically complete already; the subtitle just dwells.
+      return;
+    }
+
+    if (closure.kind === 'feedback') {
+      const now = (): number => Date.now();
+      // `persistent: true` removes every passive dismiss path — × close
+      // button hidden, Esc ignored, outside-click / any-key ignored.
+      // The bar can only close via Space (accept) or double-tap (reject).
+      // Trade-off: visitor can't skip the prompt, but we always get a
+      // labelled satisfied/not-satisfied signal — that's the whole point
+      // of opting into feedback mode.
+      await new Promise<void>((resolve) => {
+        this.subtitle.show({
+          text: closure.text,
+          type: 'agent',
+          persistent: true,
+          onAccept: () => {
+            this.emitIntent({ kind: 'agent_feedback', satisfied: true, summary: closure.text, timestamp: now() });
+            resolve();
+          },
+          onReject: () => {
+            this.emitIntent({ kind: 'agent_feedback', satisfied: false, summary: closure.text, timestamp: now() });
+            resolve();
+          },
+        });
+      });
+      return;
+    }
+
+    // ask_user — picker with the host's options. Picked value goes
+    // into the agent_feedback intent so dashboards can break down
+    // satisfaction by chosen bucket.
+    const optionLabels = closure.options.map((o) => o.label);
+    await new Promise<void>((resolve) => {
+      this.subtitle.showChoice({
+        question: closure.question,
+        options: optionLabels,
+        allowFreeText: false,
+        onChoose: (value, index) => {
+          const picked = closure.options[index];
+          this.emitIntent({
+            kind: 'agent_feedback',
+            satisfied: null,
+            summary: picked?.value ?? value,
+            timestamp: Date.now(),
+          });
+          resolve();
+        },
+        onCancel: () => {
+          this.emitIntent({ kind: 'agent_feedback', satisfied: null, summary: '', timestamp: Date.now() });
+          resolve();
+        },
+      });
+    });
   }
 
   /**
