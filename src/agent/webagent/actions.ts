@@ -45,7 +45,7 @@ function isInteractive(el: HTMLElement): boolean {
 
 const navigate: ActionDefinition<{ path: string }> = {
   name: 'navigate',
-  description: 'Move the user to a different SPA path. Calling this is what actually changes the page — narrating "I will take you to X" without calling navigate just leaves the user where they are. The runtime gates this on explicit user consent (a confirm modal replaces the subtitle bar; user accepts or rejects). When you decide the user needs to be on a different URL, call this tool in the same turn, not as something to do "next time".',
+  description: 'Take the user to a SPA-friendly path. This is a cross-page transition — the runtime always pauses for user consent before moving them. Emit one short narrate sentence that names where you are taking them as the action IMMEDIATELY BEFORE the navigate call in this turn\'s actions[]; the runtime auto-pauses after the narrate so the user can read it, presses Space, then the confirm modal for navigate fires. Without that paired narrate the user sees a confirm modal with no context.',
   parameters: objSchema({ path: { type: 'string' } }, ['path']),
   // Cross-page transitions are the only routine built-in that gates by
   // default. Other moves (scroll / border / highlight / click) are

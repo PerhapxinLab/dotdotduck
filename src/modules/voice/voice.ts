@@ -417,6 +417,7 @@ export class Voice {
 
     rec.onerror = (e: Event) => {
       const errCode = (e as unknown as { error?: string }).error;
+      const errMessage = (e as unknown as { message?: string }).message;
       const friendly =
         errCode === 'not-allowed'    ? 'microphone permission denied' :
         errCode === 'no-speech'      ? 'no speech detected' :
@@ -425,6 +426,32 @@ export class Voice {
         errCode === 'aborted'        ? 'recognition aborted' :
         errCode === 'not-supported'  ? 'language not supported' :
         errCode ?? 'unknown speech recognition error';
+      // Raw diagnostics surface — the friendly string above is what reaches
+      // the user-facing subtitle, but for debugging "voice fails on first
+      // try" we need the actual SpeechRecognitionErrorEvent fields so the
+      // developer can see whether it's permission state, network, or the
+      // engine itself bailing. Inspect `window.__dddkDebug.lastVoiceError`
+      // for the captured snapshot.
+      console.warn('[dddk voice] STT error', {
+        code: errCode,
+        message: errMessage,
+        friendly,
+        raw: e,
+        recognitionLang: rec.lang,
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+        timestamp: new Date().toISOString(),
+      });
+      if (typeof window !== 'undefined') {
+        const w = window as unknown as { __dddkDebug?: { lastVoiceError?: unknown; lastVoiceErrorAt?: string } };
+        w.__dddkDebug = w.__dddkDebug ?? {};
+        w.__dddkDebug.lastVoiceError = {
+          code: errCode,
+          message: errMessage,
+          friendly,
+          raw: { type: e.type, timeStamp: e.timeStamp },
+        };
+        w.__dddkDebug.lastVoiceErrorAt = new Date().toISOString();
+      }
       this.emit('error', { code: errCode, message: friendly, raw: e });
       // Stop the auto-restart loop on fatal errors. `network` is included
       // because Web Speech sends audio to Google's STT servers — if that
