@@ -90,6 +90,8 @@ export class ImmersiveTranslate {
   private memCache = new Map<string, string>();
   private currentLang: string | null = null;
   private dddk: DotDotDuck | null = null;
+  /** Teardown for the SPA route-change listener installed in `attachTo`. */
+  private routeChangeTeardown: (() => void) | null = null;
 
   constructor(config: ImmersiveTranslateConfig) {
     this.cfg = {
@@ -114,6 +116,60 @@ export class ImmersiveTranslate {
   attachTo(dddk: DotDotDuck): void {
     this.dddk = dddk;
     ensureStyles();
+    this.installRouteChangeCleanup();
+  }
+
+  /**
+   * Wipe injected translation nodes on any SPA route change.
+   *
+   * Without this, a host SPA (SvelteKit / Next / Vue Router) swaps its
+   * page slot but our `<font.dddk-imm-translate>` siblings stay attached
+   * to the still-mounted parent nodes — they bleed into the next page,
+   * making it look like two pages are stacked. We catch:
+   *   - `popstate` (back / forward),
+   *   - patched `history.pushState` / `replaceState` (programmatic nav).
+   *
+   * Idempotent — re-installing replaces the previous teardown so a host
+   * calling `attachTo` twice doesn't accumulate listeners.
+   */
+  private installRouteChangeCleanup(): void {
+    if (typeof window === 'undefined' || typeof history === 'undefined') return;
+    this.routeChangeTeardown?.();
+
+    let lastPath = window.location.pathname + window.location.search;
+    const checkAndClear = (): void => {
+      const now = window.location.pathname + window.location.search;
+      if (now === lastPath) return;
+      lastPath = now;
+      if (this.currentLang) this.disable();
+    };
+
+    // Patch pushState / replaceState to dispatch a custom event we can
+    // listen to. SvelteKit / Next / Vue Router all funnel SPA nav through
+    // these; popstate alone doesn't catch programmatic navigation.
+    const origPush = history.pushState;
+    const origReplace = history.replaceState;
+    const ROUTE_EVENT = 'dddk:imm-translate-route-change';
+    history.pushState = function patchedPush(...args) {
+      const r = origPush.apply(this, args);
+      window.dispatchEvent(new Event(ROUTE_EVENT));
+      return r;
+    };
+    history.replaceState = function patchedReplace(...args) {
+      const r = origReplace.apply(this, args);
+      window.dispatchEvent(new Event(ROUTE_EVENT));
+      return r;
+    };
+
+    window.addEventListener('popstate', checkAndClear);
+    window.addEventListener(ROUTE_EVENT, checkAndClear);
+
+    this.routeChangeTeardown = () => {
+      window.removeEventListener('popstate', checkAndClear);
+      window.removeEventListener(ROUTE_EVENT, checkAndClear);
+      history.pushState = origPush;
+      history.replaceState = origReplace;
+    };
   }
 
   isEnabled(): boolean { return this.currentLang !== null; }

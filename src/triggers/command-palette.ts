@@ -1983,6 +1983,24 @@ export class CommandPalette {
     }
   }
 
+  /**
+   * Public — activate a palette item by id. Returns true if found and
+   * fired, false if no matching item is currently in the filtered list
+   * (e.g. caller passed a sub-menu id before opening the parent).
+   *
+   * Used by host-registered "semantic" webagent tools that wrap multi-
+   * level palette flows: the tool can `open()` the palette, await a
+   * frame, `activateById('parent')` to expand the sub-menu, await, then
+   * `activateById('child')` to commit. Saves the agent from having to
+   * model the palette as a 2-step click sequence.
+   */
+  activateById(id: string): boolean {
+    const idx = this.filtered.findIndex((item) => item.id === id);
+    if (idx < 0) return false;
+    this.activate(idx);
+    return true;
+  }
+
   private activate(idx: number): void {
     const item = this.filtered[idx];
     if (!item) {

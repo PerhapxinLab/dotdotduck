@@ -338,6 +338,11 @@ export class Subtitle {
   finalizeStreamed(opts?: { autoHide?: number }): void {
     // Flush any tail text the model left in the buffer before going silent.
     this.flushStreamingTts(true);
+    // Run is done. A queued "running" indicator from earlier (e.g. queued
+    // by `invokeAccept` after the user pressed Space on the last pause)
+    // must NOT materialise when this bar eventually hides — otherwise the
+    // user sees a stale "Agent 執行中" pip after the loop has already ended.
+    this.pendingIndicator = null;
     if (!this.el) return;
     // Nothing was streamed (the agent finished without narration — e.g.
     // the last turn was an empty `actions: []`). Showing a static "press

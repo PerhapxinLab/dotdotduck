@@ -89,6 +89,11 @@ export interface PromptContext {
   /** When true, render the CoT-mode prompt (no procedural rules, schema
    *  enforces structure). When false, render the classic narrator prompt. */
   cotMode?: boolean;
+  /** Pre-rendered tool reference (name + description + JSON Schema) for
+   *  every action exposed this turn. Pushed into the `# Tools` section
+   *  of the system prompt so the model sees the tool catalogue in one
+   *  place rather than buried inside the agent_turn tool description. */
+  toolReference?: string;
 }
 
 export type SystemPromptOverride =
@@ -131,70 +136,58 @@ function renderDefault(ctx: PromptContext): string {
 }
 
 /**
- * CoT-mode system prompt — concise context block, no procedural rules.
- * The schema (`agent_turn` tool) enforces structure; this prompt just
- * tells the model what the situation is and what each field means.
+ * CoT-mode system prompt — single top-of-conversation block carrying
+ * identity, tool reference, envelope rules, DOM dump format, and any
+ * host-supplied sitemap / appendSystemPrompt. No procedural rules; the
+ * schema (`agent_turn` tool) enforces structure.
+ *
+ * The env block at the bottom of each turn re-injects only the current
+ * page state (URL + date) and the fresh DOM dump.
  */
 function renderCotDefault(ctx: PromptContext): string {
+  // Mental model: the LLM sees TWO conceptual blocks, joined by blank
+  // lines.
+  //   1. SDK default — identity (+ persona) + DOM dump format + Tools +
+  //      Envelope rules. Stable across hosts; describes how to operate.
+  //   2. Developer prompt — `appendSystemPrompt` from the host. Sitemap,
+  //      guidelines, language rules live here. Host writes whatever
+  //      they want; SDK doesn't double-emit anything in this slot.
   const siteClause = ctx.siteName ? ` on ${ctx.siteName}` : '';
-  const sections: string[] = [];
+  const sdkBlock: string[] = [];
 
-  sections.push(`You are ${ctx.agentName}${siteClause}, an in-page assistant.
-
-# Envelope
-
-Each turn call \`agent_turn\` with these fields. The shape is a chain — todos_remaining describes the queue, actions does the work on its head item:
-
-- **memory** — 1-2 sentences of progress. Private, not shown.
-- **todos_remaining** — concrete SECTION-LEVEL items still owed to the user's ORIGINAL request. Each item = one section / one page / one operation. NOT detail-level (don't write "explain contact INCLUDING mailto AND response time AND working days" — that's one section, one item: "explain contact section"). Each turn: REMOVE items whose section has been bordered or narrated, ADD newly-discovered sections, KEEP unfinished ones. Forbidden: "verify user", "confirm needed", "supplementary explanation", "refine for precision/completeness", "add missing detail to already-covered section".
-- **actions** — ordered list of \`{narrate}\` or \`{tool, args}\` that clear the FIRST item in todos_remaining. Quote real text from the DOM dump; don't paraphrase. **Omit this field entirely (or set to \`[]\`) when todos_remaining is empty — that ends the loop.**
-
-The runtime auto-pauses after each narrate (waits for user Space). Pacing is automatic.
-
-If a previous turn's action failed (action_results show ok:false in tool history), decide whether to retry with a different shape or skip — but make that decision in the actions[] you emit this turn, not by writing meta-evaluation prose.
-
-# Acting
-
-When you cover a subject:
-- Border (or the most apt visual marker) the element BEFORE narrating about it. The order matches what the user sees: visual frame appears, narration explains it. Bordering AFTER narrating is wrong because the user finishes reading before knowing what to look at.
-- Frame the COMPLETE information block — the whole table, the whole card, the whole section — not just a single line or label. Frame what carries the answer, not the heading that points at it.
-- Pick the most useful form of content for the user's question — a table over a paragraph that describes the same data, a structured card over a generic heading, the actual figure over a label.
-
-narrate text can ONLY describe actions whose action_result is already in tool history with ok:true. Don't claim "I've taken you to X" if the DOM dump's URL line doesn't match X. Don't claim "I've shown you the table" if no border action with ok:true precedes the narrate in this turn's actions[]. Emit the action FIRST, then narrate the outcome.
-
-# Default to success — finish and end
-
-**Unless an action_result explicitly shows \`ok: false\`, every prior action this run is SUCCESS. Your previous narrate text was GOOD. Your previous border landed RIGHT. Don't second-guess. Don't go back to supplement, refine, clarify, re-explain, or add missing details to anything you've already covered. The user has seen it; that's it.**
-
-The job is to complete the user's request and STOP. Not to keep finding more to say. The following are all the SAME failure mode and all forbidden:
-
-- Re-narrating the same section with different wording.
-- "Refining" / "更精準" the previous narrate.
-- "Supplementing" / "補上" missing details (e.g. "I mentioned contact but didn't include the email address — let me add it").
-- "Clarifying" / "再說明" from another angle.
-- Bordering the same element a second time.
-
-If a todo entry would lead to one of the above — drop the todo. Either there are GENUINELY NEW sections you haven't touched (not in any prior action_result), or you emit \`actions: []\` to end the loop.
-
-When the user's request has been addressed, end. Don't manufacture more work.
-
-# DOM dump
-
-The env block contains an indexed DOM dump. \`[id]\` markers (e.g. \`[ea3f]\`) are stable across turns — pass them verbatim as the \`selector\` arg of any tool. \`↑\`/\`↓\` markers mean the element is above/below the viewport; \`scroll_to\` first before acting on it. The URL line is ground truth — never narrate as if you're on a page you haven't actually navigated to.
-
-# Stuck
-
-Same selector or action failing twice → stop the same shape. Try a different selector, a different tool, or surface the ambiguity to the user with whatever question tool is available.`);
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  sdkBlock.push(`You are ${ctx.agentName}${siteClause}, an in-page assistant. Today is ${yyyy}-${mm}-${dd}.`);
 
   const personaBlock = renderPersona(ctx.persona);
-  if (personaBlock) sections.push(personaBlock);
+  if (personaBlock) sdkBlock.push(personaBlock);
 
-  sections.push(renderSafety());
-  if (ctx.brand) sections.push(renderBrand(ctx.brand));
-  sections.push(renderOutputLanguage(ctx.locale));
-  if (ctx.appendSystemPrompt) sections.push(ctx.appendSystemPrompt);
+  if (ctx.toolReference) {
+    sdkBlock.push(`# Tools
 
-  return sections.filter(Boolean).join('\n\n');
+${ctx.toolReference}`);
+  }
+
+  sdkBlock.push(`# Envelope
+
+Each turn call \`agent_turn\` with:
+- **memory** — private 1-2 sentence recap: "Last turn: <what just finished>. Still remaining: <head of todos>." When the original request is fully covered, write "All done — ending loop." and emit todos_remaining = [] + actions = [] / omitted. Items already covered are DONE WELL — never re-explain, re-frame, or add supplementary detail. Only describe forward motion.
+- **todos_remaining** — items still owed to the user's original request.
+- **actions** — ordered list of steps. Each step is one of:
+  - \`{tool, args}\` — DO it. Pick the tool that fits the next required step: navigate when the todo needs a page change, click when something needs activating, ask_user_choice when the user has to decide, etc. Tool calls are how real things happen.
+  - \`{narrate, about?}\` — SAY it (declarative statement streamed to the subtitle). Used to describe / explain / point at things. \`about\` = \`[id]\` of the element being described; runtime auto-borders it. NEVER a question, NEVER a substitute for a tool call. If the head of \`todos_remaining\` requires a tool, narrating about it does NOT clear it — the tool must appear in this turn's actions[].
+  - \`{task_finish: true}\` — end-of-loop marker. Use ONLY when the user's original TASK is FINISHED — fully satisfied AND there is nothing more to do. NEVER use \`task_finish\` in the same turn as \`ask_user_choice\` (user hasn't answered yet), \`navigate\` / \`click\` / \`fill_input\` (page just changed, you must react first), or any tool whose result you have not yet observed. task_finish = "the user's request has been completely satisfied"; not "I have planned my next step".
+  - Empty / omitted \`actions\` also ends the loop (legacy path).`);
+
+  sdkBlock.push(`# DOM
+
+The last user message carries the indexed DOM. \`[id]\` markers are stable per-element hashes — pass them as \`selector\` args. \`↑\`/\`↓\` markers mean above/below viewport.`);
+
+  const blocks: string[] = [sdkBlock.join('\n\n')];
+  if (ctx.appendSystemPrompt) blocks.push(ctx.appendSystemPrompt);
+  return blocks.join('\n\n');
 }
 
 function renderHeader(ctx: PromptContext): string {
@@ -391,27 +384,15 @@ export function renderSelectionBlock(sel: SelectionContext): string {
 
 export function renderPageStateBlock(opts: {
   currentPage: string;
-  previousUrl?: string;
   pageContext: string;
 }): string {
-  const lines: string[] = ['# Current page state'];
-  lines.push(`- URL: ${opts.currentPage}`);
-  if (opts.previousUrl) lines.push(`- Arrived from: ${opts.previousUrl}`);
-  const now = new Date();
-  lines.push(`- Now (UTC ISO): ${now.toISOString()}`);
-  try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const local = now.toLocaleString(undefined, {
-      year: 'numeric', month: 'short', day: 'numeric',
-      hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
-    });
-    const weekday = now.toLocaleString(undefined, { weekday: 'long' });
-    lines.push(`- Now (local): ${local} (${weekday}, ${tz})`);
-  } catch { /* SSR */ }
-  lines.push('');
-  lines.push('# Page DOM');
-  lines.push(opts.pageContext);
-  return lines.join('\n');
+  return [
+    '# Current page',
+    `- URL: ${opts.currentPage}`,
+    '',
+    '# Page DOM',
+    opts.pageContext,
+  ].join('\n');
 }
 
 /**

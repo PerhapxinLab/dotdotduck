@@ -284,6 +284,25 @@ export interface WebAgentConfig {
 
   customActions?: ActionDefinition[];
 
+  /**
+   * Per-action description overrides — applied at tool-build time so the
+   * model sees host-customised wording without the SDK shipping rules for
+   * every host. Keyed by action name (e.g. `'navigate'`, `'open_palette'`,
+   * `'border'`).
+   *
+   * - `description` — hard replace; the SDK default is dropped entirely.
+   * - `appendDescription` — appended after the SDK default with a newline.
+   *
+   * If both are set, `description` wins. Unknown action names are
+   * ignored. Applies to BOTH CoT mode (where the override lands in the
+   * system prompt's `# Tools` section) and classic mode (where it lands
+   * on the OpenAI tool definition).
+   */
+  actionOverrides?: Record<string, {
+    description?: string;
+    appendDescription?: string;
+  }>;
+
   /** sessionStorage key. Default 'webagent.session'. */
   sessionStorageKey?: string;
 

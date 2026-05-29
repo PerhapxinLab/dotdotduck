@@ -31,10 +31,24 @@ export interface CotToolRef {
   parameters: Record<string, unknown>;
 }
 
-/** One step inside a CoT turn — either narration text or a tool call. */
+/** One step inside a CoT turn — either narration text, a tool call, or
+ *  an explicit end-of-loop signal.
+ *
+ *  Narrate carries an optional `about` selector — when set the runtime
+ *  auto-borders that element BEFORE streaming the narrate text, so the
+ *  model doesn't need to remember to chain a separate `border` action.
+ *  Omit `about` only for wrap-up narrates not tied to any element.
+ *
+ *  `{ task_finish: true }` marks the user's whole request as complete
+ *  AFTER this turn's prior actions run. The deliberately verbose name
+ *  ("task_finish" rather than just "done") fights the previous
+ *  misreading where the model treated it as "I'm done planning this
+ *  turn" — it now reads as "the TASK has FINISHED". Without it, ending
+ *  the loop requires a separate empty-actions turn, wasting a round-trip. */
 export type TurnAction =
-  | { narrate: string }
-  | { tool: string; args?: Record<string, unknown> };
+  | { narrate: string; about?: string }
+  | { tool: string; args?: Record<string, unknown> }
+  | { task_finish: true };
 
 /** Full parsed turn response.
  *
@@ -65,33 +79,29 @@ export interface TurnResponse {
 export const AGENT_TURN_TOOL = 'agent_turn';
 
 /**
- * Tool definition the LLM sees when CoT mode is on. The runtime forces
- * `tool_choice: { type: 'function', function: { name: 'agent_turn' } }`
- * so every turn returns one (and only one) `agent_turn` call.
- *
- * The available action `tool` names are listed in `availableTools` —
- * we inject them as an enum so the model can't invent tool names.
+ * Render the tool reference (name + description + JSON Schema for args)
+ * for every action exposed this turn. Lives on the SYSTEM prompt now —
+ * the agent_turn tool description only carries the envelope shape so
+ * we don't duplicate the tool list in two places the model has to read.
  */
-export function buildAgentTurnTool(availableTools: readonly CotToolRef[]): ToolDefinition {
-  // Render each tool's name + description + the JSON Schema of its
-  // required args, inline in the agent_turn description. Without this
-  // the model saw only the tool names (as an enum) and had to guess the
-  // arg shape — causing things like `{ tool: "navigate", args: {} }`
-  // (no `path`) that fail silently at dispatch time.
-  const toolReference = availableTools.map((t) => {
+export function renderToolReference(availableTools: readonly CotToolRef[]): string {
+  return availableTools.map((t) => {
     const params = JSON.stringify(t.parameters);
     return `### \`${t.name}\`\n${t.description}\nargs schema (JSON Schema): ${params}`;
   }).join('\n\n');
+}
 
+/**
+ * Tool definition the LLM sees when CoT mode is on. The runtime forces
+ * `tool_choice: { type: 'function', function: { name: 'agent_turn' } }`
+ * so every turn returns one (and only one) `agent_turn` call.
+ */
+export function buildAgentTurnTool(availableTools: readonly CotToolRef[]): ToolDefinition {
   const toolNames = availableTools.map((t) => t.name);
 
   return {
     name: AGENT_TURN_TOOL,
-    description: `Your full response for this turn. Call exactly once; don't call any other tool directly. Field semantics live in the system prompt — keep the values aligned with what's described there. Include all required args from each tool's schema below; empty args for a tool that needs them will be rejected.
-
-# Tools
-
-${toolReference}`,
+    description: `Your full response for this turn. Call exactly once; don't call any other tool directly. Envelope shape and tool reference live in the system prompt.`,
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -103,7 +113,7 @@ ${toolReference}`,
       properties: {
         memory: {
           type: 'string',
-          description: '1-2 sentences of progress notes. Private.',
+          description: 'Private 1-2 sentence progress recap. Structure: "Last turn: <what just finished>. Still remaining: <head of todos_remaining>". When the user\'s original TASK is fully covered, write "Task complete — emitting task_finish." and put `{task_finish: true}` as the last item in actions[]. Items already covered in previous turns are DONE WELL — never go back to re-explain, re-frame, or supplement them. DO NOT invent NEW todos based on what you see in the fresh DOM dump — todos are derived from the USER\'s original request, not from how much content the page has. If you find yourself wanting to add follow-up todos because "there is more to cover", that means the task is actually done — emit task_finish. NEVER ask the user a question they already answered earlier in this run — if memory or history shows they picked / typed / confirmed X, reuse X; do not re-ask after a tool failure. When a tool fails (selector not found, etc.), retry with a CORRECTED arg (e.g. a different selector from the DOM dump), not by restarting from the user.',
         },
         todos_remaining: {
           type: 'array',
@@ -118,7 +128,11 @@ ${toolReference}`,
             properties: {
               narrate: {
                 type: 'string',
-                description: 'Text streamed into the subtitle bar (one short prose sentence).',
+                description: 'A short DECLARATIVE statement streamed into the subtitle bar — the CONTENT you want the user to read (a fact, a value, what an element shows, what something means). NOT a preview of your next move ("I will now...", "next we will see...", "let me show you..."). NOT a meta status ("thinking...", "processing...", "思考中...", "處理中...", "let me think...") — the runtime shows its own indicator, never narrate your own status. NOT a question (no `?` / `？`, no "would you like…"); questions go through the `ask_user_choice` tool action. For multi-item content (a list of plans, steps, options), use `\\n` newlines to split items onto separate lines for readability — never pack everything into one paragraph joined with "；" / "、" / commas.',
+              },
+              about: {
+                type: 'string',
+                description: 'Selector ([id] from DOM dump, or CSS) of the element this narrate describes. When set, the runtime auto-borders that element BEFORE streaming the narrate — no separate `border` tool call needed. REQUIRED whenever the narrate refers to anything visible on the page (a section, table, row, card, paragraph). Omit ONLY for narrates not tied to any specific element (rare).',
               },
               tool: {
                 type: 'string',
@@ -129,6 +143,10 @@ ${toolReference}`,
                 type: 'object',
                 additionalProperties: true,
                 description: 'Arguments for the tool. Required keys depend on the tool — see its schema in the description.',
+              },
+              task_finish: {
+                type: 'boolean',
+                description: 'Set this action to `{ "task_finish": true }` (no narrate / tool fields) to declare the user\'s TASK is FINISHED. Use ONLY when the original request is fully satisfied AND there is nothing more to do — typically as the LAST item in actions[] after a sequence of narrates that finished the task. DO NOT use task_finish in the same turn as `ask_user_choice` (the run continues after the user answers), `navigate` / `click` / `fill_input` (the page just changed, you need to react), or any tool whose result you have not yet acted on. task_finish = "the user\'s request has been completely satisfied" — not "I have planned my next step".',
               },
             },
           },
@@ -172,10 +190,19 @@ export function parseTurnResponse(rawArgs: string | Record<string, unknown>): Tu
       if (!a || typeof a !== 'object') continue;
       const obj = a as Record<string, unknown>;
       if (typeof obj.narrate === 'string') {
-        actions.push({ narrate: obj.narrate });
+        const about = typeof obj.about === 'string' && obj.about.trim().length > 0 ? obj.about.trim() : undefined;
+        actions.push(about ? { narrate: obj.narrate, about } : { narrate: obj.narrate });
       } else if (typeof obj.tool === 'string') {
         const args = (obj.args && typeof obj.args === 'object') ? obj.args as Record<string, unknown> : {};
-        actions.push({ tool: obj.tool, args });
+        // Strip the OpenAI-style `functions.` prefix that nano sometimes
+        // leaks into the tool field even when the schema enum is strict.
+        // The webagent dispatches by bare action name, so a leaked prefix
+        // would resolve to `Unknown action: functions.immersive_translate`
+        // and silently fail.
+        const tool = obj.tool.replace(/^functions\./, '');
+        actions.push({ tool, args });
+      } else if (obj.task_finish === true) {
+        actions.push({ task_finish: true });
       }
     }
   }
@@ -187,9 +214,12 @@ export function parseTurnResponse(rawArgs: string | Record<string, unknown>): Tu
 }
 
 /** Type guards. */
-export function isNarrateAction(a: TurnAction): a is { narrate: string } {
+export function isNarrateAction(a: TurnAction): a is { narrate: string; about?: string } {
   return 'narrate' in a;
 }
 export function isToolAction(a: TurnAction): a is { tool: string; args?: Record<string, unknown> } {
   return 'tool' in a;
+}
+export function isTaskFinishAction(a: TurnAction): a is { task_finish: true } {
+  return 'task_finish' in a && a.task_finish === true;
 }

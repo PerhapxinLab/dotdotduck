@@ -652,7 +652,17 @@ export class DotDotDuck {
     el.setAttribute('data-dddk-dwell-target', '');
     this.highlightedEl = el;
     if (opts?.scroll !== false) {
-      try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch { /* noop */ }
+      // Position the element's TOP near the upper third of the viewport
+      // (~18% from the top) rather than centering it. Centering pushes
+      // long sections halfway off-screen and crops the title; pinning to
+      // the very top hides any context above (heading / breadcrumb / nav).
+      // 18% leaves room for site chrome + a bit of breathing space.
+      try {
+        const rect = el.getBoundingClientRect();
+        const targetTop = Math.round(window.innerHeight * 0.18);
+        const desiredScrollY = window.scrollY + rect.top - targetTop;
+        window.scrollTo({ top: Math.max(0, desiredScrollY), behavior: 'smooth' });
+      } catch { /* noop */ }
     }
     if (opts?.autoDismiss && opts.autoDismiss > 0) {
       this.highlightDismissTimer = setTimeout(() => this.clearHighlight(), opts.autoDismiss);
@@ -1112,36 +1122,6 @@ export class DotDotDuck {
     // this BEFORE the SPA settle window).
     agent.setNavigateBridge((path: string) => this.navigate(path));
 
-    // Palette context — every turn the agent's system prompt shows
-    // the host's currently-registered palette commands, so the model
-    // can `run_palette({id})` directly without needing to discover them
-    // first. Filters out fallback / search-only items (recursive Ask AI
-    // call, hidden doc-flat rows).
-    agent.setPaletteContextProvider(() =>
-      this.palette.getItems()
-        .filter((it) => !it.fallback && !it.searchOnly && !!it.handler)
-        .map((it) => {
-          // Prefix shape on PaletteItem is `string | string[] | { match, label? }`.
-          // Flatten to a single representative string for prompt display —
-          // the agent only needs to recognise the command, not list every alias.
-          let prefix: string | undefined;
-          if (typeof it.prefix === 'string') prefix = it.prefix;
-          else if (Array.isArray(it.prefix)) prefix = it.prefix[0];
-          else if (it.prefix && typeof it.prefix === 'object') {
-            const m = it.prefix.match;
-            prefix = typeof m === 'string' ? m : (Array.isArray(m) ? m[0] : undefined);
-          }
-          return {
-            id: it.id,
-            name: it.name,
-            description: it.description,
-            prefix,
-            section: typeof it.section === 'string' ? it.section : undefined,
-            acceptsArg: it.prefixAcceptsAnyArg === true,
-          };
-        }),
-    );
-
     // ask_user / ask_user_choice are dispatched via the action handler;
     // the handler calls back into these to render the host UI.
     agent.setAskUserHandler(({ question, resolve }) => {
@@ -1440,23 +1420,26 @@ export class DotDotDuck {
       const now = (): number => Date.now();
       // `persistent: true` removes every passive dismiss path — × close
       // button hidden, Esc ignored, outside-click / any-key ignored.
-      // The bar can only close via Space (accept) or double-tap (reject).
-      // Trade-off: visitor can't skip the prompt, but we always get a
-      // labelled satisfied/not-satisfied signal — that's the whole point
-      // of opting into feedback mode.
+      // The bar can only close via Space (accept), double-tap (reject),
+      // or click on the ✓ / ✕ buttons. Trade-off: visitor can't skip the
+      // prompt, but we always get a labelled satisfied/not-satisfied
+      // signal — that's the whole point of opting into feedback mode.
       await new Promise<void>((resolve) => {
+        const close = (satisfied: boolean): void => {
+          this.emitIntent({ kind: 'agent_feedback', runId, skillId, satisfied, summary: closure.text, timestamp: now() });
+          // Tear the bar down — accept / reject callbacks don't go through
+          // the gesture-manager `invokeAccept` path that normally hides
+          // the subtitle, so we hide it here. Without this the bar stays
+          // visible after the click and the user thinks ✓ / ✕ didn't fire.
+          this.subtitle.hide();
+          resolve();
+        };
         this.subtitle.show({
           text: closure.text,
           type: 'agent',
           persistent: true,
-          onAccept: () => {
-            this.emitIntent({ kind: 'agent_feedback', runId, skillId, satisfied: true, summary: closure.text, timestamp: now() });
-            resolve();
-          },
-          onReject: () => {
-            this.emitIntent({ kind: 'agent_feedback', runId, skillId, satisfied: false, summary: closure.text, timestamp: now() });
-            resolve();
-          },
+          onAccept: () => close(true),
+          onReject: () => close(false),
         });
       });
       return;
@@ -1574,40 +1557,15 @@ export class DotDotDuck {
       });
     }
 
-    // Open the palette UI — and nothing else. This tool does ONE thing:
-    // it renders the palette panel on screen. It does NOT pick a command,
-    // does NOT pre-fill the search input, does NOT execute anything.
-    //
-    // Once the palette is visible, all the standard DOM actions (`click`,
-    // `fill_input`, `border`, etc.) work on the palette items, the search
-    // input, and the language sub-menus the same way they would for any
-    // other on-page element. The host's available palette commands are
-    // listed below for reference, but invoking one of them is done by
-    // clicking its row in the next turn's DOM dump — never by passing it
-    // as an argument here.
-    tools.push({
-      name: 'open_palette',
-      description: 'Open the command palette UI. This is equivalent to the user pressing Ctrl+K — the panel opens with all top-level commands visible and focus stays on the page (not on the search input), so subsequent Space / accept gestures still work. The tool takes NO arguments — to filter the list, follow up with `fill_input` on the palette\'s search input; to invoke a command, follow up with `click` on the matching row from the next turn\'s DOM dump. The host\'s available palette commands are listed below — read them BEFORE opening so you know what to click for.',
-      parameters: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {},
-      },
-      handler: async () => {
-        try {
-          // Open WITHOUT focusing the palette input. Reason: if focus
-          // landed in the input, Space presses would become literal
-          // characters instead of resolving the runtime's auto-pause /
-          // accept gesture. With focus on body, Space still advances the
-          // agent through whatever comes next. The user can click the
-          // input themselves to start typing.
-          this.palette.open(undefined, { focusInput: false });
-          return { ok: true as const };
-        } catch (err) {
-          return { ok: false, reason: 'unknown' as const, message: (err as Error).message };
-        }
-      },
-    });
+    // `open_palette` was previously registered here as a generic "show
+    // the UI and let the agent click into it" tool. Removed in v0.1.0+:
+    // multi-step UI navigation (open → click row → click sub-menu) is
+    // unreliable on small models. Hosts that want the agent to invoke a
+    // palette command now register semantic intent tools instead — e.g.
+    // `immersive_translate({language})`, `start_site_tour()`,
+    // `search_docs({query})`. The host's tool handler drives the palette
+    // UI animation if visual feedback is desired. See
+    // `dddk-frontend/src/lib/agent-tools.ts` for the reference pattern.
 
     return tools;
   }

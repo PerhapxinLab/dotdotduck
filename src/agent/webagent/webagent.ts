@@ -55,7 +55,6 @@ import {
   renderSelectionBlock,
   renderPageStateBlock,
   renderUserReminder,
-  renderPaletteCommandsForToolDescription,
 } from './prompt';
 import { builtinActions, presentSurface } from './actions';
 import { readDOM } from './dom-reader';
@@ -64,7 +63,16 @@ import { setupCrossTabSync, publishCrossTab } from './cross-tab';
 import { executeAction } from './execute-action';
 import { DEFAULT_DESTRUCTIVE_PATTERNS, isDestructiveByPattern } from './destructive';
 import { sdkString } from '../../utils/sdk-i18n';
-import { AGENT_TURN_TOOL, buildAgentTurnTool, parseTurnResponse, isNarrateAction, isToolAction } from './cot';
+import {
+  AGENT_TURN_TOOL,
+  buildAgentTurnTool,
+  parseTurnResponse,
+  renderToolReference,
+  isNarrateAction,
+  isToolAction,
+  isTaskFinishAction,
+  type CotToolRef,
+} from './cot';
 
 const DEFAULT_MAX_STEPS = 30;
 const DEFAULT_MAX_ERRORS = 3;
@@ -156,17 +164,6 @@ export class WebAgent {
    *  prompt; the next turn picks up the new locale. */
   setLocale(locale: string): void {
     this.config.locale = locale;
-  }
-
-  /** Set by the orchestrator — invoked per turn to fetch the host's
-   *  current palette commands. Returning items inlines them in the
-   *  system prompt so the agent sees what host-registered commands
-   *  exist without having to call `list_palette` first. Optional;
-   *  hosts running WebAgent standalone (no palette UI) just leave it
-   *  unset. */
-  private paletteContextProvider: (() => import('./prompt').PaletteCommandSummary[]) | null = null;
-  setPaletteContextProvider(fn: () => import('./prompt').PaletteCommandSummary[]): void {
-    this.paletteContextProvider = fn;
   }
 
   /** Set by the orchestrator — called when the agent picks `navigate`.
@@ -664,11 +661,13 @@ export class WebAgent {
         url: this.session.currentPage,
         memory: turn.memory,
         todos_remaining: turn.todos_remaining,
-        actions: turn.actions.map((a) =>
-          isNarrateAction(a)
-            ? { narrate: a.narrate.length > 100 ? a.narrate.slice(0, 100) + '…' : a.narrate }
-            : { tool: (a as { tool: string }).tool, args: (a as { args?: unknown }).args },
-        ),
+        actions: turn.actions.map((a) => {
+          if (isNarrateAction(a)) {
+            return { narrate: a.narrate.length > 100 ? a.narrate.slice(0, 100) + '…' : a.narrate };
+          }
+          if (isTaskFinishAction(a)) return { task_finish: true };
+          return { tool: (a as { tool: string }).tool, args: (a as { args?: unknown }).args };
+        }),
       };
       console.info('[dddk webagent] turn', turnSummary);
       if (typeof window !== 'undefined') {
@@ -684,19 +683,24 @@ export class WebAgent {
         w.__dddkDebug.lastTurnAt = new Date().toISOString();
       }
 
-      // Structural normalization. The envelope is a two-field chain:
-      //   todos_remaining  →  actions
-      // (what's still owed  → how to clear the head of the queue)
-      //
-      // When `todos_remaining` is empty the chain has no head — actions
-      // is inert by definition. The schema makes `actions` optional, so
-      // a well-behaved model omits it; we still defensively force it to
-      // [] here for the rare case a model emits an actions field anyway.
+      // Structural normalization. Historically when `todos_remaining` is
+      // empty we forced `actions = []` (band-aid for models that signalled
+      // done via empty todos but still emitted actions). Now that the
+      // schema has explicit `{task_finish: true}` for end-of-loop, model
+      // CAN legitimately emit `[narrate, narrate, ..., task_finish]` as a
+      // wrap-up — todos already empty because the work is done, but the
+      // narrates carry the closing message. We only normalize away when
+      // the model has NEITHER an explicit task_finish NOR any narrate —
+      // i.e. it left orphan tool calls without a closing signal.
       if (turn.todos_remaining.length === 0 && turn.actions.length > 0) {
-        if (typeof console !== 'undefined') {
-          console.info('[dddk webagent] todos empty → ' + turn.actions.length + ' queued actions normalized away; loop ends');
+        const hasTaskFinish = turn.actions.some((a) => isTaskFinishAction(a));
+        const hasNarrate = turn.actions.some((a) => isNarrateAction(a));
+        if (!hasTaskFinish && !hasNarrate) {
+          if (typeof console !== 'undefined') {
+            console.info('[dddk webagent] todos empty + actions has only tools without task_finish → ' + turn.actions.length + ' queued actions normalized away; loop ends');
+          }
+          turn.actions = [];
         }
-        turn.actions = [];
       }
 
       if (turn.actions.length === 0) {
@@ -725,19 +729,110 @@ export class WebAgent {
       // `actionResults` so the next LLM turn can see what actually happened
       // (not just "action_count: N") and reason about it. Without this, the
       // model re-issues actions it already executed.
-      const actionResults: Array<{ type: 'narrate'; text: string } | { type: 'tool'; name: string; ok: boolean; reason?: string; data?: unknown }> = [];
+      const actionResults: Array<{ type: 'narrate'; text: string } | { type: 'tool'; name: string; ok: boolean; reason?: string; data?: unknown } | { type: 'done' }> = [];
       let actionErrorThisTurn = 0;
       let pageChanged = false;
+      // Set by an explicit `{done: true}` action item. When true, the outer
+      // loop ends right after this turn's dispatch finishes — saves the
+      // wasted "I'm done" round-trip otherwise needed when the model has
+      // already finished the work this turn.
+      let endLoopRequested = false;
+      // Track whether this turn ran an action whose RESULT the model still
+      // needs to read before declaring the run finished. Used to drop a
+      // mis-placed `{task_finish: true}` in the SAME turn.
+      //
+      // Scope is deliberately narrow:
+      //   - `ask_user_choice` / `ask_user` — answer is genuinely pending; the
+      //     model has no idea what the user will pick until the next turn.
+      //   - `navigate` — destination page DOM is brand new; declaring the
+      //     task done before reading it is almost always wrong.
+      //
+      // NOT in this set: `click`, `fill_input`, `select_option`,
+      // `open_palette`, `submit`. Those CAN be terminal (a palette row
+      // click commits + closes; a submit posts a form). Trust the model
+      // to decide whether task_finish belongs after them.
+      const TOOLS_REQUIRING_NEXT_REACTION = new Set(['ask_user_choice', 'ask_user', 'navigate']);
+      let executedReactionRequiringTool = false;
       for (let ai = 0; ai < turn.actions.length; ai++) {
         const action = turn.actions[ai]!;
         if (signal.aborted) { this.setStatus('idle'); return; }
 
+        if (isTaskFinishAction(action)) {
+          if (executedReactionRequiringTool) {
+            // Model emitted `task_finish` after a tool whose outcome it
+            // hasn't yet processed (asked the user → answer pending,
+            // navigated → new DOM not seen, etc.). Treat as a mis-use,
+            // log, drop.
+            console.warn('[dddk webagent] dropping {task_finish:true} — turn included a reaction-requiring tool; the run is not actually finished yet');
+            continue;
+          }
+          endLoopRequested = true;
+          actionResults.push({ type: 'done' });
+          // No further action items matter once task_finish lands — the
+          // model is signalling the run is over. Break out of the action loop.
+          break;
+        }
+
         if (isNarrateAction(action)) {
           this.setStatus('executing');
-          for (const ch of action.narrate) {
+          // Auto-border the element this narrate is "about" BEFORE streaming
+          // the text. Putting the framing in the same {narrate, about} payload
+          // means the model can't forget to chain a separate border action —
+          // structurally enforced rather than rule-enforced. Synthesises the
+          // same tool-start / tool-end events the explicit `border` path emits
+          // so highlight pipelines (resolveSelector → host highlight) still
+          // observe the framing.
+          const about = (action as { about?: string }).about;
+          if (about && about.trim().length > 0) {
+            const borderAction = this.actions.get('border');
+            if (borderAction) {
+              const synthId = `cot_about_${stepIdx}_${ai}_${Math.random().toString(36).slice(2, 6)}`;
+              yield {
+                kind: 'tool-start',
+                name: 'border',
+                args: { selector: about },
+                targetSelector: about,
+                toolCallId: synthId,
+              };
+              const borderResult = await executeAction(
+                {
+                  actions: this.actions,
+                  indexMap: this.currentIndexMap,
+                  registerPendingResolver: (r) => this.registerPendingResolver(r),
+                  emitAskUser: () => {},
+                  emitAskUserChoice: () => {},
+                  emitPause: () => {},
+                  emitPresentSurface: undefined,
+                  session: this.session,
+                  defaultPauseNote: '',
+                },
+                'border',
+                { selector: about },
+                signal,
+              );
+              yield { kind: 'tool-end', name: 'border', result: borderResult, toolCallId: synthId };
+              actionResults.push({
+                type: 'tool',
+                name: 'border',
+                ok: borderResult.ok,
+                reason: borderResult.ok ? undefined : borderResult.reason,
+                data: borderResult.ok ? borderResult.data : undefined,
+              });
+            }
+          }
+
+          // Throttle the typewriter feel. `agent_turn` arrives complete, so
+          // we slice the narrate into small chunks and pace them out — fast
+          // enough to feel responsive, slow enough that readers can follow
+          // as it appears (instant-blit feels like a wall-of-text drop).
+          // 4ms per char ≈ 250 chars/sec; chunking 2 chars at a time so the
+          // event loop overhead doesn't dominate at that rate.
+          const NARRATE_CHUNK_SIZE = 2;
+          const NARRATE_CHUNK_DELAY_MS = 8;
+          for (let i = 0; i < action.narrate.length; i += NARRATE_CHUNK_SIZE) {
             if (signal.aborted) { this.setStatus('idle'); return; }
-            yield { kind: 'text-delta', delta: ch };
-            await sleep(12);
+            yield { kind: 'text-delta', delta: action.narrate.slice(i, i + NARRATE_CHUNK_SIZE) };
+            await sleep(NARRATE_CHUNK_DELAY_MS);
           }
           actionResults.push({ type: 'narrate', text: action.narrate });
 
@@ -808,6 +903,9 @@ export class WebAgent {
             name: action.tool,
             arguments: action.args ?? {},
           };
+          if (TOOLS_REQUIRING_NEXT_REACTION.has(synth.name)) {
+            executedReactionRequiringTool = true;
+          }
           const matched = this.actions.get(synth.name);
 
           const needsConfirm = await this.needsConfirmation(synth, matched, signal);
@@ -925,7 +1023,6 @@ export class WebAgent {
             data: result.ok ? result.data : undefined,
           });
           if (!result.ok) actionErrorThisTurn += 1;
-          if (pageChanged) break;
         }
       }
 
@@ -958,6 +1055,15 @@ export class WebAgent {
         }
       } else {
         errorCount = 0;
+      }
+
+      // Explicit `{done: true}` action — model signalled this turn closes
+      // the loop. Skip the wasted "I'm done" round-trip the empty-actions
+      // path would otherwise require.
+      if (endLoopRequested) {
+        this.setStatus('idle');
+        yield { kind: 'final' };
+        return;
       }
     }
 
@@ -1154,6 +1260,10 @@ export class WebAgent {
       }
     }
 
+    const toolReference = this.config.cotMode
+      ? renderToolReference(this.buildCotToolRefs())
+      : undefined;
+
     const systemPrompt = assembleSystemPrompt({
       locale: this.config.locale,
       agentName: this.config.agentName,
@@ -1168,6 +1278,7 @@ export class WebAgent {
       selection: this.currentSelection ?? undefined,
       previousUrl: undefined,
       cotMode: this.config.cotMode,
+      toolReference,
     });
 
     const messages: LLMMessage[] = [{ role: 'system', content: systemPrompt }];
@@ -1250,18 +1361,22 @@ export class WebAgent {
       }
     }
 
-    // Per-turn environment block: sitemap + reminder + current page state.
+    // Per-turn environment block: current page state + fresh DOM dump.
     // Appended as the LAST user message so the model always re-grounds on
-    // the latest reality before its next emission.
+    // the latest reality before its next emission. In classic (non-CoT)
+    // mode the legacy reminder + sitemap still ride along; in CoT mode
+    // both live on the system prompt and the env block stays minimal.
     const envParts: string[] = [];
-    if (this.config.sitemap) envParts.push(renderSitemap(this.config.sitemap));
-    const latestUser = lastUserTurn(this.session);
-    envParts.push(renderUserReminder({
-      latestUserText: latestUser?.text ?? '',
-      stepsSoFar: this.session.turns,
-      currentUrl: this.session.currentPage,
-      cotMode: this.config.cotMode,
-    }));
+    if (!this.config.cotMode) {
+      if (this.config.sitemap) envParts.push(renderSitemap(this.config.sitemap));
+      const latestUser = lastUserTurn(this.session);
+      envParts.push(renderUserReminder({
+        latestUserText: latestUser?.text ?? '',
+        stepsSoFar: this.session.turns,
+        currentUrl: this.session.currentPage,
+        cotMode: false,
+      }));
+    }
     envParts.push(renderPageStateBlock({
       currentPage: this.session.currentPage,
       pageContext,
@@ -1294,53 +1409,69 @@ export class WebAgent {
     return messages;
   }
 
+  /**
+   * Resolve the effective description for an action, applying any
+   * `actionOverrides` entry. Hard `description` wins over
+   * `appendDescription`; both unset returns the SDK default verbatim.
+   *
+   * Centralised so CoT (`buildCotToolRefs`) and classic (`buildToolDefinitions`)
+   * paths can't drift in override behaviour.
+   */
+  private resolveActionDescription(action: ActionDefinition): string {
+    const ov = this.config.actionOverrides?.[action.name];
+    if (!ov) return action.description;
+    if (typeof ov.description === 'string') return ov.description;
+    if (typeof ov.appendDescription === 'string' && ov.appendDescription.length > 0) {
+      return action.description + '\n' + ov.appendDescription;
+    }
+    return action.description;
+  }
+
+  /**
+   * Build the CoT tool reference list once per turn. Shared by:
+   *   - `buildToolDefinitions()` — wraps refs in a single `agent_turn` tool
+   *   - `buildMessages()` — renders refs as the system prompt's `# Tools`
+   *
+   * Skipped from the model's tool reference:
+   *   - `pause` — CoT auto-pauses after every narrate; exposing the tool
+   *     invites double-pauses.
+   *   - `border` — element framing is done structurally via `narrate.about`
+   *     (runtime auto-borders). Exposing the standalone tool creates two
+   *     ways to do the same thing and the model picks inconsistently.
+   *
+   * The actions still live in `this.actions` so internal dispatch
+   * (narrate.about, legacy executeLoop, host customActions) keeps working.
+   *
+   * Per-action `actionOverrides` are applied so the model sees host-
+   * customised descriptions instead of (or appended to) the SDK defaults.
+   */
+  private buildCotToolRefs(): CotToolRef[] {
+    const refs: CotToolRef[] = [];
+    for (const action of this.actions.values()) {
+      if (action.name === 'pause' || action.name === 'border') continue;
+      refs.push({
+        name: action.name,
+        description: this.resolveActionDescription(action),
+        parameters: action.parameters,
+      });
+    }
+    return refs;
+  }
+
   private buildToolDefinitions(): ToolDefinition[] {
     if (this.config.toolDefinitions) return this.config.toolDefinitions;
 
-    // Live palette listing → appended to `open_palette`'s description so
-    // the model sees the available commands RIGHT INSIDE the tool it's
-    // about to call. The agent opens the palette, then operates it via
-    // normal `click` / `fill_input` on the rendered DOM — same as a
-    // user would. Having the listing co-located with `open_palette`
-    // means the model decides whether to open AND which command to
-    // pre-fill / look for in one step.
-    const palette = this.paletteContextProvider?.() ?? [];
-    const paletteSuffix = palette.length > 0
-      ? renderPaletteCommandsForToolDescription(palette)
-      : '';
-    const describeAction = (action: ActionDefinition): string =>
-      action.name === 'open_palette' && paletteSuffix
-        ? action.description + '\n' + paletteSuffix
-        : action.description;
-
     if (this.config.cotMode) {
-      // CoT mode: a single wrapping tool. Each built-in action is
-      // surfaced inside the `agent_turn` description with its own
-      // `{ name, description, parameters }` so the model sees the per-
-      // tool arg schemas (without these it had to guess, which caused
-      // `navigate` calls with empty `path`, etc.).
-      //
-      // We strip `pause` — every narration auto-pauses for Space at
-      // runtime, so giving the model `pause` only invites a double-pause
-      // that manifests as "user pressed Space but nothing happened".
-      // Destructive actions still gate on confirm; user input still
-      // goes through ask_user / ask_user_choice.
-      const refs: { name: string; description: string; parameters: Record<string, unknown> }[] = [];
-      for (const action of this.actions.values()) {
-        if (action.name === 'pause') continue;
-        refs.push({
-          name: action.name,
-          description: describeAction(action),
-          parameters: action.parameters,
-        });
-      }
-      return [buildAgentTurnTool(refs)];
+      return [buildAgentTurnTool(this.buildCotToolRefs())];
     }
+
+    // Classic (non-CoT) mode: each action becomes a top-level tool.
+    // Same override policy as CoT.
     const defs: ToolDefinition[] = [];
     for (const action of this.actions.values()) {
       defs.push({
         name: action.name,
-        description: describeAction(action),
+        description: this.resolveActionDescription(action),
         parameters: action.parameters,
       });
     }

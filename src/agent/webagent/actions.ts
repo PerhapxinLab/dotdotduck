@@ -45,7 +45,7 @@ function isInteractive(el: HTMLElement): boolean {
 
 const navigate: ActionDefinition<{ path: string }> = {
   name: 'navigate',
-  description: 'Take the user to a SPA-friendly path. This is a cross-page transition — the runtime always pauses for user consent before moving them. Emit one short narrate sentence that names where you are taking them as the action IMMEDIATELY BEFORE the navigate call in this turn\'s actions[]; the runtime auto-pauses after the narrate so the user can read it, presses Space, then the confirm modal for navigate fires. Without that paired narrate the user sees a confirm modal with no context.',
+  description: 'Take the user to a SPA-friendly path (e.g. "/pricing"). Cross-page transition; the runtime asks the user to confirm before moving.',
   parameters: objSchema({ path: { type: 'string' } }, ['path']),
   // Cross-page transitions are the only routine built-in that gates by
   // default. Other moves (scroll / border / highlight / click) are
@@ -61,9 +61,9 @@ const navigate: ActionDefinition<{ path: string }> = {
 
 const pause: ActionDefinition<{ note?: string }> = {
   name: 'pause',
-  description: 'Stop and wait for the user to press Space before continuing — ONLY for irreversible / destructive moments where you want explicit consent before proceeding (about to submit a form, place an order, send a message, delete something). Normal narrative cadence is handled by the runtime: it auto-pauses after each `narrate` so you do NOT need to call `pause` between sentences. Calling `pause` mid-tour is wrong.',
+  description: 'Wait for the user to press Space before continuing. Use only for explicit-consent moments (about to submit, place an order, send a message).',
   parameters: objSchema({
-    note: { type: 'string', description: 'Optional short hint shown in the bar in the user\'s language (e.g. "Submit this order?"). Omit to use the SDK\'s locale-aware default.' },
+    note: { type: 'string', description: 'Optional short hint shown in the subtitle bar.' },
   }),
   handler: async () => {
     // Intercepted in execute-action.ts; this stub only registers the schema.
@@ -73,7 +73,7 @@ const pause: ActionDefinition<{ note?: string }> = {
 
 const scrollTo: ActionDefinition<{ selector: string }> = {
   name: 'scroll_to',
-  description: 'Smoothly scroll an element into view. Use before narrating about that element so the user can see what you mean. `selector` accepts either a stable hash ID from the DOM dump (e.g. "ea3f" or "[ea3f]") OR a CSS selector.',
+  description: 'Smoothly scroll an element into view. `selector` accepts a stable hash ID from the DOM dump or a CSS selector.',
   parameters: objSchema({ selector: { type: 'string' } }, ['selector']),
   handler: async ({ selector }, ctx) => {
     const found = resolve(ctx, selector);
@@ -85,7 +85,7 @@ const scrollTo: ActionDefinition<{ selector: string }> = {
 
 const wait: ActionDefinition<{ ms?: number; selector?: string; timeout?: number }> = {
   name: 'wait',
-  description: 'Wait for time or for an element to appear, capped at 5 seconds. Two modes:\n- `ms`: sleep for that many milliseconds (use for animations / page settle).\n- `selector` + optional `timeout`: poll the DOM until a CSS selector matches an element, or `timeout` ms elapse. Selector mode uses CSS only — stable IDs refer to elements that already exist in the current dump.',
+  description: 'Wait for time or for a CSS selector to appear, capped at 5s. Pass `ms` to sleep, or `selector` (+ optional `timeout`) to poll.',
   parameters: objSchema(
     {
       ms: { type: 'number', maximum: 5000 },
@@ -126,7 +126,7 @@ const wait: ActionDefinition<{ ms?: number; selector?: string; timeout?: number 
 
 const click: ActionDefinition<{ selector: string }> = {
   name: 'click',
-  description: 'Click an element — this is what ACTIVATES it: triggers the element\'s onClick handler, follows links, opens menus, picks list / option items, submits buttons. If the user\'s intent is for something on the page to ACT (a menu to open, an option to be selected, a form to submit, a row to be picked), `click` is the action that does it. Drawing a border on the element does NOT click it — border is a passive visual marker only.',
+  description: 'Click an element — fires its onClick handler, follows links, opens menus, picks options, submits buttons. `selector` MUST be a stable `[id]` hash taken VERBATIM from the current DOM dump (e.g. `[a1b2]` or `a1b2`). NEVER invent CSS selectors like `#thing` / `.row` based on guessed names — the page does not necessarily use those IDs. If the element you want is not in the current DOM dump, scroll / wait / re-read instead of guessing.',
   parameters: objSchema({ selector: { type: 'string' } }, ['selector']),
   handler: async ({ selector }, ctx) => {
     const found = resolve(ctx, selector);
@@ -200,6 +200,51 @@ const selectOption: ActionDefinition<{ selector: string; value: string }> = {
   },
 };
 
+/**
+ * Maps a few common key names to their `event.code` value so frameworks
+ * checking `code` (not just `key`) still match. Sparse on purpose — most
+ * single-character keys map 1:1 and don't need an entry.
+ */
+const KEY_CODE_MAP: Record<string, string> = {
+  Enter: 'Enter',
+  Escape: 'Escape',
+  Tab: 'Tab',
+  Backspace: 'Backspace',
+  Delete: 'Delete',
+  ArrowUp: 'ArrowUp',
+  ArrowDown: 'ArrowDown',
+  ArrowLeft: 'ArrowLeft',
+  ArrowRight: 'ArrowRight',
+  ' ': 'Space',
+  Space: 'Space',
+};
+
+const pressKey: ActionDefinition<{ key: string; selector?: string }> = {
+  name: 'press_key',
+  description: 'Dispatch a keyboard event (keydown + keyup) on an element. Use for Enter (commit forms / palette selections), Escape, Tab, ArrowUp/Down, etc. `key` is the W3C key name ("Enter", "Escape", "ArrowDown", "a", " "). `selector` is optional — omitted = the currently focused element (`document.activeElement`).',
+  parameters: objSchema(
+    { key: { type: 'string' }, selector: { type: 'string' } },
+    ['key'],
+  ),
+  handler: async ({ key, selector }, ctx) => {
+    if (typeof document === 'undefined') return { ok: false, reason: 'unknown', message: 'no DOM' };
+    let target: HTMLElement | null;
+    if (selector) {
+      const found = resolve(ctx, selector);
+      if (!found.ok) return found.result;
+      target = found.el;
+    } else {
+      target = (document.activeElement as HTMLElement | null) ?? document.body;
+    }
+    if (!target) return { ok: false, reason: 'not_found' };
+    const code = KEY_CODE_MAP[key] ?? (key.length === 1 ? `Key${key.toUpperCase()}` : key);
+    const init: KeyboardEventInit = { key, code, bubbles: true, cancelable: true };
+    target.dispatchEvent(new KeyboardEvent('keydown', init));
+    target.dispatchEvent(new KeyboardEvent('keyup', init));
+    return { ok: true };
+  },
+};
+
 const clearInput: ActionDefinition<{ selector: string }> = {
   name: 'clear_input',
   description: 'Clear an input or textarea value.',
@@ -222,7 +267,7 @@ const borderAction: ActionDefinition<
   string
 > = {
   name: 'border',
-  description: 'Draw a border around an element to point it out — "I want to show you THIS". Use right before narrating about that element. Any previous border / highlight is cleared automatically — you do NOT need a separate "clear" tool. `selector` accepts either a stable hash ID from the DOM dump (e.g. "ea3f" or "[ea3f]") OR a CSS selector.',
+  description: 'Draw a border around an element to point at it. Previous border / highlight is auto-cleared.',
   parameters: objSchema(
     {
       selector: { type: 'string' },
@@ -245,7 +290,7 @@ const highlightAction: ActionDefinition<
   string
 > = {
   name: 'highlight',
-  description: 'Translucent highlighter paint over an element or text span — "look at this passage / chip". More visually dense than border; use for paragraphs / inline text rather than rectangular cards. Any previous border / highlight is cleared automatically. `selector` accepts either a stable hash ID from the DOM dump OR a CSS selector.',
+  description: 'Translucent paint overlay on an element or text span. Previous border / highlight is auto-cleared.',
   parameters: objSchema(
     {
       selector: { type: 'string' },
@@ -267,8 +312,7 @@ const highlightAction: ActionDefinition<
 
 const askUser: ActionDefinition<{ question: string }, string> = {
   name: 'ask_user',
-  description:
-    'Pause and ask the user a free-text question. ONLY use when you genuinely need information you can\'t derive from the page or conversation. Do NOT use to acknowledge state or fish for "press space to continue" — just narrate the answer directly.',
+  description: 'Pause and ask the user a free-text question. Use only when you need information not derivable from the page or conversation.',
   parameters: objSchema({ question: { type: 'string' } }, ['question']),
   handler: async () => {
     // Intercepted in execute-action.ts.
@@ -281,8 +325,7 @@ const askUserChoice: ActionDefinition<
   string
 > = {
   name: 'ask_user_choice',
-  description:
-    'Pause and ask the user to pick one of 2-4 short options. Renders a clickable / digit-key picker. Prefer this over `ask_user` when the answer space is finite. Returns the chosen value.',
+  description: 'Pause and ask the user to pick one of 2-6 options. Prefer this over ask_user when the answer space is finite. Returns the chosen value.',
   parameters: objSchema(
     {
       question: { type: 'string' },
@@ -307,35 +350,15 @@ export const presentSurface: ActionDefinition<{
   placement?: 'subtitle' | 'modal' | 'dock' | 'inline';
 }> = {
   name: 'present_surface',
-  description: `Render a structured PieceSurface (an image+text card, an option-picker, a 3-up recommendation grid) and wait for the user to pick or cancel. Returns \`{ value: <chosen option's value> | null, cancelled: boolean }\`.
-
-USE WHEN: the answer is "show the user a small UI and let them choose", not "narrate the options as prose". Specifically: 2-6 visual recommendations (products, destinations, files), confirm-summary screens, multi-option pickers where each option has its own image / metadata.
-
-DO NOT USE FOR: yes/no questions (use ask_user_choice instead), free-text input (use ask_user), or destructive confirms (those use the runtime's automatic confirm gate).
-
-Surface shape — a single PieceSurface tree. Recommended composition for "pick one of N":
-
-{
-  surface: {
-    root: {
-      kind: 'OptionGroup',
-      bind: 'pick',
-      layout: 'row',          // or 'column'
-      options: [
-        { value: 'p1', title: 'Product A', description: '...', image: { src: 'https://...', alt: '...' } },
-        { value: 'p2', title: 'Product B', description: '...', image: { src: '...' } },
-        { value: 'p3', title: 'Product C', description: '...', image: { src: '...' } }
-      ]
-    }
-  },
-  placement: 'subtitle'   // or 'modal' for blocking, 'dock' for persistent
-}
-
-The runtime resolves with the option's \`value\` once the user clicks or hits Enter on a focused tile. Use the returned value in your next-turn reasoning.`,
+  description: 'Render a visual picker (OptionGroup of 2-6 options, each with value / title / optional description / optional image) and wait for the user to pick or cancel. Returns `{ value, cancelled }`. Use when the choice has visual weight (product cards, plan tiers); use ask_user_choice for plain 2-6 text options.',
   parameters: objSchema(
     {
-      surface: { type: 'object', additionalProperties: true, description: 'PieceSurface tree — { root: PieceNode, data?: object }.' },
-      placement: { type: 'string', enum: ['subtitle', 'modal', 'dock', 'inline'], description: 'Where the surface renders. Default `subtitle`.' },
+      surface: {
+        type: 'object',
+        additionalProperties: true,
+        description: 'PieceSurface tree. Shape: { root: { kind: "OptionGroup", bind: string, layout: "row" | "column", options: Array<{ value: string, title: string, description?: string, image?: { src: string, alt?: string } }> } }.',
+      },
+      placement: { type: 'string', enum: ['subtitle', 'modal', 'dock', 'inline'], description: 'Where the picker renders. Default `subtitle`.' },
     },
     ['surface'],
   ),
@@ -355,6 +378,7 @@ export const builtinActions: ActionDefinition[] = [
   fillInput,
   selectOption,
   clearInput,
+  pressKey,
   // `borderAction` is the canonical "point at an element" tool. The old
   // `highlightAction` (translucent paint overlay, intended for text spans)
   // was removed from the builtin set in v0.1.0+ because two visually-similar
