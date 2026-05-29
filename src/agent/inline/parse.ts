@@ -49,6 +49,10 @@ export const REPLACEMENT_END_VARIANTS: readonly string[] = [
   '<<<REPLACEMENT/>>>',
   '<<<END_REPLACEMENT>>>',
   '<<</END>>>',
+  // Small models occasionally echo the SEL closing marker from the input
+  // contract instead of the REPLACEMENT closing marker. Treat as end so
+  // it never reaches the user's editable.
+  '[[/SEL]]',
 ];
 
 /** Scan `text` for the earliest end-marker variant. Returns the match
@@ -93,7 +97,19 @@ export function extractReplacement(raw: string): string {
     } catch { /* … */ }
   }
   const out = trimmed.replace(/^(here'?s|here is|sure[,!]?|certainly[,!]?)\b[^\n]*\n+/i, '');
-  return out.trim();
+  // Belt for the no-start-marker fallback path: if the model echoed any of
+  // the SEL input markers (or REPLACEMENT_END variant) without ever opening
+  // <<<REPLACEMENT>>>, strip them so they don't leak into the editable.
+  return stripStrayMarkers(out).trim();
+}
+
+function stripStrayMarkers(s: string): string {
+  let out = s.replace(/\[\[\/?SEL\]\]/g, '');
+  for (const m of REPLACEMENT_END_VARIANTS) {
+    out = out.split(m).join('');
+  }
+  out = out.split(REPLACEMENT_START).join('');
+  return out;
 }
 
 /** Strip the single leading + trailing newline the marker format

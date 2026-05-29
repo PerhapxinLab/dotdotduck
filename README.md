@@ -243,8 +243,7 @@ dotdotduck is in active development. It works, but expect rough edges. A few thi
 
 Current stack:
 
-- **WebAgent** loop → OpenAI `gpt-5.4-mini`
-- **InlineAgent** + voice transcript cleanup → OpenAI `gpt-5.4-nano`
+- **WebAgent** loop, **InlineAgent**, and voice transcript cleanup → OpenAI `gpt-5.4-nano`
 - **Speech-to-text** → the browser's Web Speech API (the SDK default; fine for demo, no SLA — production hosts wire `transcribe` with Whisper / Deepgram / etc.)
 
 None of this is baked into `@perhapxin/dddk`. The package itself ships LLM provider adapters (OpenAI / Google / proxy, plus any OpenAI-compatible vendor via `baseURL` — e.g. DeepSeek, Qwen, OpenRouter) and a `transcribe(audio)` extension point. Bring your own keys, models, and ASR vendor — the SDK doesn't lock you in.
