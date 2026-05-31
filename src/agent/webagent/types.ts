@@ -93,6 +93,10 @@ export interface AgentSession {
   currentPage: string;
   startedAt: number;
   updatedAt: number;
+  /** Master plan produced by `WebAgentConfig.planner` at run start, if
+   *  any. The webagent's per-turn envelope reads `todos` from here; the
+   *  loop mutates via `todo_adjust` (remove / replace operations only). */
+  plan?: import('../plan/types').TaskPlan;
 }
 
 export type AgentStatus =
@@ -240,6 +244,23 @@ export interface WebAgentConfig {
   /** LLM source — single `LLMProvider` or `LLMRouter` (per-role). */
   llm: LLMSource;
   locale?: string;
+
+  /**
+   * Optional pre-loop planning callback. When set, the webagent makes a
+   * single planning call BEFORE entering the turn loop, expects a
+   * `TaskPlan` ({ task_summary, todos[] }), stores it on the session,
+   * and switches the per-turn envelope to the planned variant
+   * (turn_planning + todo_adjust + actions instead of memory +
+   * todos_remaining + actions). Typical wiring is `(input) =>
+   * dddk.plan.makeTodos(input)` so the Plan module's strategic
+   * appendSystemPrompt drives the plan shape.
+   */
+  planner?: (input: import('../plan/types').PlanInput) => Promise<import('../plan/types').TaskPlan>;
+
+  /** When true (and `planner` is set), the resulting `task_summary` is
+   *  announced to the user via a subtitle bar narrate before the loop
+   *  begins. Default false — silent execution. */
+  announcePlan?: boolean;
   /** Hard cap on tool-call iterations per task. Default 30. */
   maxSteps?: number;
   /** Consecutive LLM-call failures before bailing. Default 3. */

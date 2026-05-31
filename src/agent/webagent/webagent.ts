@@ -611,6 +611,64 @@ export class WebAgent {
     if (!this.session) return;
     let errorCount = 0;
 
+    // ─── Planning phase (one-shot, optional) ─────────────────────
+    // When `config.planner` is set AND this session has no plan yet,
+    // run a single planning call before entering the turn loop. The
+    // resulting TaskPlan is stored on session.plan so subsequent turns
+    // can render `# Master plan` in the system prompt and mutate via
+    // todo_adjust. Planning is fail-loud: a thrown error propagates to
+    // the consumer's runStream() iterator. Hosts handle fallback.
+    if (this.config.planner && !this.session.plan) {
+      this.setStatus('thinking');
+      yield { kind: 'thinking' };
+      const latestUser = lastUserTurn(this.session);
+      const taskText = latestUser?.text ?? '';
+      console.info('[dddk webagent] planning start', { task: taskText });
+      try {
+        const plan = await this.config.planner({
+          task: taskText,
+          sitemap: this.config.sitemap,
+          brand: this.config.brand,
+          persona: this.config.persona,
+          locale: this.config.locale,
+          selection: this.currentSelection ?? undefined,
+        });
+        this.session.plan = plan;
+        this.persistSession();
+        console.info('[dddk webagent] planning result', {
+          task_summary: plan.task_summary,
+          todoCount: plan.todos.length,
+          todos: plan.todos,
+        });
+        if (this.config.announcePlan && plan.task_summary?.trim()) {
+          yield {
+            kind: 'text-delta',
+            delta: plan.task_summary.trim() + '\n',
+          };
+          // Wait for user ack before turn 1 starts — otherwise the
+          // first turn's confirm dialog (navigate, destructive tool)
+          // covers the announce before the user can read it.
+          if (this.pauseHandler) {
+            this.setStatus('waiting');
+            const pauseHint = sdkString(this.config.locale, 'agent.press_space_continue');
+            const resolution = await new Promise<string>((resolve) => {
+              this.pauseHandler!({ hint: pauseHint, resolve });
+            });
+            if (signal.aborted || resolution === '') {
+              this.setStatus('idle');
+              return;
+            }
+          }
+        }
+      } catch (err) {
+        if (signal.aborted) { this.setStatus('idle'); return; }
+        console.warn('[dddk webagent] planning failed', err);
+        yield { kind: 'error', error: err as Error, retrying: false };
+        this.setStatus('failed');
+        return;
+      }
+    }
+
     for (let stepIdx = 0; stepIdx < this.config.maxSteps; stepIdx++) {
       if (signal.aborted) { this.setStatus('idle'); return; }
 
@@ -688,19 +746,28 @@ export class WebAgent {
       // Diagnostics goal: when the agent loops on the same content the
       // user can SEE that todos_remaining never empties despite the
       // page already being fully covered in action_results.
-      const turnSummary = {
+      // Per-turn summary — fields present only when the envelope mode
+      // actually populates them. Legacy mode has `todos_remaining`;
+      // planned mode has `turn_planning` + `todo_adjust` + the live
+      // master `plan.todos`. Don't emit `undefined` placeholders.
+      const turnSummary: Record<string, unknown> = {
         turn: stepIdx + 1,
         url: this.session.currentPage,
         memory: turn.memory,
-        todos_remaining: turn.todos_remaining,
-        actions: turn.actions.map((a) => {
-          if (isNarrateAction(a)) {
-            return { narrate: a.narrate.length > 100 ? a.narrate.slice(0, 100) + '…' : a.narrate };
-          }
-          if (isTaskFinishAction(a)) return { task_finish: true };
-          return { tool: (a as { tool: string }).tool, args: (a as { args?: unknown }).args };
-        }),
       };
+      if (turn.todos_remaining !== undefined) turnSummary.todos_remaining = turn.todos_remaining;
+      if (turn.turn_planning) turnSummary.turn_planning = turn.turn_planning;
+      if (turn.todo_adjust) turnSummary.todo_adjust = turn.todo_adjust;
+      if (this.session.plan) {
+        turnSummary.master_todos = this.session.plan.todos.map((t) => `${t.id}:${t.intent}:${t.description}`);
+      }
+      turnSummary.actions = turn.actions.map((a) => {
+        if (isNarrateAction(a)) {
+          return { narrate: a.narrate.length > 100 ? a.narrate.slice(0, 100) + '…' : a.narrate };
+        }
+        if (isTaskFinishAction(a)) return { task_finish: true };
+        return { tool: (a as { tool: string }).tool, args: (a as { args?: unknown }).args };
+      });
       console.info('[dddk webagent] turn', turnSummary);
       if (typeof window !== 'undefined') {
         const w = window as unknown as { __dddkDebug?: { turnLog?: unknown[]; lastTurnResponse?: unknown; lastTurnAt?: string } };
@@ -724,7 +791,36 @@ export class WebAgent {
       // narrates carry the closing message. We only normalize away when
       // the model has NEITHER an explicit task_finish NOR any narrate —
       // i.e. it left orphan tool calls without a closing signal.
-      if (turn.todos_remaining.length === 0 && turn.actions.length > 0) {
+      // Apply todo_adjust mutations BEFORE dispatching actions — the
+      // adjustments describe what the PREVIOUS turn completed / how the
+      // plan needs to morph based on observed reality. So the master
+      // plan is up-to-date before this turn's actions[] runs.
+      if (turn.todo_adjust && this.session.plan) {
+        if (turn.todo_adjust.remove?.length) {
+          for (const id of turn.todo_adjust.remove) {
+            this.session.plan.todos = this.session.plan.todos.filter((t) => t.id !== id);
+          }
+        }
+        if (turn.todo_adjust.replace?.length) {
+          for (const r of turn.todo_adjust.replace) {
+            const idx = this.session.plan.todos.findIndex((t) => t.id === r.id);
+            if (idx < 0) continue;
+            this.session.plan.todos[idx] = {
+              ...this.session.plan.todos[idx]!,
+              description: r.new_description,
+              ...(r.new_intent ? { intent: r.new_intent } : {}),
+            };
+          }
+        }
+        this.persistSession();
+      }
+
+      // In legacy mode `todos_remaining` carries the plan; in planned
+      // mode it's absent (master plan lives on session.plan.todos and
+      // mutates via `todo_adjust`). Only apply this normalisation in
+      // legacy mode — planned mode trusts the schema's structural
+      // distinction.
+      if (turn.todos_remaining !== undefined && turn.todos_remaining.length === 0 && turn.actions.length > 0) {
         const hasTaskFinish = turn.actions.some((a) => isTaskFinishAction(a));
         const hasNarrate = turn.actions.some((a) => isNarrateAction(a));
         if (!hasTaskFinish && !hasNarrate) {
@@ -873,41 +969,27 @@ export class WebAgent {
           // so the model never has to manage cadence with explicit `pause`
           // tool calls.
           //
-          // Three skip conditions:
+          // We deliberately DO NOT skip the pause when the next action is
+          // a confirm-required tool (navigate, destructive). Earlier the
+          // skip was an optimisation against "two Space presses for one
+          // decision", but in practice the confirm dialog covers the
+          // narrate the user is still reading. Better: pause first so
+          // the user acks the narrate context, THEN show the confirm.
           //
-          // 1. The very next action is a confirm-required tool (navigate,
-          //    destructive). The confirm modal IS the next pause point;
-          //    stacking would force two Space presses for one decision.
+          // One skip condition kept: focus inside the open palette's
+          // input. The palette is the one place where the user is
+          // expected to be typing INTO the SDK's own surface while the
+          // agent is running (e.g. the agent opened the palette to let
+          // the user pick / fill). Skipping pause here lets the loop
+          // continue while the user types.
           //
-          // 2. Focus is inside the open command palette's input AND user
-          //    is in editing state. Palette is the one place where the
-          //    user is expected to be typing INTO the SDK's own surface
-          //    while the agent is running (e.g. the agent opened the
-          //    palette to let the user pick / fill). Skipping pause here
-          //    lets the agent loop continue while the user types.
-          //
-          //    Deliberately NOT skipped for page-level inputs — the user
-          //    can leave a page form temporarily, blur it, and Space then
-          //    advances the agent normally. Always-skip would mean Space
-          //    "has no effect" when the user finishes filling, which is
-          //    confusing.
-          const next = turn.actions[ai + 1];
+          // Deliberately NOT skipped for page-level inputs — the user
+          // can leave a page form temporarily, blur it, and Space then
+          // advances the agent normally. Always-skip would mean Space
+          // "has no effect" when the user finishes filling, which is
+          // confusing.
           let skipPause = false;
-          if (next && isToolAction(next)) {
-            const matched = this.actions.get(next.tool);
-            const reqConfirm = matched?.requireConfirmation;
-            if (reqConfirm === true) {
-              skipPause = true;
-            } else if (typeof reqConfirm === 'function') {
-              // Function form: peek-evaluate without dispatching. Best-effort
-              // since the predicate may rely on context the runtime can't
-              // synthesize cheaply — default to skipping pause if unsure.
-              skipPause = true;
-            } else if (isDestructiveByPattern(next.tool, this.destructivePatterns)) {
-              skipPause = true;
-            }
-          }
-          if (!skipPause && isUserEditingInPalette()) {
+          if (isUserEditingInPalette()) {
             skipPause = true;
           }
 
@@ -1448,6 +1530,7 @@ export class WebAgent {
     envParts.push(renderPageStateBlock({
       currentPage: this.session.currentPage,
       pageContext,
+      plan: this.session.plan,
     }));
     const envText = envParts.join('\n\n');
     if (screenshotImages.length > 0) {
@@ -1526,11 +1609,15 @@ export class WebAgent {
     return refs;
   }
 
+  private hasPlan(): boolean {
+    return !!this.session?.plan;
+  }
+
   private buildToolDefinitions(): ToolDefinition[] {
     if (this.config.toolDefinitions) return this.config.toolDefinitions;
 
     if (this.config.cotMode) {
-      return [buildAgentTurnTool(this.buildCotToolRefs())];
+      return [buildAgentTurnTool(this.buildCotToolRefs(), { planned: this.hasPlan() })];
     }
 
     // Classic (non-CoT) mode: each action becomes a top-level tool.

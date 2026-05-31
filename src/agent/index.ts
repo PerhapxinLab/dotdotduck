@@ -102,3 +102,20 @@ export {
   type MemoryOpts,
   type MemorySearchOpts,
 } from './memory';
+
+// ─── Plan (LLM-mediated structured artifact module) ────────────────
+// Standalone module — owns `todos` (used by webagent.planner) +
+// `markdown` artifacts. Attach with `plan.attachTo(dddk)` then wire
+// `webagent.planner: (input) => plan.makeTodos(input)`.
+export {
+  Plan,
+  TodosArtifact,
+  MarkdownArtifact,
+  type PlanConfig,
+  type PlanInput,
+  type TaskPlan,
+  type TodoItem,
+  type MarkdownDoc,
+  type PlanSnapshot,
+  type PlanStorageAdapter,
+} from './plan';

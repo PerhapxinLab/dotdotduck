@@ -80,6 +80,9 @@ export {
   AgentCursor,
   Memory,
   createMemory,
+  Plan,
+  TodosArtifact,
+  MarkdownArtifact,
   border,
   highlight,
   spotlight,
@@ -95,6 +98,15 @@ export {
   listAuthGatedPaths,
   SAAS_SITEMAP_TEMPLATE,
   SitemapLearner,
+} from './agent';
+export type {
+  PlanConfig,
+  PlanInput,
+  TaskPlan,
+  TodoItem,
+  MarkdownDoc,
+  PlanSnapshot,
+  PlanStorageAdapter,
 } from './agent';
 export type {
   WebAgentConfig,

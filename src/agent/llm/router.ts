@@ -20,7 +20,9 @@ export type LLMRole =
   /** Inline AI (input-field editing, short single-shot LLM calls). Falls back to `webagent`. */
   | 'inline'
   /** Voice transcript cleanup (remove fillers, fix punctuation). Falls back to `webagent`. */
-  | 'voiceCleanup';
+  | 'voiceCleanup'
+  /** Plan module — one-shot planning calls + markdown LLM edits. Falls back to `webagent`. */
+  | 'plan';
 
 export interface LLMRouter {
   /** Required. Default LLM for the webagent loop. All other roles fall back here. */
@@ -31,6 +33,10 @@ export interface LLMRouter {
   inline?: LLMProvider;
   /** Optional. Tiny model for voice transcript cleanup. */
   voiceCleanup?: LLMProvider;
+  /** Optional. Planning-stage model — runs once per agent run before the
+   *  turn loop. Can be the same as `webagent` (default) or a larger model
+   *  if planning quality matters more than per-turn cost. */
+  plan?: LLMProvider;
 }
 
 export type LLMSource = LLMProvider | LLMRouter;
@@ -59,5 +65,7 @@ export function resolveLLM(source: LLMSource, role: LLMRole): LLMProvider {
       return source.inline ?? source.webagent;
     case 'voiceCleanup':
       return source.voiceCleanup ?? source.webagent;
+    case 'plan':
+      return source.plan ?? source.webagent;
   }
 }

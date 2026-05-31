@@ -385,14 +385,35 @@ export function renderSelectionBlock(sel: SelectionContext): string {
 export function renderPageStateBlock(opts: {
   currentPage: string;
   pageContext: string;
+  plan?: import('../plan/types').TaskPlan;
 }): string {
-  return [
+  const parts: string[] = [
     '# Current page',
     `- URL: ${opts.currentPage}`,
-    '',
-    '# Page DOM',
-    opts.pageContext,
-  ].join('\n');
+  ];
+  if (opts.plan) {
+    parts.push('', renderMasterPlan(opts.plan));
+  }
+  parts.push('', '# Page DOM', opts.pageContext);
+  return parts.join('\n');
+}
+
+/** Render the live master plan for the per-turn user message. Shows the
+ *  task summary + the CURRENT todos list (already pruned by any prior
+ *  `todo_adjust.remove`) so the model writes `turn_planning.this_turn_does`
+ *  anchored to a real id and emits `todo_adjust.remove` on completion. */
+function renderMasterPlan(plan: import('../plan/types').TaskPlan): string {
+  const lines: string[] = ['# Master plan'];
+  lines.push(`Task: ${plan.task_summary}`);
+  lines.push('Todos remaining (head first):');
+  for (const t of plan.todos) {
+    const turnHint = typeof t.expected_turn === 'number' ? ` [expected turn ${t.expected_turn}]` : '';
+    lines.push(`- ${t.id} (${t.intent}): ${t.description}${turnHint}`);
+  }
+  if (plan.todos.length === 0) {
+    lines.push('- (empty — emit `{task_finish: true}` and end the run)');
+  }
+  return lines.join('\n');
 }
 
 /**
