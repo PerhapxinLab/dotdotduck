@@ -33,7 +33,7 @@ import type {
   SelectionContext,
   AgentStatus,
 } from './types';
-import type { LLMMessage, ToolDefinition, ToolCall } from '../llm/types';
+import type { CompleteResult, LLMMessage, ToolDefinition, ToolCall } from '../llm/types';
 import type { StreamingProvider, StreamChunk } from '../llm/stream';
 import { resolveLLM } from '../llm/router';
 import {
@@ -79,6 +79,25 @@ const DEFAULT_MAX_ERRORS = 3;
 const DEFAULT_LLM_TIMEOUT_MS = 60_000;
 const DEFAULT_CONTINUITY_MS = 5 * 60 * 1000;
 
+/**
+ * Per-LLM-call performance sample emitted to the orchestrator after each
+ * streaming call. The orchestrator decorates with `runId` and forwards as
+ * an `agent_llm_call` IntentEvent for the analytics dashboard.
+ */
+export interface LlmCallInfo {
+  role: 'webagent' | 'webagentWithSelection';
+  /** Time-to-first-token in ms (request issued → first non-empty delta). */
+  ttftMs: number;
+  /** Total stream wall-time in ms (request issued → final chunk). */
+  durationMs: number;
+  /** Provider-reported output tokens (if available). */
+  outputTokens?: number;
+  /** Provider-reported input tokens (if available). */
+  inputTokens?: number;
+  /** Resolved model id, when the provider exposes it. */
+  model?: string;
+}
+
 export class WebAgent {
   private config: WebAgentConfig & Required<Pick<
     WebAgentConfig,
@@ -100,11 +119,19 @@ export class WebAgent {
    *  the webagent awaits it before the DOM-settle window — so the next
    *  `readDOM()` sees the new page, not the old one half-replaced. */
   private navigateBridge: ((path: string) => void | Promise<void>) | null = null;
+  /** Fires once per LLM streaming call so the orchestrator can emit
+   *  an `agent_llm_call` IntentEvent with TTFT / tokens-per-sec. */
+  private llmCallListener: ((info: LlmCallInfo) => void) | null = null;
   /** Host signalled "end continuity now" — next runStream() starts fresh. */
   private continuityEnded = false;
 
   constructor(config: WebAgentConfig) {
     this.config = {
+      // Locale auto-detect from navigator.language is fine to PROVIDE as
+      // a default. The system prompt framing (see prompt.ts language
+      // section) makes clear the user's actual input language overrides
+      // this hint on every turn — so the locale is "starting guess",
+      // not a hard signal that biases the model.
       locale:
         config.locale ??
         ((typeof navigator !== 'undefined' && navigator.language?.startsWith('zh')
@@ -171,6 +198,11 @@ export class WebAgent {
    *  awaits it before declaring the navigation complete. */
   setNavigateBridge(fn: (path: string) => void | Promise<void>): void {
     this.navigateBridge = fn;
+  }
+
+  /** Orchestrator wires this to emit `agent_llm_call` IntentEvents. */
+  setLlmCallListener(fn: (info: LlmCallInfo) => void): void {
+    this.llmCallListener = fn;
   }
 
   getSession(): AgentSession | null {
@@ -1159,6 +1191,14 @@ export class WebAgent {
     const timer = setTimeout(() => timeoutCtrl.abort('llm timeout'), this.config.llmTimeoutMs);
     const composedSignal = composeSignals(signal, timeoutCtrl.signal);
 
+    // Per-call perf instrumentation. Consumer-side measurement so it
+    // reflects what the agent actually saw, not what the producer cached.
+    const startedAt = Date.now();
+    let firstDeltaAt: number | undefined;
+    let usage: { promptTokens: number; completionTokens: number } | undefined;
+    const modelId = (llm as { name?: string; model?: string }).model
+      ?? (llm as { name?: string }).name;
+
     try {
       if (hasStreaming) {
         const handle = streamProvider.streamComplete!({ ...completeOpts, signal: composedSignal });
@@ -1170,7 +1210,10 @@ export class WebAgent {
           if (chunk.text.length > lastText.length) {
             const newDelta = chunk.text.slice(lastText.length);
             lastText = chunk.text;
-            if (newDelta) yield { kind: 'text-delta', delta: newDelta };
+            if (newDelta) {
+              if (firstDeltaAt === undefined) firstDeltaAt = Date.now();
+              yield { kind: 'text-delta', delta: newDelta };
+            }
           }
           if (chunk.toolCalls) {
             for (const tc of chunk.toolCalls) {
@@ -1183,15 +1226,40 @@ export class WebAgent {
           }
           if (chunk.error) throw chunk.error;
         }
+        // After iteration, await the handle (already resolved) to grab
+        // usage. Closure state is frozen at this point so the read is safe.
+        try {
+          const final = await (handle as unknown as Promise<CompleteResult>);
+          usage = final.usage;
+        } catch { /* error already surfaced via chunk.error above */ }
       } else {
         const result = await llm.complete({ ...completeOpts, signal: composedSignal });
-        if (result.content) yield { kind: 'text-delta', delta: result.content };
+        if (result.content) {
+          if (firstDeltaAt === undefined) firstDeltaAt = Date.now();
+          yield { kind: 'text-delta', delta: result.content };
+        }
         if (result.toolCalls) {
           for (const tc of result.toolCalls) yield { kind: 'tool-call', call: tc };
         }
+        usage = result.usage;
       }
     } finally {
       clearTimeout(timer);
+      const endedAt = Date.now();
+      if (this.llmCallListener && firstDeltaAt !== undefined) {
+        const ttftMs = firstDeltaAt - startedAt;
+        const durationMs = endedAt - startedAt;
+        try {
+          this.llmCallListener({
+            role,
+            ttftMs,
+            durationMs,
+            outputTokens: usage?.completionTokens,
+            inputTokens: usage?.promptTokens,
+            model: modelId,
+          });
+        } catch { /* listener errors must never break the agent loop */ }
+      }
     }
   }
 

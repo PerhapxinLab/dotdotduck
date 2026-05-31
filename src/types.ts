@@ -123,7 +123,19 @@ export type DddkEventName =
 export type IntentEvent =
   | { kind: 'palette_activated'; itemId: string; arg?: string; selectionText?: string; attachmentsCount: number; timestamp: number }
   | { kind: 'agent_asked'; question: string; timestamp: number }
-  | { kind: 'agent_answered'; question?: string; answer: string; via: 'gesture' | 'voice' | 'text' | 'mobile-button'; timestamp: number }
+  | { kind: 'agent_answered'; question?: string; answer: string; via: 'gesture' | 'voice' | 'text' | 'mobile-button'; latencyMs?: number; timestamp: number }
+  /**
+   * One emit per LLM streaming call inside an agent run. Carries
+   * per-call speed metrics for the dashboard:
+   *   - `ttftMs`     time-to-first-token (request sent → first delta)
+   *   - `durationMs` total stream wall-time (request sent → last delta)
+   *   - `outputTokens` provider-reported output token count (when available)
+   *   - `inputTokens`  provider-reported input token count
+   *   - `tokensPerSec` outputTokens × 1000 / durationMs (host-computed; 0 if missing)
+   * `runId` joins back to the agent run. `model` is the resolved provider
+   * model id when available, otherwise omitted.
+   */
+  | { kind: 'agent_llm_call'; runId: string; role: 'webagent' | 'webagentWithSelection'; ttftMs: number; durationMs: number; outputTokens?: number; inputTokens?: number; tokensPerSec?: number; model?: string; timestamp: number }
   | { kind: 'confirm_action'; actionName: string; params: Record<string, unknown>; approved: boolean; timestamp: number }
   | { kind: 'voice_captured'; text: string; cleanedText?: string; timestamp: number }
   | { kind: 'selection_used'; selectionText: string; selectorHint?: string; itemId: string; timestamp: number }

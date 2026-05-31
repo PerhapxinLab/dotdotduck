@@ -63,6 +63,12 @@ export function buildStream(opts: BuildStreamOptions): StreamHandle {
   let waiters: Array<(c: StreamChunk | null) => void> = [];
   let done = false;
   let pendingError: unknown;
+  // TTFT instrumentation. `startedAt` is sampled at buildStream() return,
+  // which is the moment the host issued the call. `firstDeltaAt` is the
+  // first non-empty text delta — TTFT = firstDeltaAt − startedAt.
+  const startedAt = Date.now();
+  let firstDeltaAt: number | undefined;
+  let endedAt = startedAt;
 
   // Drive the producer in the background.
   let producerErrored = false;
@@ -80,10 +86,14 @@ export function buildStream(opts: BuildStreamOptions): StreamHandle {
           }
         }
         if (evt.delta !== undefined) {
+          if (evt.delta.length > 0 && firstDeltaAt === undefined) {
+            firstDeltaAt = Date.now();
+          }
           text += evt.delta;
         }
         if (evt.usage) usage = evt.usage;
         if (evt.finishReason) finishReason = evt.finishReason;
+        endedAt = Date.now();
 
         const chunk: StreamChunk = {
           delta: evt.delta ?? '',
@@ -178,6 +188,7 @@ export function buildStream(opts: BuildStreamOptions): StreamHandle {
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       usage,
       finishReason: finishReason ?? 'stop',
+      streamMetrics: { startedAt, firstDeltaAt, endedAt },
     };
   })();
 

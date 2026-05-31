@@ -1122,19 +1122,44 @@ export class DotDotDuck {
     // this BEFORE the SPA settle window).
     agent.setNavigateBridge((path: string) => this.navigate(path));
 
+    // Per-LLM-call performance sample → analytics dashboard. The webagent
+    // measures TTFT and total stream duration locally; we tack on runId
+    // and compute tokens-per-sec from the provider-reported output tokens.
+    agent.setLlmCallListener((info) => {
+      if (!this.currentRunId) return;
+      const tokensPerSec = info.outputTokens && info.durationMs > 0
+        ? Math.round((info.outputTokens * 1000) / info.durationMs)
+        : undefined;
+      this.emitIntent({
+        kind: 'agent_llm_call',
+        runId: this.currentRunId,
+        role: info.role,
+        ttftMs: info.ttftMs,
+        durationMs: info.durationMs,
+        outputTokens: info.outputTokens,
+        inputTokens: info.inputTokens,
+        tokensPerSec,
+        model: info.model,
+        timestamp: Date.now(),
+      });
+    });
+
     // ask_user / ask_user_choice are dispatched via the action handler;
     // the handler calls back into these to render the host UI.
     agent.setAskUserHandler(({ question, resolve }) => {
-      this.emitIntent({ kind: 'agent_asked', question, timestamp: Date.now() });
+      const askedAt = Date.now();
+      this.emitIntent({ kind: 'agent_asked', question, timestamp: askedAt });
       this.subtitle.show({
         text: question,
         type: 'agent',
         onAccept: () => {
-          this.emitIntent({ kind: 'agent_answered', question, answer: 'yes', via: 'gesture', timestamp: Date.now() });
+          const now = Date.now();
+          this.emitIntent({ kind: 'agent_answered', question, answer: 'yes', via: 'gesture', latencyMs: now - askedAt, timestamp: now });
           resolve('yes');
         },
         onReject: () => {
-          this.emitIntent({ kind: 'agent_answered', question, answer: 'no', via: 'gesture', timestamp: Date.now() });
+          const now = Date.now();
+          this.emitIntent({ kind: 'agent_answered', question, answer: 'no', via: 'gesture', latencyMs: now - askedAt, timestamp: now });
           resolve('no');
         },
         onCancel: () => resolve(''),
@@ -1142,18 +1167,21 @@ export class DotDotDuck {
     });
 
     agent.setAskUserChoiceHandler(({ question, options, allowFreeText, resolve }) => {
-      this.emitIntent({ kind: 'agent_asked', question, timestamp: Date.now() });
+      const askedAt = Date.now();
+      this.emitIntent({ kind: 'agent_asked', question, timestamp: askedAt });
       this.subtitle.showChoice({
         question,
         options,
         allowFreeText,
         onChoose: (value, index) => {
+          const now = Date.now();
           this.emitIntent({
             kind: 'agent_answered',
             question,
             answer: value,
             via: index === -1 ? 'text' : 'gesture',
-            timestamp: Date.now(),
+            latencyMs: now - askedAt,
+            timestamp: now,
           });
           resolve(value);
         },

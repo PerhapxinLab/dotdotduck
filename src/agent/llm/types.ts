@@ -56,6 +56,16 @@ export interface CompleteResult {
   toolCalls?: ToolCall[];
   usage?: { promptTokens: number; completionTokens: number };
   finishReason: 'stop' | 'tool_calls' | 'length' | 'content_filter';
+  /**
+   * Streaming-only timing. Present when the call went through
+   * `streamComplete()` and the stream produced at least one delta. All
+   * values are epoch ms (`Date.now()`).
+   *   - `startedAt`     — first call to `produce()`
+   *   - `firstDeltaAt`  — first non-empty text delta (TTFT = this - startedAt)
+   *   - `endedAt`       — terminal chunk (last delta or finish)
+   * Non-streaming `complete()` calls omit this field.
+   */
+  streamMetrics?: { startedAt: number; firstDeltaAt?: number; endedAt: number };
 }
 
 export type LLMRole = 'system' | 'user' | 'assistant' | 'tool';
