@@ -39,8 +39,21 @@ const voice = new VoiceModule({
   unsupportedLabel: '此瀏覽器不支援語音輸入',
   captureTimeoutMs: 30000,      // 單次 capture 的上限
   autoSpeakSubtitles: false,    // 設 true 後每次 subtitle.show() 都會 TTS 念出來
+  skipEmptyTranscript: true,    // 預設 true — captureOnce 對空語音 / timeout / 不支援都回 null
 });
 ```
+
+### `skipEmptyTranscript`（預設 `true`）
+
+使用者長按 Space 但沒講話就放開、STT 超時、瀏覽器不支援語音 — 這幾種情況 `captureOnce` 都回 `null` 而不是 `''`。host 一條 guard 就能擋掉所有「沒抓到東西」的情境：
+
+```ts
+const text = await voice.captureOnce(dddk.subtitle);
+if (!text) return;          // null 跟空字串都擋住
+dddk.startAgent(text);      // text 已經被 trim 過
+```
+
+關掉（`skipEmptyTranscript: false`）— `captureOnce` 會回原始轉錄結果（包括空字串）。host 要自己做 `.trim()` + 早 return。除非你真的想讓每次靜默放手都跑下游邏輯，否則沒必要關。
 
 ## TTS 設定（`TTSConfig`）
 

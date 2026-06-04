@@ -29,6 +29,15 @@ export interface VoiceModuleConfig {
   listeningLabel?: string;
   /** UI label shown when the browser doesn't support STT. */
   unsupportedLabel?: string;
+  /**
+   * Default `true`. When enabled, `captureOnce` returns `null` for any
+   * capture that resolves to whitespace-only text — empty utterance,
+   * timeout, browser-unsupported, denied permission. Hosts can then write
+   * a single `if (!text) return;` guard instead of repeating `.trim()`
+   * checks everywhere. Set `false` if you want the raw transcript
+   * (including empty / whitespace-only) at the host boundary.
+   */
+  skipEmptyTranscript?: boolean;
 }
 
 export class VoiceModule {
@@ -38,6 +47,7 @@ export class VoiceModule {
   private captureTimeoutMs: number;
   private listeningLabel: string;
   private unsupportedLabel: string;
+  private skipEmptyTranscript: boolean;
 
   constructor(config: VoiceModuleConfig = {}) {
     this.stt = new Voice({
@@ -49,17 +59,28 @@ export class VoiceModule {
     this.captureTimeoutMs = config.captureTimeoutMs ?? 30_000;
     this.listeningLabel = config.listeningLabel ?? 'Listening — release to send';
     this.unsupportedLabel = config.unsupportedLabel ?? 'This browser does not support voice input';
+    this.skipEmptyTranscript = config.skipEmptyTranscript ?? true;
   }
 
-  /** Helper: capture one utterance, return cleaned text. */
-  async captureOnce(subtitle?: Subtitle): Promise<string> {
+  /**
+   * Capture one utterance, return the trimmed transcript.
+   *
+   * Default behaviour (`skipEmptyTranscript: true`): empty / whitespace
+   * / timeout / unsupported all resolve to `null`. Hosts write a single
+   * `if (!text) return;` guard instead of repeating `.trim()` checks
+   * and accidentally feeding empty queries to the webagent.
+   *
+   * Disable with `skipEmptyTranscript: false` to receive the raw
+   * transcript at the host boundary (empty string for nothing captured).
+   */
+  async captureOnce(subtitle?: Subtitle): Promise<string | null> {
     if (!this.stt.isSupported()) {
       subtitle?.show({
         text: this.unsupportedLabel,
         type: 'info',
         autoHide: 2000,
       });
-      return '';
+      return this.skipEmptyTranscript ? null : '';
     }
 
     return new Promise((resolve) => {
@@ -71,11 +92,21 @@ export class VoiceModule {
         if (timer != null) clearTimeout(timer);
         subtitle?.hideIndicator();
       };
+      // Normalise the resolved value against the skipEmptyTranscript flag.
+      // raw → null when empty (and skipping), trimmed string otherwise.
+      const finish = (raw: string): void => {
+        const trimmed = raw.trim();
+        if (this.skipEmptyTranscript) {
+          resolve(trimmed.length === 0 ? null : trimmed);
+        } else {
+          resolve(raw);
+        }
+      };
       const handler = (text: unknown) => {
         if (settled) return;
         settled = true;
         cleanup();
-        resolve(String(text ?? ''));
+        finish(String(text ?? ''));
       };
       // The STT engine fires `start` when the mic is actually captured —
       // that's AFTER the permission grant + browser-side warmup. We
@@ -98,7 +129,7 @@ export class VoiceModule {
         settled = true;
         cleanup();
         try { this.stt.stop(); } catch { /* ignore */ }
-        resolve('');
+        finish('');
       }, this.captureTimeoutMs);
       subtitle?.showIndicator('processing');
       this.stt.start();

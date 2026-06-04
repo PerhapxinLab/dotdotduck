@@ -39,8 +39,21 @@ const voice = new VoiceModule({
   unsupportedLabel: 'This browser does not support voice input',
   captureTimeoutMs: 30000,      // upper bound for a single capture
   autoSpeakSubtitles: false,    // when true, every subtitle.show() is also TTS-spoken
+  skipEmptyTranscript: true,    // default true — captureOnce returns null for empty / timeout / unsupported
 });
 ```
+
+### `skipEmptyTranscript` (default `true`)
+
+When the user holds Space and releases without speaking — or the STT engine times out, or the browser doesn't support voice — `captureOnce` resolves to `null` instead of `''`. Hosts can write one guard:
+
+```ts
+const text = await voice.captureOnce(dddk.subtitle);
+if (!text) return;          // covers null + empty
+dddk.startAgent(text);      // text is already trimmed
+```
+
+Without the flag (`skipEmptyTranscript: false`), `captureOnce` returns the raw transcript including empty / whitespace-only strings; hosts must do their own `.trim()` + early-return. Set this to `false` only if you genuinely want every silent release to flow through your downstream code.
 
 ## TTS config (`TTSConfig`)
 
