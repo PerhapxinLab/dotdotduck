@@ -1,6 +1,6 @@
 # dotdotduck — 語音 I/O
 
-> Speech-to-text（聽用戶） + Text-to-speech（念給用戶聽）。兩個 opt-in class — `Voice`（STT）跟 `TTS`，搭配 `VoiceModule` 包成一份方便使用。Host 自己把它們接到 space 手勢跟字幕條；SDK 不會自動掛載任何一個。
+> Speech-to-text（聽使用者） + Text-to-speech（念給使用者聽）。兩個 opt-in class — `Voice`（STT）跟 `TTS`，搭配 `VoiceModule` 包成一份方便使用。Host 自己把它們接到 space 手勢跟字幕條；SDK 不會自動掛載任何一個。
 
 ## 整合架構
 
@@ -89,14 +89,14 @@ dddk.startAgent(text, { selection: { text, elements, images } })
 
 ## 預熱 mic（`Voice.warmUp` / `VoiceModule.warmUp`）
 
-第一次 call `voice.start()` 會串： 權限對話框（如果還沒授權） → `getUserMedia`（冷啟約 300–800ms） → Web Speech 對 Google STT 做 TLS handshake（約 200–500ms）。實際情況是用戶常常 space 都鬆開了麥才開始錄。在任何不相關的用戶手勢（pointerdown / keydown）裡 call `warmUp()`，可以把這段冷啟挪離語音手勢的關鍵路徑：
+第一次 call `voice.start()` 會串： 權限對話框（如果還沒授權） → `getUserMedia`（冷啟約 300–800ms） → Web Speech 對 Google STT 做 TLS handshake（約 200–500ms）。實際情況是使用者常常 space 都鬆開了麥才開始錄。在任何不相關的使用者手勢（pointerdown / keydown）裡 call `warmUp()`，可以把這段冷啟挪離語音手勢的關鍵路徑：
 
 ```ts
 const tryWarmUp = () => voice.warmUp().catch(() => { /* 拒絕 — 安靜跳過 */ });
 
 if (navigator.permissions?.query) {
   navigator.permissions.query({ name: 'microphone' as PermissionName }).then((s) => {
-    if (s.state === 'granted') tryWarmUp();    // 回訪用戶 — 立刻熱身
+    if (s.state === 'granted') tryWarmUp();    // 回訪使用者 — 立刻熱身
   });
 }
 window.addEventListener('pointerdown', tryWarmUp, { capture: true, once: true });
@@ -133,7 +133,7 @@ import { createWebSpeechTTSProvider } from '$lib/tts-provider';
 dddk.subtitle.setTTSProvider(createWebSpeechTTSProvider());
 ```
 
-念到一半用戶按 Escape → TTS 由 host 自己的 handler 停（內建 provider 有 `tts.stop()`）。
+念到一半使用者按 Escape → TTS 由 host 自己的 handler 停（內建 provider 有 `tts.stop()`）。
 
 ## 語音 cleanup 提示詞
 
@@ -185,7 +185,7 @@ new VoiceModule({
 ## 隱私
 
 - 預設 STT 走 Web Speech — 音訊由瀏覽器的 STT vendor 處理（Chrome/Edge 送到 Google STT；新版 macOS / iOS 的 Safari 在本機處理）。
-- 用戶主動長按 space 才會開麥 — 不會持續監聽。
+- 使用者主動長按 space 才會開麥 — 不會持續監聽。
 - mic 權限由瀏覽器管，dotdotduck 不繞過。
 - 透過 `transcribe` 走雲端 STT 是 opt-in，且只走 host 自己的 endpoint — dotdotduck 不附 vendor SDK。
 

@@ -381,15 +381,15 @@ dotdotduck.palette.addItem({
 
 ## 給 agent 看的 `description` 怎麼寫
 
-`agentTool.description` 跟一般 palette item 的 `description` agent 都會讀。寫的時候要想著 agent 的選擇邏輯，不只是用戶可發現性。
+`agentTool.description` 跟一般 palette item 的 `description` agent 都會讀。寫的時候要想著 agent 的選擇邏輯，不只是使用者可發現性。
 
-**Agent 用 description 比對用戶意圖來挑工具**。好的 description 告訴 agent：
+**Agent 用 description 比對使用者意圖來挑工具**。好的 description 告訴 agent：
 
-1. **動詞開頭**：講工具**做**什麼。「退指定訂單 ID 的款」— 不是「退款工具給用戶用」。
+1. **動詞開頭**：講工具**做**什麼。「退指定訂單 ID 的款」— 不是「退款工具給使用者用」。
 2. **具體 input / output**：`arg` 是什麼、`parameters` 接什麼、回傳什麼。模型看到 arg 形狀挑得更準。
 3. **什麼時候用、什麼時候不要用**：跟其他工具容易搞混的話加「DO NOT use for X」。Agent 對工具排序靠 description 相似度，相近的工具要解消歧義。
 4. **副作用**：會 navigate / 寄信 / 改資料庫的講清楚 — agent 才會在呼叫前 narrate「我要退這筆訂單了…」。
-5. **不要寫實作細節**：別提內部服務 / RPC 名稱 / 資料表。停在「用戶動作」這層就好。
+5. **不要寫實作細節**：別提內部服務 / RPC 名稱 / 資料表。停在「使用者動作」這層就好。
 
 ### 好 vs 壞
 
@@ -398,7 +398,7 @@ dotdotduck.palette.addItem({
 description: '退款'
 
 // 好
-description: '退指定訂單 ID 的款（`arg` 帶 ORD-NNNN 格式的訂單 ID）。送 refund 請求到 billing API，發 `refund_issued` event。會 require confirmation — runtime 會 gate 在用戶 Space-accept。用戶明確要求退某一張訂單時用；DO NOT 用在 partial refund（那個走 `partial-refund:`）。'
+description: '退指定訂單 ID 的款（`arg` 帶 ORD-NNNN 格式的訂單 ID）。送 refund 請求到 billing API，發 `refund_issued` event。會 require confirmation — runtime 會 gate 在使用者 Space-accept。使用者明確要求退某一張訂單時用；DO NOT 用在 partial refund（那個走 `partial-refund:`）。'
 ```
 
 ```ts

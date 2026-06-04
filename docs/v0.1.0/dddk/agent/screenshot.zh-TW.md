@@ -34,10 +34,10 @@ new WebAgent({
 
 | 模式 | 截什麼 | 每輪圖數 |
 |---|---|---|
-| `viewport` | 用戶當下看到的範圍 | 1 |
+| `viewport` | 使用者當下看到的範圍 | 1 |
 | `full-page` | 整個 scroll height，太高的自動切成多張 | 1–`maxImages` |
 
-`viewport` 便宜，跟用戶眼睛看到的同步。`full-page` 適合需要 agent 對整頁推理的場景（橫跨整張長表格的定價比較、整篇 docs 從頭到尾）。
+`viewport` 便宜，跟使用者眼睛看到的同步。`full-page` 適合需要 agent 對整頁推理的場景（橫跨整張長表格的定價比較、整篇 docs 從頭到尾）。
 
 ## Peer dependency
 

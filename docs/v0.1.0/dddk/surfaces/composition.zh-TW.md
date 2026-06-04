@@ -13,7 +13,7 @@ v0.1.0 新增的四個 layout piece（`Group`, `MediaCard`, `OptionGroup`, `Choi
 
 ## Pattern 1 — 上圖下選項
 
-常見的 proactive 推薦流程：先說明在推薦什麼，給三個選項，讓用戶選。
+常見的 proactive 推薦流程：先說明在推薦什麼，給三個選項，讓使用者選。
 
 ```ts
 {

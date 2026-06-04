@@ -1,6 +1,6 @@
 # 概述
 
-`@perhapxin/dddk` 是一個可直接嵌入任何 web 產品的 AI 互動層。裝套件、mount 一個 instance，你的用戶就拿到：
+`@perhapxin/dddk` 是一個可直接嵌入任何 web 產品的 AI 互動層。裝套件、mount 一個 instance，你的使用者就拿到：
 
 - **命令面板（Command palette）** — `Ctrl+K` 開啟。前綴路由、模糊搜尋、你自訂的指令。
 - **網頁 agent（Web agent）** — 用自然語言下達操作頁面的任務（點擊 / 輸入 / 導頁 / 破壞性操作前確認）。

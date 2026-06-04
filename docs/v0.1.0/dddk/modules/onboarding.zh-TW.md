@@ -1,19 +1,19 @@
 # OnboardingModule — 首次造訪自動跑導覽
 
-> 把一個普通的 `ScriptSkill` 包上「看過」持久化旗標、可選的 URL 路徑 gating、跟一個「重看導覽」的 palette 指令。用戶第一次進到符合條件的頁面時導覽會自動跑；之後沒 reset 就不會再跑。
+> 把一個普通的 `ScriptSkill` 包上「看過」持久化旗標、可選的 URL 路徑 gating、跟一個「重看導覽」的 palette 指令。使用者第一次進到符合條件的頁面時導覽會自動跑；之後沒 reset 就不會再跑。
 
 Opt-in。Module 本身只是 skill 的薄 lifecycle wrapper — 沒有自己的 DOM。
 
 ## 什麼時候用
 
-- 引導式導覽，告訴用戶 dddk 的 Ctrl+K、語音手勢、dock 在哪
+- 引導式導覽，告訴使用者 dddk 的 Ctrl+K、語音手勢、dock 在哪
 - 單一功能的首次說明（「你開啟了 InlineAgent — 這是它的用法」）
 - 鎖在某個 URL 的新版本 "what's changed" 彈窗
 
 不要用：
 
 - 導覽需要**每次** session 都跑（例如定期訓練提醒）— 改用一般 palette 指令
-- 導覽要依用戶帳號狀態分支 — 寫一個 `PanelSkill`，自己 conditional run
+- 導覽要依使用者帳號狀態分支 — 寫一個 `PanelSkill`，自己 conditional run
 - 「first-time」要的不是導覽而是一則 toast — 在 bootstrap 直接 `dddk.subtitle.show()`
 
 ## Import
@@ -55,7 +55,7 @@ const onboarding = new OnboardingModule({
 dddk.mount();
 onboarding.maybeRun((id) => dddk.skills.run(id));
 
-// 5. 加 palette 指令讓用戶可以重看
+// 5. 加 palette 指令讓使用者可以重看
 onboarding.registerOn(dddk.palette, (id) => dddk.skills.run(id));
 ```
 
@@ -73,7 +73,7 @@ onboarding.registerOn(dddk.palette, (id) => dddk.skills.run(id));
 
 ```ts
 onboarding.maybeRun(runSkill);  // 沒看過 + 路徑符合就跑
-onboarding.markSeen();          // 標記看過但不跑（例如用戶手動完成後）
+onboarding.markSeen();          // 標記看過但不跑（例如使用者手動完成後）
 onboarding.reset();              // 忘掉旗標，下次造訪會再跑
 onboarding.hasSeen();            // boolean
 onboarding.paletteCommands(run); // 回傳 PaletteItem[] 供手動 register
@@ -114,7 +114,7 @@ interface StorageAdapter {
 
 ## 「完成」的兩種方式
 
-自動跑的路徑會在 skill resolve 之後 call `markSeen()` — 所以 skill throw 不會被標記成看過，用戶下次還有一次機會。如果你的 skill 要在部分完成時就標記（例如用戶中途 dismiss），在 skill 的 step handler 裡自己 call `markSeen()`。
+自動跑的路徑會在 skill resolve 之後 call `markSeen()` — 所以 skill throw 不會被標記成看過，使用者下次還有一次機會。如果你的 skill 要在部分完成時就標記（例如使用者中途 dismiss），在 skill 的 step handler 裡自己 call `markSeen()`。
 
 ## Tear-down
 

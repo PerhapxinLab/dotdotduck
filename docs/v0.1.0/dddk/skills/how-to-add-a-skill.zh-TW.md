@@ -4,7 +4,7 @@
 
 | 型別 | 什麼時候用 | 範例 |
 |---|---|---|
-| `ScriptSkill` | 帶用戶走一輪 guided tour | `/introduce` |
+| `ScriptSkill` | 帶使用者走一輪 guided tour | `/introduce` |
 | `PromptSkill` | 把一個模板化的 prompt 丟給 LLM | `/translate-prompt` |
 | `ActionSkill` | 跑一段 TypeScript callback（不走 LLM） | `/clear-clipboard` |
 | `SurfaceSkill` | 開一個用 Piece tree 描述的表單 / dialog | `/new-customer` |
@@ -15,7 +15,7 @@
 
 ## ScriptSkill — `/introduce`
 
-一段 scripted tour。每一步顯示一段字幕，等用戶按空白鍵繼續（或設 `waitForUser: false` 自動往下走）。
+一段 scripted tour。每一步顯示一段字幕，等使用者按空白鍵繼續（或設 `waitForUser: false` 自動往下走）。
 
 ```ts
 import { DotDotDuck, type ScriptSkill } from '@perhapxin/dddk';
@@ -50,7 +50,7 @@ const dotdotduck = new DotDotDuck({
 dotdotduck.mount();
 ```
 
-用戶在 palette 打 `/introduce`（或你自己 call `dotdotduck.runSkill('introduce')`）就會跑起來。
+使用者在 palette 打 `/introduce`（或你自己 call `dotdotduck.runSkill('introduce')`）就會跑起來。
 
 ### Step API（`t` 這個參數）
 
@@ -63,7 +63,7 @@ dotdotduck.mount();
 | `t.navigate(path)` | 程式化導頁（走你的 `onNavigate` callback） |
 | `t.wait(ms)` | 暫停 `ms` 再進下一步 |
 | `t.clearOverlays()` | 清掉所有 `border` / `spotlight` 裝飾 |
-| `t.ask(question)` | 問一個問題，回 `Promise<string>` 拿用戶答案 |
+| `t.ask(question)` | 問一個問題，回 `Promise<string>` 拿使用者答案 |
 | `t.surface(surface, opts?)` | 步驟中插一個 Surface；resolve 回表單資料（取消則回 `null`） |
 
 ### Script 中途插 Surface（表單 / picker / 確認）
@@ -135,7 +135,7 @@ dotdotduck.registerSkill(translateSkill);
 //   → prompt becomes "Translate the following to es: Hello world"
 ```
 
-skill 名稱後面的參數會被串起來變成 `{args}`。想要更細的控制，skill 可以把用戶第一個 positional arg 當成具名變數讀進來 — 看 SkillRegistry 的 `parseArgs`。
+skill 名稱後面的參數會被串起來變成 `{args}`。想要更細的控制，skill 可以把使用者第一個 positional arg 當成具名變數讀進來 — 看 SkillRegistry 的 `parseArgs`。
 
 ---
 
@@ -212,7 +212,7 @@ const newCustomer: SurfaceSkill = {
 
 ## 每個 skill 自己的 preferences（設定）
 
-skill 可以宣告幾個欄位，要求用戶在第一次跑之前先設好。dotdotduck 會自動跳出設定表單，並把值存進 storage。
+skill 可以宣告幾個欄位，要求使用者在第一次跑之前先設好。dotdotduck 會自動跳出設定表單，並把值存進 storage。
 
 ```ts
 const summarizeSkill: ActionSkill = {

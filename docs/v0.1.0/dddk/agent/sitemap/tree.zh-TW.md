@@ -122,7 +122,7 @@ const text = serializeSitemap(sitemap);
 const r = resolvePath(sitemap, '/orders/12345');
 // → { path: '/orders/12345', node: ...orderDetailNode, params: { id: '12345' } }
 
-// 3. 搜尋（用戶說「我要看帳單」→ 找對應路徑）
+// 3. 搜尋（使用者說「我要看帳單」→ 找對應路徑）
 const matches = searchSitemap(sitemap, '帳單');
 // → [{ path: '/settings/billing', node: ..., params: {} }]
 

@@ -1,15 +1,15 @@
 # webagent — 安全性
 
-> **TL;DR**：browser app 的 API key 只有兩個正確答案 — (A) 用戶自己提供且只存在他自己機器上，(B) backend proxy、用戶完全看不到 key。**`.env` 不是萬靈丹** — Vite / Next.js client bundle 裡的 `import.meta.env.*` 是 build 時 inline 進去的，跟硬寫一樣不安全。
+> **TL;DR**：browser app 的 API key 只有兩個正確答案 — (A) 使用者自己提供且只存在他自己機器上，(B) backend proxy、使用者完全看不到 key。**`.env` 不是萬靈丹** — Vite / Next.js client bundle 裡的 `import.meta.env.*` 是 build 時 inline 進去的，跟硬寫一樣不安全。
 
 ## 四種 BYOK 模式（trade-off）
 
 | 模式 | client 看得到 key？ | 適合 |
 |---|---|---|
-| **A. localStorage（用戶填）** | 看得到（只在他自己機器） | 純本機 demo / 內部工具 / 用戶完全是自己人 |
-| **B. `.env` build-time inject** | **看得到（任何用戶都看得到，被 bundle 進 JS）** | ❌ **永遠不要**拿來放 client-only app 的 secret |
+| **A. localStorage（使用者填）** | 看得到（只在他自己機器） | 純本機 demo / 內部工具 / 使用者完全是自己人 |
+| **B. `.env` build-time inject** | **看得到（任何使用者都看得到，被 bundle 進 JS）** | ❌ **永遠不要**拿來放 client-only app 的 secret |
 | **C. Backend proxy** | **看不到** | production SaaS（**推薦**） |
-| **D. OAuth + 短期 token** | 短期 token，不是長期 key | 用戶用 Google / OpenAI OAuth |
+| **D. OAuth + 短期 token** | 短期 token，不是長期 key | 使用者用 Google / OpenAI OAuth |
 
 webagent 提供三種 `LLMProvider` 對應上面這些：
 
@@ -79,7 +79,7 @@ const CompleteRequest = z.object({
 });
 
 app.post('/api/llm/complete', async (req, res) => {
-  // 1. AUTH —— 驗用戶有沒有權限呼叫
+  // 1. AUTH —— 驗使用者有沒有權限呼叫
   const user = await authenticate(req);
   if (!user) return res.status(401).send('unauthorized');
 
@@ -141,12 +141,12 @@ app.post('/api/llm/complete', async (req, res) => {
 只有以下條件**全部成立**才行：
 
 - ✅ 純本機 demo（不對外）
-- ✅ 用戶 100% 知道並同意（要有明確 UI 警告）
-- ✅ 不會跨用戶 / 不會被 phishing 站偷
-- ✅ XSS 風險已經可控（你的 host 沒有任何用戶輸入 inject 的地方）
+- ✅ 使用者 100% 知道並同意（要有明確 UI 警告）
+- ✅ 不會跨使用者 / 不會被 phishing 站偷
+- ✅ XSS 風險已經可控（你的 host 沒有任何使用者輸入 inject 的地方）
 
 而且還要：
-- 顯眼的 UI 告訴用戶「key 存在你瀏覽器，請不要在公用電腦上輸入」
+- 顯眼的 UI 告訴使用者「key 存在你瀏覽器，請不要在公用電腦上輸入」
 - 提供「登出 / 清除 key」按鈕
 
 dddk demo 就是這個用法 — `dddk/example_website/` 有明確警示。**正式產品請走 ProxyProvider**。
@@ -160,7 +160,7 @@ dddk demo 就是這個用法 — `dddk/example_website/` 有明確警示。**正
 - ✅ host 註冊的 custom action 要自己負責 input validation
 
 ### XSS / CSP
-- webagent 不 eval、不對用戶內容 innerHTML（除了 immersive-translate 的 `preserveHtml` 模式 — 那是來自 LLM 翻譯）
+- webagent 不 eval、不對使用者內容 innerHTML（除了 immersive-translate 的 `preserveHtml` 模式 — 那是來自 LLM 翻譯）
 - Piece catalog 元件一定要 escape 掉所有 user-supplied props（內建 catalog 已經做了）
 - host CSP 建議：`script-src 'self'; connect-src 'self' https://api.openai.com https://generativelanguage.googleapis.com;`
 
@@ -169,7 +169,7 @@ dddk demo 就是這個用法 — `dddk/example_website/` 有明確警示。**正
 - `localStorage`（host 用 storage adapter 時）— 跨 tab 共享，要自己權衡
 
 ### Network
-- Piece surface / agent message 內容不要塞用戶 PII 以外的隱私資料
+- Piece surface / agent message 內容不要塞使用者 PII 以外的隱私資料
 - LLM provider 預設不 retain user data 的設定（OpenAI 有 API 層的 zero-retention 選項，Gemini 預設不收）— host 自己跟 provider 簽合約
 
 ## 結論
@@ -179,7 +179,7 @@ dddk demo 就是這個用法 — `dddk/example_website/` 有明確警示。**正
 | 本地單機 demo | `OpenAIProvider({ apiKey })` + localStorage **加明確警告** |
 | 內部企業工具 | ProxyProvider → 自己的 backend → server-side key + 公司 SSO |
 | 對外 SaaS | ProxyProvider → 自己的 backend + auth + quota + log |
-| 用戶完全 BYOK 的 SaaS | 加密 key 存在 server，用戶 OAuth 進來解密 |
+| 使用者完全 BYOK 的 SaaS | 加密 key 存在 server，使用者 OAuth 進來解密 |
 
 ---
 
@@ -187,7 +187,7 @@ dddk demo 就是這個用法 — `dddk/example_website/` 有明確警示。**正
 
 LLM provider 對 endpoint 保持中立 — 套件本體不挑邊，但**你怎麼接、key 放哪**會直接決定上線會不會爆。三個模式對應三種 provider 用法：
 
-### 模式 A — 直連官方 API（dev / 用戶自填 key）
+### 模式 A — 直連官方 API（dev / 使用者自填 key）
 
 ```ts
 import { OpenAIProvider } from '@perhapxin/dddk';
@@ -198,7 +198,7 @@ new WebAgent({ llm });
 
 什麼時候用：
 - 你在 localhost dev、key 從 `.env` 讀（不 commit）
-- 用戶自己填 key 存到 localStorage（**錢永遠是用戶自己付**）
+- 使用者自己填 key 存到 localStorage（**錢永遠是使用者自己付**）
 - 後台管理工具，只有自己人在用
 
 什麼時候**絕對不能用**：把 `apiKey: import.meta.env.VITE_OPENAI_KEY` 寫進 production build → 全網開放 key。

@@ -1,12 +1,12 @@
 # WebAgent — `present_surface` action
 
-> Opt-in 工具，讓 agent 可以渲染結構化的 PieceSurface（圖+文推薦卡、選項網格、確認摘要）並等用戶選。預設 `off` — host 沒開的話 agent 就只走 narrate / DOM 操作。
+> Opt-in 工具，讓 agent 可以渲染結構化的 PieceSurface（圖+文推薦卡、選項網格、確認摘要）並等使用者選。預設 `off` — host 沒開的話 agent 就只走 narrate / DOM 操作。
 
 ## 為什麼要 opt-in
 
 Rich surface 很強 — agent 可以秀 3 欄商品網格、日期挑選器、含描述的選項列表 — 但風險也不同：
 
-- Agent 自己挑 image `src`、選項標題、描述。胡謅的內容（編造的商品、錯誤的價格）會以「漂亮的 UI」呈現而不是明顯有問題的文字。用戶對 UI 的信任度比對文字高。
+- Agent 自己挑 image `src`、選項標題、描述。胡謅的內容（編造的商品、錯誤的價格）會以「漂亮的 UI」呈現而不是明顯有問題的文字。使用者對 UI 的信任度比對文字高。
 - Host 能 constrain UI 的手段少 — agent 一旦吐出 piece tree，renderer 就照畫。
 
 預設 `off` 讓 host 可以放心採用 SDK 其他部分不用先想這個風險。要做推薦流程的 host 明確 opt-in，並調整 [persona](./prompt-design.md) + brand prompt 把模型框住。
@@ -26,7 +26,7 @@ new DotDotDuck({
 
 // Orchestrator 內部會幫你做（buildAgent 時）：
 agent.setSurfaceMounter(({ surface, placement, resolve }) => {
-  // 2. 接 mounter — render surface、聽用戶選擇、resolve({ value, cancelled })
+  // 2. 接 mounter — render surface、聽使用者選擇、resolve({ value, cancelled })
 });
 ```
 
@@ -44,13 +44,13 @@ present_surface({
 }): Promise<{ value: string | null; cancelled: boolean }>
 ```
 
-Agent 每個「讓用戶選一個」的節奏點呼叫一次。Loop 拿回選的 `value`，或 `cancelled: true` 如果用戶 dismiss。
+Agent 每個「讓使用者選一個」的節奏點呼叫一次。Loop 拿回選的 `value`，或 `cancelled: true` 如果使用者 dismiss。
 
 `placement` 限 4 個值（不是 8 個 slot 的完整 `PlacementSlot` enum）。Agent 不能選 `fab` / `banner` / `toast` / `indicator` — 那些是 host 的語意。
 
 ## Agent 什麼時候挑 `present_surface` vs 其他工具
 
-| 用戶意圖 | 對的工具 |
+| 使用者意圖 | 對的工具 |
 |---|---|
 | 「Yes / No — 確認?」 | `ask_user_choice({ question, options: ['yes', 'no'] })` |
 | 「你的 email?」 | `ask_user({ question })` |
@@ -64,7 +64,7 @@ Host 的 palette 命令（主題切換、翻譯、搜尋等）改用 `dddk.tools
 
 ## 例子 — agent 吐出推薦網格
 
-用戶問「幫我找一個給愛喝咖啡的人的禮物」。Agent 推理，呼叫 `present_surface`：
+使用者問「幫我找一個給愛喝咖啡的人的禮物」。Agent 推理，呼叫 `present_surface`：
 
 ```json
 {
@@ -106,7 +106,7 @@ Host 的 palette 命令（主題切換、翻譯、搜尋等）改用 `dddk.tools
 }
 ```
 
-用戶點磨豆機 → tool resolve `{ value: 'g2', cancelled: false }` → agent 下一輪知道用戶選了 g2，可以 `navigate('/cart/add?sku=g2')` 之類。
+使用者點磨豆機 → tool resolve `{ value: 'g2', cancelled: false }` → agent 下一輪知道使用者選了 g2，可以 `navigate('/cart/add?sku=g2')` 之類。
 
 ## 鎖死 surface schema
 
@@ -146,7 +146,7 @@ catalog.register({
 
 ## 流程 — surface → action
 
-`present_surface` 是 turn-boundary action — agent 吐出來、用戶互動、下一輪看到結果。**不要**在同 envelope 內 narrate 前後加東西：前面 narrate 會 auto-pause（picker 出現前打斷很煩），後面 narrate 會在 picker dismiss 後執行（混亂）。
+`present_surface` 是 turn-boundary action — agent 吐出來、使用者互動、下一輪看到結果。**不要**在同 envelope 內 narrate 前後加東西：前面 narrate 會 auto-pause（picker 出現前打斷很煩），後面 narrate 會在 picker dismiss 後執行（混亂）。
 
 ## Intent stream
 
@@ -156,7 +156,7 @@ catalog.register({
 - `agent_answered` **會** fire，帶 `via: 'gesture' | 'text'` 跟 `answer: <選中的 value 或空字串>`。
 - Cancel 時：`agent_answered` 帶 `answer: ''`。
 
-所以 dashboard 不管用戶從字幕條 picker 還是 rich surface 選的，都會看到同一個 `agent_answered` 聚合。
+所以 dashboard 不管使用者從字幕條 picker 還是 rich surface 選的，都會看到同一個 `agent_answered` 聚合。
 
 ## 跨文件
 

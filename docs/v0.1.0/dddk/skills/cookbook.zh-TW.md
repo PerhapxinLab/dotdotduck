@@ -4,7 +4,7 @@
 
 ## 場景 1：客服 SaaS — 一鍵叫出最近訂單
 
-需求：用戶按 ctrl+k 打 `/recent-orders`，顯示最近 10 筆 + 點擊跳轉。
+需求：使用者按 ctrl+k 打 `/recent-orders`，顯示最近 10 筆 + 點擊跳轉。
 
 ```ts
 import type { ActionSkill } from '@perhapxin/dddk';
@@ -27,7 +27,7 @@ const recentOrders: ActionSkill = {
 
 ## 場景 2：法律 SaaS — 對選取的條款用白話解釋
 
-需求：用戶選取一段法律條款 → 長按 space 講「用簡單話解釋」→ 字幕條跳出簡化版本。
+需求：使用者選取一段法律條款 → 長按 space 講「用簡單話解釋」→ 字幕條跳出簡化版本。
 
 ```ts
 import type { PromptSkill } from '@perhapxin/dddk';
@@ -93,7 +93,7 @@ const newLead: SurfaceSkill = {
 };
 ```
 
-## 場景 4：影視製作 — ScriptSkill 帶用戶逛新功能
+## 場景 4：影視製作 — ScriptSkill 帶使用者逛新功能
 
 ```ts
 import type { ScriptSkill } from '@perhapxin/dddk';
@@ -195,7 +195,7 @@ const approveExpense: SurfaceSkill = {
   type: 'surface',
   name: '審核費用',
   build: async (ctx) => {
-    // 後端會檢查用戶身分
+    // 後端會檢查使用者身分
     const pending = await fetch('/api/expenses/pending', {
       headers: { Authorization: `Bearer ${ctx.storage.get('token')}` },
     }).then((r) => r.json());
@@ -246,7 +246,7 @@ import * as skills from '@/dotdotduck-skills';
 ```
 
 ### 依權限隱藏
-ActionSkill / SurfaceSkill 可以根據用戶角色決定 build 行為，或讓 host 直接過濾掉 skills list：
+ActionSkill / SurfaceSkill 可以根據使用者角色決定 build 行為，或讓 host 直接過濾掉 skills list：
 
 ```tsx
 const allSkills = [adminSkill, userSkill, ...];

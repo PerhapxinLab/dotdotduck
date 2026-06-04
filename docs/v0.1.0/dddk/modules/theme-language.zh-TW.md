@@ -1,6 +1,6 @@
 # ThemeToggle + LanguageSwitcher — 兩個小工具 module
 
-> 兩個很小的 module 合在一篇講，因為每個都只有一條 palette 指令加一個 callback。ThemeToggle 負責 `<html>` 上的 `data-theme` 屬性；LanguageSwitcher 什麼都不負責 — 只在用戶選語言時 call 你的 i18n 層。
+> 兩個很小的 module 合在一篇講，因為每個都只有一條 palette 指令加一個 callback。ThemeToggle 負責 `<html>` 上的 `data-theme` 屬性；LanguageSwitcher 什麼都不負責 — 只在使用者選語言時 call 你的 i18n 層。
 
 兩個都 opt-in。兩個都用 `.registerOn(palette)` 註冊 palette 指令。
 
@@ -12,7 +12,7 @@
 不要用：
 
 - 你的 header 已經有 theme toggle — 直接 `document.documentElement.dataset.theme = 'dark'`，不需要 module
-- 語言清單會 per-user 變動（例如只給訂閱了某語言的用戶看）— 自己包一個 wrapper，或乾脆手動 register palette items
+- 語言清單會 per-user 變動（例如只給訂閱了某語言的使用者看）— 自己包一個 wrapper，或乾脆手動 register palette items
 
 ---
 
@@ -61,7 +61,7 @@ theme.toggle();          // light → dark → system → light → ...
 
 ### System 模式
 
-偏好是 `'system'` 時 ThemeToggleModule 會訂閱 `matchMedia('(prefers-color-scheme: dark)')`，系統設定變了就重新套用。明確選 `'light'` 或 `'dark'` 會 unsubscribe — 用戶的覆寫贏。
+偏好是 `'system'` 時 ThemeToggleModule 會訂閱 `matchMedia('(prefers-color-scheme: dark)')`，系統設定變了就重新套用。明確選 `'light'` 或 `'dark'` 會 unsubscribe — 使用者的覆寫贏。
 
 ### 或者直接設屬性
 

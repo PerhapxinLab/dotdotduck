@@ -45,7 +45,7 @@ new DotDotDuck({
   // ...
   webAgent: {
     planner: (input) => plan.makeTodos(input),
-    announcePlan: true,  // stream task_summary + 等用戶按 Space
+    announcePlan: true,  // stream task_summary + 等使用者按 Space
   },
 });
 ```
@@ -76,7 +76,7 @@ interface PlanConfig {
 }
 ```
 
-策略 context（sitemap 心智模型、「用戶問 X 帶去 /Y」這種路由規則、tour playbook）放 `appendSystemPrompt`。這段文字只在每次 run 的 planning 階段送出一次 — 不會在每 turn 都重發。所以這裡可以寫得詳細沒關係，per-turn prompt 仍會保持精簡。
+策略 context（sitemap 心智模型、「使用者問 X 帶去 /Y」這種路由規則、tour playbook）放 `appendSystemPrompt`。這段文字只在每次 run 的 planning 階段送出一次 — 不會在每 turn 都重發。所以這裡可以寫得詳細沒關係，per-turn prompt 仍會保持精簡。
 
 ## Artifacts
 
@@ -88,7 +88,7 @@ interface PlanConfig {
 interface TodoItem {
   id: string;                          // 't1', 't2', ... — create 時自動配發
   intent: 'navigate' | 'narrate' | 'click' | 'fill' | 'ask' | 'finish' | string;
-  description: string;                 // 用戶感知的描述
+  description: string;                 // 使用者感知的描述
   expected_turn?: number;              // planner 的預測（1-based）
 }
 
@@ -129,19 +129,19 @@ Webagent 不會用 markdown artifact。它是給 host 介面做 LLM 驅動寫作
 
 ```ts
 interface PlanInput {
-  task: string;                        // 用戶原始 query
+  task: string;                        // 使用者原始 query
   sitemap?: SitemapConfig;
   brand?: BrandPrompt;
   persona?: PersonaInput;
   locale?: string;                     // BCP-47 — 控制 task_summary 語言
-  selection?: SelectionContext;        // 用戶 Dwell / drag 選取
+  selection?: SelectionContext;        // 使用者 Dwell / drag 選取
   hostContext?: string;                // 自由 host context
 }
 
 const plan: TaskPlan = await plan.makeTodos(input);
 
 interface TaskPlan {
-  task_summary: string;                // 一句、用戶的語言
+  task_summary: string;                // 一句、使用者的語言
   todos: TodoItem[];                   // 有順序、ids 已配發
 }
 ```

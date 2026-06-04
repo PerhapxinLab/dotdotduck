@@ -60,16 +60,16 @@ interface GestureCallbacks {
 }
 ```
 
-`onVoiceStart` 拿到的是按下去的瞬間就先抓好的 selection（用戶當時 highlight 的文字）跟那段裡面的 `<img src>` — 跟 palette chip-bar 同一個 pattern。
+`onVoiceStart` 拿到的是按下去的瞬間就先抓好的 selection（使用者當時 highlight 的文字）跟那段裡面的 `<img src>` — 跟 palette chip-bar 同一個 pattern。
 
 ---
 
 ## 調 `holdThresholdMs`
 
-預設 200ms 是內部測試出來最舒服的。
+預設 200ms 是內部測試後體感最自然的設定。
 
-- **更短（150ms）** — 錄音反應像瞬發，但用戶按鍵猶豫一下就會誤觸。只適合 power user 才會碰的功能。
-- **更長（300–400ms）** — 幾乎不誤觸，但錄音延遲明顯；用戶會以為按鍵壞了。除非你有資料顯示用戶在抱怨，不然不要往上拉。
+- **更短（150ms）** — 錄音反應像瞬發，但使用者按鍵猶豫一下就會誤觸。只適合 power user 才會碰的功能。
+- **更長（300–400ms）** — 幾乎不誤觸，但錄音延遲明顯；使用者會以為按鍵壞了。除非你有資料顯示使用者在抱怨，不然不要往上拉。
 
 這是 global setting，沒有 per-context 的版本。要看狀況分歧的話放在 `shouldIntercept` 裡。
 
@@ -87,7 +87,7 @@ import { GestureManager } from '@perhapxin/dddk';
 const gestures = new GestureManager({
   callbacks: { ... },
   shouldIntercept: () => {
-    // 用戶在 code editor 裡面就不要攔。
+    // 使用者在 code editor 裡面就不要攔。
     if (document.activeElement?.closest('.monaco-editor')) return false;
     return dddk.subtitle.isVisible() || dddk.palette.isOpen();
   },

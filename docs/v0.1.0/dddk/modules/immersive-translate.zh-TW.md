@@ -6,7 +6,7 @@ Opt-in。預設關掉；attach 一個 `ImmersiveTranslate` instance，然後從 
 
 ## 什麼時候用
 
-- 用戶在讀外文長文，想把譯文**並排**在原文旁邊，不是取代
+- 使用者在讀外文長文，想把譯文**並排**在原文旁邊，不是取代
 - 把 user-facing 文件 / blog / KB 文章在現有 CMS preview 裡翻譯
 - 任何需要「對照原文跟譯文逐行學單字」的場景
 
@@ -14,7 +14,7 @@ Opt-in。預設關掉；attach 一個 `ImmersiveTranslate` instance，然後從 
 
 - 文字在**可編輯欄位**裡 — 用 [InlineAgent](./inline-agent.md) 做選取翻譯
 - 頁面是用 native PDF 外掛或跨來源 Office Online iframe 渲染 — DOM 摸不到
-- 用戶只想翻譯一個字串 — 直接 call `llm.complete()`，不需要 module
+- 使用者只想翻譯一個字串 — 直接 call `llm.complete()`，不需要 module
 
 ## Import
 
@@ -117,7 +117,7 @@ new ImmersiveTranslate({
 譯文用 `<font class="dddk-imm-translate">` 接在後面（前面加一個 `<br>` 做視覺分隔）。選 legacy 的 `<font>` 是刻意的，因為：
 
 - 大多數富文字編輯器（TinyMCE、ProseMirror、Quill）不會把它的 style 拿掉
-- PDF viewer（pdf.js）跟 Office Online overlay 在用戶複製 / 匯出時會保留它
+- PDF viewer（pdf.js）跟 Office Online overlay 在使用者複製 / 匯出時會保留它
 - 預設是 inline，不會破壞 block layout
 
 要換 tag 只能 fork，沒有 per-instance override。
@@ -135,7 +135,7 @@ new ImmersiveTranslate({
 - Native PDF 外掛（瀏覽器內建的 plugin viewer，不是 JS overlay）
 - 跨來源 Office Online iframe（Microsoft / Google 嵌入）
 
-選 `<font>` 包裝的好處是：如果你的 host 把 PDF / docx render 成 inline HTML，用戶存檔 / 匯出時雙語排版就會被保留。
+選 `<font>` 包裝的好處是：如果你的 host 把 PDF / docx render 成 inline HTML，使用者存檔 / 匯出時雙語排版就會被保留。
 
 ## 進度 UI
 

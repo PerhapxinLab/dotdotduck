@@ -8,13 +8,13 @@ Opt-in。預設關閉；要 attach 一個 `Dwell` instance 才有作用。互動
 
 Dwell 是「頁面上這個東西」的指針。適合：
 
-- 用戶想針對某個元素**發問**（「這顆按鈕做什麼？」、「幫我摘要這段」）
+- 使用者想針對某個元素**發問**（「這顆按鈕做什麼？」、「幫我摘要這段」）
 - 某個 skill 需要頁面上任意區塊作為 context，但元素沒有寫死的 selector 可以指
-- 給非技術用戶做一個「右鍵 → 檢查」的可觸控替代
+- 給非技術使用者做一個「右鍵 → 檢查」的可觸控替代
 
 不要用 Dwell：
 
-- 用戶在可編輯欄位裡選取**文字** — 那是 [InlineAgent](./inline-agent.md) 的工作
+- 使用者在可編輯欄位裡選取**文字** — 那是 [InlineAgent](./inline-agent.md) 的工作
 - 你已經知道 selector，只是想 drive agent — 直接 call `dddk.startAgent()`
 - 你用 Spotter（cursor-ring trigger，也會鎖元素）驅動 — 二選一，不然兩個會搶同一個手勢；看下面「跟 Spotter 衝突」一節
 
@@ -163,9 +163,9 @@ dwell.destroy();         // 完全 unmount listener 跟 popover
 
 這是 Dwell 的旗艦互動模式。Flow：
 
-1. 用戶長按某個元素。Dwell 把 frame 釘上去，把元素 signature 餵給 `palette.setPinnedContext`，下次開 palette 就會看到這個 context。
-2. pin 完馬上開一個 [`subtitle.showChoice`](./subtitle.md#%E5%A4%9A%E9%81%B8-picker-showchoice) picker，問用戶要對選取做什麼 — 通常是 3 個最常見的問法外加一個 `Other (輸入)` free-text fallback。
-3. 用戶挑（`1`/`2`/`3`、點擊、或在 Other 列打字）。Host 把選到的東西轉成任務字串，呼叫 `dddk.startAgent(task, { selection: { text, elements } })`。
+1. 使用者長按某個元素。Dwell 把 frame 釘上去，把元素 signature 餵給 `palette.setPinnedContext`，下次開 palette 就會看到這個 context。
+2. pin 完馬上開一個 [`subtitle.showChoice`](./subtitle.md#%E5%A4%9A%E9%81%B8-picker-showchoice) picker，問使用者要對選取做什麼 — 通常是 3 個最常見的問法外加一個 `Other (輸入)` free-text fallback。
+3. 使用者挑（`1`/`2`/`3`、點擊、或在 Other 列打字）。Host 把選到的東西轉成任務字串，呼叫 `dddk.startAgent(task, { selection: { text, elements } })`。
 
 ```ts
 const dwell = new Dwell({
@@ -185,7 +185,7 @@ const dwell = new Dwell({
     const ctx = inner ? `${sig} ${inner}` : sig;
     dddk.palette.setPinnedContext(ctx, selector, { kind: 'dom' });
 
-    // pin 完馬上開多選 picker — 用戶剛剛說了「我在乎這個東西」,
+    // pin 完馬上開多選 picker — 使用者剛剛說了「我在乎這個東西」,
     // 就把最常見的 3 種問法（解說 / 摘要 / 翻譯）擺出來,加一個
     // Other free-text 列。選好之後 webagent 立刻以這個元素當
     // SelectionContext 跑。
@@ -204,7 +204,7 @@ const dwell = new Dwell({
           index === 0 ? '請用淺白的話解說使用者選到的這個元素是什麼、做什麼用。'
           : index === 1 ? '請摘要使用者選到的這段內容的重點。'
           : index === 2 ? '請把使用者選到的這段內容翻譯成英文,保留原意與語氣。'
-          : value; // free-text:用戶打什麼就 pass through
+          : value; // free-text:使用者打什麼就 pass through
         dddk.startAgent(task, {
           selection: { text: ctx, elements: [selector] },
         });
@@ -222,7 +222,7 @@ const dwell = new Dwell({
 
 ### 為什麼要這樣做
 
-舊版的 dddk host 走時間觸發的 proactive（「用戶在 `/commercial` 已 dwell 30 秒 — 跳一個 Yes/No 問是否要 X」）。對用戶刻意手勢的直接回應永遠贏過時間觸發的打斷：用戶剛跟你說了在乎哪個元素，picker 該出現的時間點就是現在，不是 30 秒後。
+舊版的 dddk host 走時間觸發的 proactive（「使用者在 `/commercial` 已 dwell 30 秒 — 跳一個 Yes/No 問是否要 X」）。對使用者刻意手勢的直接回應永遠贏過時間觸發的打斷：使用者剛跟你說了在乎哪個元素，picker 該出現的時間點就是現在，不是 30 秒後。
 
 ### 行為細節
 
@@ -232,7 +232,7 @@ const dwell = new Dwell({
 
 ### 你不想要這個的話
 
-要 Dwell 只當純 pin 手勢、不接後續問題（例如 workflow 只用 palette 開），就在 `onSelect` 裡別 call `showChoice` 就好。Dwell 還是會 pin frame 跟設 palette 的 pinned context，後面沒任何後續動作，等用戶自己決定下一步。
+要 Dwell 只當純 pin 手勢、不接後續問題（例如 workflow 只用 palette 開），就在 `onSelect` 裡別 call `showChoice` 就好。Dwell 還是會 pin frame 跟設 palette 的 pinned context，後面沒任何後續動作，等使用者自己決定下一步。
 
 ## 把 Dwell 接到語音 prompt
 
@@ -267,7 +267,7 @@ Spotter（cursor-ring trigger，看 [../triggers/spotter.md](../triggers/spotter
 
 ## Touch 行為
 
-`enableOnTouch` 預設 `false`。iOS / Android 的 OS 本身就用長按做文字選取 / context menu，手機用戶通常透過 [MobileTrigger](./mobile-trigger.md) chrome 操作。只有 touch-only kiosk 那種「OS 長按可以蓋掉」的場景才開 `enableOnTouch: true`。
+`enableOnTouch` 預設 `false`。iOS / Android 的 OS 本身就用長按做文字選取 / context menu，手機使用者通常透過 [MobileTrigger](./mobile-trigger.md) chrome 操作。只有 touch-only kiosk 那種「OS 長按可以蓋掉」的場景才開 `enableOnTouch: true`。
 
 ## 主題化
 

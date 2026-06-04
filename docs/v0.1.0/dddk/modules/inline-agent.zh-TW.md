@@ -6,14 +6,14 @@ Opt-in。預設關掉；要 attach 一個 `InlineAgent` instance 才會啟用。
 
 ## 什麼時候用
 
-- 改寫 / 翻譯 / 縮短 / 修正用戶**正在編輯的**文字
+- 改寫 / 翻譯 / 縮短 / 修正使用者**正在編輯的**文字
 - domain-specific 的轉換，且要直接落回 form field（例如「把這封 email 改成客服語氣」）
 
 不要用：
 
 - 選取的是頁面上**非編輯區**的文字 — 那是 palette 的工作（`palette.context.selectionText`），不是這個 module
-- 你想讓 LLM 產出讓用戶**讀**的自由文 — 改用 [Subtitle](./subtitle.md) + agent task
-- 你想跨多個欄位做連續編輯 — 用 [skill](../skills/overview.md)，這樣用戶看到的是一個進度 UI，不是七個 popover
+- 你想讓 LLM 產出讓使用者**讀**的自由文 — 改用 [Subtitle](./subtitle.md) + agent task
+- 你想跨多個欄位做連續編輯 — 用 [skill](../skills/overview.md)，這樣使用者看到的是一個進度 UI，不是七個 popover
 
 ## Import
 
@@ -112,7 +112,7 @@ inline.destroy();                          // 完全 unmount listener 跟 menu
 
 ## 動態指令 — 跑之前先問
 
-動作的 `build()` 是啟動當下才跑。可以拿它在 call LLM 之前再問用戶。內建 Translate 的語言挑選器就是這樣；任何自訂流程也適用：
+動作的 `build()` 是啟動當下才跑。可以拿它在 call LLM 之前再問使用者。內建 Translate 的語言挑選器就是這樣；任何自訂流程也適用：
 
 ```ts
 {
@@ -133,7 +133,7 @@ inline.destroy();                          // 完全 unmount listener 跟 menu
 
 - `ArrowDown` / `ArrowUp`（或 `Ctrl+N` / `Ctrl+P`） — 移動選擇
 - `Mod+Enter`（Cmd / Ctrl / Alt + Enter） — 觸發目前選到的動作。
-  單獨按 Enter 不攔截，用戶還是可以在可編輯欄位裡換行。
+  單獨按 Enter 不攔截，使用者還是可以在可編輯欄位裡換行。
 - `Esc` — 關掉選單
 
 ## 持續顯示 — menu 什麼時候出現 / 消失
@@ -141,7 +141,7 @@ inline.destroy();                          // 完全 unmount listener 跟 menu
 選單會一直顯示，只要選取還在。捲頁會**重新定位**它（不會 hide）。只有以下情況才會 hide：
 
 - 選取被清空或縮到不到 2 個字元
-- 用戶點到沒有選取的地方
+- 使用者點到沒有選取的地方
 - 一個動作跑完
 - 按下 `Esc`
 - 呼叫 `inline.setEnabled(false)`
@@ -152,14 +152,14 @@ inline.destroy();                          // 完全 unmount listener 跟 menu
 
 選單**預設浮在選取下方**：
 
-- 垂直方向：錨在 `selection.rect.bottom` 下方 6px，往下展開。只有「下方沒空間 **且** 上方還比較多空間」時才翻到選取上方。原本貼齊選取頂端、開在側邊的做法，在窄螢幕上會蓋到用戶自己的文字。
+- 垂直方向：錨在 `selection.rect.bottom` 下方 6px，往下展開。只有「下方沒空間 **且** 上方還比較多空間」時才翻到選取上方。原本貼齊選取頂端、開在側邊的做法，在窄螢幕上會蓋到使用者自己的文字。
 - 水平方向：錨在選取的右側邊緣，超出 viewport 寬度時翻到左邊。
 
 `<input>` 跟 `<textarea>` 的位置用 mirror-div 技巧算（複製 typographic styles，找 `selectionStart` / `selectionEnd` 的 caret 座標）。這很重要：如果用 input 的 bbox 當錨點，menu 會貼在 textarea 邊框，而不是選到的文字旁邊。
 
 ## 錯誤處理
 
-LLM provider 錯誤會被「人話化」成一行 subtitle，不讓用戶看到 stack trace。完整 raw error 會進 `console.warn`。常見：
+LLM provider 錯誤會被「人話化」成一行 subtitle，不讓使用者看到 stack trace。完整 raw error 會進 `console.warn`。常見：
 
 | Status | English subtitle | 中文 subtitle |
 | --- | --- | --- |

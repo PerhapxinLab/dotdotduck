@@ -1,6 +1,6 @@
 # Spotter
 
-`Spotter` 是**主動指元素**的 picker。用戶移動滑鼠，dddk 把 hover 到的元素框起來，按一下 lock，或拖一個 region 來 lasso。Agent 就清楚知道用戶在說哪一個 DOM node。
+`Spotter` 是**主動指元素**的 picker。使用者移動滑鼠，dddk 把 hover 到的元素框起來，按一下 lock，或拖一個 region 來 lasso。Agent 就清楚知道使用者在說哪一個 DOM node。
 
 `DotDotDuck` 內部會建一個 `Spotter`，但預設 `enableRing: false` — Spotter 在你 start 之前什麼都不會 render。
 
@@ -10,7 +10,7 @@ import { DotDotDuck } from '@perhapxin/dddk';
 const dddk = new DotDotDuck({ /* ... */ });
 dddk.mount();
 
-// 開啟 hover ring（例如用戶按了「選一個元素」按鈕）：
+// 開啟 hover ring（例如使用者按了「選一個元素」按鈕）：
 dddk.spotter.start();
 
 // 用完：
@@ -21,11 +21,11 @@ dddk.spotter.destroy();
 
 ## 三個狀態
 
-| State    | 用戶看到的                          | 怎麼結束                                                |
+| State    | 使用者看到的                          | 怎麼結束                                                |
 | -------- | ----------------------------------- | ------------------------------------------------------ |
 | `idle`   | 什麼都沒有。                        | —                                                      |
 | `ring`   | hover 元素周圍會有粉紅色動畫框。     | 滑鼠移走（框消失）或按一下 lock。                       |
-| `lock`   | 選定元素被框 pin 住。               | host 呼叫 `unlock()` 或用戶開始新動作。                |
+| `lock`   | 選定元素被框 pin 住。               | host 呼叫 `unlock()` 或使用者開始新動作。                |
 | `lasso`  | 游標下面拖出一個虛線框。            | mouseup commit 那個 region；< 5px 取消。               |
 
 狀態轉換：
@@ -35,7 +35,7 @@ idle ─(hover 200ms)→ ring ─(click)→ lock ─(unlock)→ idle
   └─(beginLasso)→ lasso ─(endLasso)→ idle
 ```
 
-Ring 要 hover 200ms 才出現，免得用戶看哪段就閃哪段框。`ringDelay` 可調。
+Ring 要 hover 200ms 才出現，免得使用者看哪段就閃哪段框。`ringDelay` 可調。
 
 ---
 
@@ -49,7 +49,7 @@ Ring 要 hover 200ms 才出現，免得用戶看哪段就閃哪段框。`ringDel
 | `ignoreSelector`  | `string`                                      | —       | 永遠不要框的 CSS selector。dddk 預設帶 `[data-dddk-ui]`，避免框到自己的 palette / subtitle。 |
 | `onRingShow`      | `(info: { selector, element, rect }) => void` | —       | 換 ring 對象的時候 fire。                                   |
 | `onRingHide`      | `() => void`                                  | —       | ring 消失的時候 fire。                                      |
-| `onLock`          | `(info: { selector, element }) => void`       | —       | 用戶把當前 ring pin 成 lock 的時候 fire。                   |
+| `onLock`          | `(info: { selector, element }) => void`       | —       | 使用者把當前 ring pin 成 lock 的時候 fire。                   |
 | `onLassoComplete` | `(info: { elements, bounds }) => void`        | —       | lasso 鬆手且 region 有效時 fire。                           |
 
 Orchestrator 上的 `dddk.spotter` 已經把四個 callback 都接成 dddk 事件（`pointer_ring_show`、`pointer_ring_hide`、`pointer_lock`、`pointer_lasso`），所以大多時候你只要 `dddk.on(...)`，不必自己 new。
@@ -81,7 +81,7 @@ spotter.unlock();             // 放掉 lock，回 idle
 
 ### 場景 A — 「選一個元素」mode
 
-用戶按 toolbar 按鈕 → ring 開 → 點一個元素 → 拿到 selector 做事：
+使用者按 toolbar 按鈕 → ring 開 → 點一個元素 → 拿到 selector 做事：
 
 ```ts
 import type { SpotterOptions } from '@perhapxin/dddk';
@@ -116,7 +116,7 @@ function startLasso() {
 
   dddk.on('pointer_lasso', ({ elements, bounds }) => {
     const selectors = elements.map((el) => el.tagName.toLowerCase()).join(', ');
-    dddk.startAgent(`用戶圈了這塊區域：${selectors}（${bounds.width}×${bounds.height}）。`);
+    dddk.startAgent(`使用者圈了這塊區域：${selectors}（${bounds.width}×${bounds.height}）。`);
   });
 }
 ```
@@ -127,16 +127,16 @@ function startLasso() {
 
 ## Spotter 跟 Dwell 怎麼選
 
-兩個都讓用戶「指某個元素」，差在 gesture：
+兩個都讓使用者「指某個元素」，差在 gesture：
 
 | Surface | 觸發              | 適合場景                                                                   |
 | ------- | ----------------- | -------------------------------------------------------------------------- |
-| Dwell   | 長按那個元素       | 手機 + 桌面。用戶直接按住*那個元素本身*，沒有切換模式的概念。看 [Dwell](../modules/dwell.md)。 |
-| Spotter | hover ring + 點擊 | power user 的 pick 流程，用戶要明確進入「我要指東西」mode（toolbar 按鈕、`/inspect` skill）。 |
+| Dwell   | 長按那個元素       | 手機 + 桌面。使用者直接按住*那個元素本身*，沒有切換模式的概念。看 [Dwell](../modules/dwell.md)。 |
+| Spotter | hover ring + 點擊 | power user 的 pick 流程，使用者要明確進入「我要指東西」mode（toolbar 按鈕、`/inspect` skill）。 |
 
-判斷：gesture 是**順手**做的（用戶在看東西，看到了就長按），用 Dwell。Gesture 是**用戶切到的 mode**（「幫我選一個元素」），用 Spotter。
+判斷：gesture 是**順手**做的（使用者在看東西，看到了就長按），用 Dwell。Gesture 是**使用者切到的 mode**（「幫我選一個元素」），用 Spotter。
 
-兩個共存可以 — Dwell 吃長按、Spotter 吃 hover+click — 但兩個一起開的話最好有文件說明，不然用戶會搞混為什麼兩個類似手勢的行為微妙地不一樣。
+兩個共存可以 — Dwell 吃長按、Spotter 吃 hover+click — 但兩個一起開的話最好有文件說明，不然使用者會搞混為什麼兩個類似手勢的行為微妙地不一樣。
 
 ---
 

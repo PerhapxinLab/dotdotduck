@@ -1,12 +1,12 @@
 # AgentCursor — 看得見的游標 + 點擊前停頓
 
-> 一個放大的浮動游標，會移動到 webagent 即將點擊 / 輸入 / 捲動的元素上。到達後會停頓一下，用戶才看得到「下一步要發生什麼」，也有時間取消。
+> 一個放大的浮動游標，會移動到 webagent 即將點擊 / 輸入 / 捲動的元素上。到達後會停頓一下，使用者才看得到「下一步要發生什麼」，也有時間取消。
 
 Opt-in。預設關掉；attach 一個 `AgentCursor` instance 才會啟用。
 
 ## 什麼時候用
 
-- Demo / onboarding 流程，需要讓用戶**看到** agent 在做什麼
+- Demo / onboarding 流程，需要讓使用者**看到** agent 在做什麼
 - 敏感流程（刪除、購買、不可逆寫入），點擊前的視覺停頓是一層 soft safety net
 - 錄 dddk 操作影片 — 游標 + flash overlay 在影片上看得清楚
 
@@ -14,7 +14,7 @@ Opt-in。預設關掉；attach 一個 `AgentCursor` instance 才會啟用。
 
 - agent 在做純後台工作（抓資料、分類、生摘要）— 沒東西可以指
 - 你需要的是 hard confirmation gate，不只是視覺提示 — 改用 subtitle 的 `onAccept` / `onReject`
-- 用戶已經在看 live screen-share — 真實游標就看得到了，重複會吵
+- 使用者已經在看 live screen-share — 真實游標就看得到了，重複會吵
 
 ## Import
 
@@ -87,7 +87,7 @@ cursor.destroy();         // unmount listener + DOM node
 
 ## 跟其他 module 的互動
 
-- **[Dwell](./dwell.md)** — 互不干擾。如果 agent 對 pin 起來的元素做動作，游標會移過去；dwell frame 還是維持「這是用戶目前的選取」的語意。
+- **[Dwell](./dwell.md)** — 互不干擾。如果 agent 對 pin 起來的元素做動作，游標會移過去；dwell frame 還是維持「這是使用者目前的選取」的語意。
 - **[InlineAgent](./inline-agent.md)** — InlineAgent 不會 fire webagent 動作，所以 inline 編輯時游標不會動。改用 subtitle 的 `processing` indicator。
 - **[MobileTrigger](./mobile-trigger.md)** — 可以用，但游標概念是 desktop-shaped 的。touch 上建議關掉 AgentCursor，靠 subtitle 旁白就好。
 

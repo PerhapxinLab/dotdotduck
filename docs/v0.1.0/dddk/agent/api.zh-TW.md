@@ -60,9 +60,9 @@ class WebAgent {
 interface WebAgentConfig {
   llm: LLMSource;            // LLMProvider 或 LLMRouter — 見 llm/providers
   locale?: string;           // BCP-47（'en'、'zh-TW'、'ja-JP' ...）。
-                             // 當作「用戶輸入曖昧時的預設回覆語言」用
+                             // 當作「使用者輸入曖昧時的預設回覆語言」用
                              // —— 例如 "hello"、純 URL、單一表情符號。
-                             // 用戶寫出明確句子時，model 仍會用該句語言回。
+                             // 使用者寫出明確句子時，model 仍會用該句語言回。
                              // 預設取自 navigator.language。
   maxSteps?: number;         // 預設 30 — 一個 task 內 tool-call 迴圈上限
   maxErrors?: number;        // 預設 3 — 連續 LLM call 失敗到此次數就放棄
@@ -94,7 +94,7 @@ interface WebAgentConfig {
   planner?: (input: PlanInput) => Promise<TaskPlan>;
 
   // 設了 `planner` 時，再加這個 = true → planner 的 `task_summary` 會在
-  // turn 1 開始前 stream 進字幕條，然後 runtime 主動 await 用戶按 Space
+  // turn 1 開始前 stream 進字幕條，然後 runtime 主動 await 使用者按 Space
   // 才開始 loop（避免後續 navigate 確認 dialog 蓋掉 announce）。預設 false。
   announcePlan?: boolean;
   // 每個 action 的 description 覆蓋 — 在組 tool 時套用。
@@ -159,7 +159,7 @@ type OnLoopEnd =
   | { kind: 'text'; text: string; autoHide?: number }
   // 結束文案 + Space（滿意）/ 雙擊（不滿意）手勢收集。
   // 字幕條走 `persistent: true` — 不會自動關閉、Esc 不關、外部點擊不關，
-  // 用戶必須選同意或拒絕。任一選擇都會在 intent stream 發出
+  // 使用者必須選同意或拒絕。任一選擇都會在 intent stream 發出
   // `agent_feedback`（`satisfied: true | false`）。
   | { kind: 'feedback'; text: string }
   // 多選題（例如 1-5 分評分）。選到的值寫進 `agent_feedback.summary`，
@@ -179,7 +179,7 @@ interface SitemapEntry {
 
 ```ts
 interface RunOptions {
-  /** 用戶 invoke agent 的當下選了什麼。 */
+  /** 使用者 invoke agent 的當下選了什麼。 */
   selection?: SelectionContext;
 }
 
@@ -190,7 +190,7 @@ interface SelectionContext {
   images?: string[];
   /** 頁面上的選取 bounding box。 */
   bbox?: { x: number; y: number; width: number; height: number };
-  /** 用戶點 / 多選的 CSS selector 或 DOM path。 */
+  /** 使用者點 / 多選的 CSS selector 或 DOM path。 */
   elements?: string[];
 }
 ```
@@ -199,10 +199,10 @@ interface SelectionContext {
 
 | 欄位 | host 何時填 |
 |---|---|
-| `text` | 用戶有 text selection（`getSelection().toString()`），或長按某個元素 — 把它的可見文字傳進來。 |
-| `images` | 用戶選 / 丟一張圖。base64 data URL 或可抓的 URL 都行 — LLM provider 自己處理上傳。 |
+| `text` | 使用者有 text selection（`getSelection().toString()`），或長按某個元素 — 把它的可見文字傳進來。 |
+| `images` | 使用者選 / 丟一張圖。base64 data URL 或可抓的 URL 都行 — LLM provider 自己處理上傳。 |
 | `bbox` | 拖選 lasso、截圖切片、「問這塊區域是什麼」這類手勢。座標是頁面相對。 |
-| `elements` | 用戶點了一或多個元素（Dwell 長按、Spotter ring、多選）。傳當下頁面上能 resolve 的 CSS selector。 |
+| `elements` | 使用者點了一或多個元素（Dwell 長按、Spotter ring、多選）。傳當下頁面上能 resolve 的 CSS selector。 |
 
 Agent 會把 selection 序列化成 system prompt 裡的 `# User selection at invocation` 段 — LLM 看到時當作這次任務的首要 context。如果 `llm` 是 `LLMRouter` 而且設了 `webagentWithSelection`，這一輪就用那個（比較便宜的）model 跑（selection 任務多半是一發完成的摘要 / 釐清，不需要頂級模型）。
 
@@ -236,7 +236,7 @@ await agent.run('這塊區域有什麼異常?', {
 | `subtitle` | `string` | Agent 在 tool call 之間發出的自由文字。沒有 `show_subtitle` 工具 — LLM 在 tool call 之間 emit 的文字會透過這個 event 一個字一個字 stream 進中央底部的 subtitle bar。 |
 | `piece_surface` | `{ surface: PieceSurface; placement: PiecePlacement }` | dddk 把 host 開的 Piece surface 轉發進來，讓 agent loop 知道現在畫面上有什麼。 |
 | `ask_user` | `{ question: string; resolve: (answer: string) => void }` | Agent 呼叫內建 `ask_user` action。Loop 在 `waiting`，直到 host 呼叫 `resolve` 或呼叫 `agent.respond(...)`。 |
-| `ask_user_choice` | `{ question: string; options: string[]; allowFreeText?: boolean; resolve: (answer: string) => void }` | Agent 呼叫內建 `ask_user_choice` action。Host 要 render 一個離散選項 picker（推薦走 dddk 的 [`Subtitle.showChoice`](../modules/subtitle.md#%E5%A4%9A%E9%81%B8-picker-showchoice)），然後呼叫 `agent.respond(chosenValue)` 把用戶的選擇送回 — 預設選項就傳該選項字串；`allowFreeText` 開時用戶用 free-text 列就傳他打的字。`waiting` 語意跟 `ask_user` 一樣。 |
+| `ask_user_choice` | `{ question: string; options: string[]; allowFreeText?: boolean; resolve: (answer: string) => void }` | Agent 呼叫內建 `ask_user_choice` action。Host 要 render 一個離散選項 picker（推薦走 dddk 的 [`Subtitle.showChoice`](../modules/subtitle.md#%E5%A4%9A%E9%81%B8-picker-showchoice)），然後呼叫 `agent.respond(chosenValue)` 把使用者的選擇送回 — 預設選項就傳該選項字串；`allowFreeText` 開時使用者用 free-text 列就傳他打的字。`waiting` 語意跟 `ask_user` 一樣。 |
 | `confirm_action` | `{ actionName: string; params: Record<string, unknown>; message: string; decide: (approved: boolean) => void }` | `confirmEachStep: true` 時每個 action 前，或某個 action 標了 `requireConfirmation` 時。Host **必須**呼叫 `decide(boolean)` — `decide(false)` 會以「stopped by user」狀態結束 loop。 |
 | `overlay_update` | `OverlayItem[]` | `border` / `highlight` / `inject` overlay 新增、改變、移除。每次傳完整的當前列表。呼叫 `border` 或 `highlight` 會自動清掉上一個 overlay — 沒有獨立的 `clear_overlays` action。 |
 | `navigate` | `{ path: string }` | Agent 想換頁。換頁主控權在 host — 呼 `router.push(path)` 才能保持 SPA routing。 |
@@ -260,7 +260,7 @@ agent.on('ask_user', ({ question, resolve }) => {
 });
 ```
 
-可以直接在 handler 裡呼 `resolve`（同步 prompt），也可以晚一點呼 `agent.respond(answer)`（非同步 UI 流程 — 你自家 dialog mount、用戶送出、你 call `respond`）。兩條路 resolve 的是同一個 pending promise。
+可以直接在 handler 裡呼 `resolve`（同步 prompt），也可以晚一點呼 `agent.respond(answer)`（非同步 UI 流程 — 你自家 dialog mount、使用者送出、你 call `respond`）。兩條路 resolve 的是同一個 pending promise。
 
 ### 2. Surface（結構化 form / dialog）
 
@@ -313,7 +313,7 @@ agent.on('before_action', ({ actionName, targetSelector }) => {
 });
 ```
 
-用這個 event 來動 agent 游標、或讓目標元素閃一下，讓用戶看清楚下一步要對哪裡動手。
+用這個 event 來動 agent 游標、或讓目標元素閃一下，讓使用者看清楚下一步要對哪裡動手。
 
 ## Navigation Hook
 
@@ -345,7 +345,7 @@ agent.registerAction({
     });
     return { ok: true };
   },
-  requireConfirmation: true,        // 透過 confirm_action 問用戶
+  requireConfirmation: true,        // 透過 confirm_action 問使用者
   confirmationMessage: (p) => `要把 ${p.productId} 加進購物車嗎？`,
 });
 ```

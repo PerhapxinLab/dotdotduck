@@ -146,7 +146,7 @@ dddk.palette.addItem({
   title: '重新整理儀表板',
   onActivate: (ctx) => {
     refreshAll();
-    ctx.startAgent('告訴用戶儀表板資料已更新。');
+    ctx.startAgent('告訴使用者儀表板資料已更新。');
   },
 }
 ```

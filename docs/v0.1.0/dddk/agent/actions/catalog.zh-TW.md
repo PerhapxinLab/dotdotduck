@@ -29,26 +29,26 @@
 | `clear_input` | `{ selector }` | 清空欄位 |
 | `press_key` | `{ key, selector? }` | Dispatch 鍵盤 event（keydown + keyup）。`key` 是 W3C key 名稱（`"Enter"`、`"Escape"`、`"ArrowDown"`、`" "`、單字元）。`selector` 省略 = `document.activeElement`。Enter 送出、Escape 關閉、Arrow keys 移動等都靠這個 |
 
-### 視覺 overlay（給用戶看）
+### 視覺 overlay（給使用者看）
 
 | Action | 參數 | 行為 |
 |---|---|---|
 | `border` | `{ selector, color?, label? }` | 加框。`border` / `highlight` 會自動清掉之前的 overlay，沒有 `clear_overlays` 工具。**CoT mode 下 `border` 從 model tool list 隱藏** — 框元素是透過 `narrate.about` 設定（見下）。Action 本身還在註冊內、給 classic loop / customActions 用 |
 | `highlight` | `{ selector, color?, label? }` | 加底色 — 適合 inline 段落。同樣自動清掉舊 overlay。預設沒在 builtin set 裡，要 opt-in 透過 `customActions` |
 
-### 跟用戶溝通
+### 跟使用者溝通
 
 | Action | 參數 | 行為 |
 |---|---|---|
-| `pause` | `{ note? }` | 等用戶按 space。**CoT mode 下隱藏** — runtime 每個 narrate 後會自動 pause，曝露 `pause` 反而會雙 pause。Classic mode 還有 |
+| `pause` | `{ note? }` | 等使用者按 space。**CoT mode 下隱藏** — runtime 每個 narrate 後會自動 pause，曝露 `pause` 反而會雙 pause。Classic mode 還有 |
 | `ask_user` | `{ question }` | 問純文字問題 |
 | `ask_user_choice` | `{ question, options[], allowFreeText? }` | 多選 picker（2–6 個選項，可選 free-text fallback） |
 
 #### `ask_user` vs `ask_user_choice`
 
-當答案空間是 2–4 個短選項時，**優先**用 `ask_user_choice` — 它在 host 端 render 成可點 / 數字鍵選的 picker（推薦走 [`Subtitle.showChoice`](../../modules/subtitle.md#%E5%A4%9A%E9%81%B8-picker-showchoice)），用戶不用打字。只有當答案真的需要自由文字（「描述你的問題」、「貼 email」這種）才用 `ask_user`。
+當答案空間是 2–4 個短選項時，**優先**用 `ask_user_choice` — 它在 host 端 render 成可點 / 數字鍵選的 picker（推薦走 [`Subtitle.showChoice`](../../modules/subtitle.md#%E5%A4%9A%E9%81%B8-picker-showchoice)），使用者不用打字。只有當答案真的需要自由文字（「描述你的問題」、「貼 email」這種）才用 `ask_user`。
 
-`allowFreeText` 預設 `true`：picker 的最後一列是 free-text 輸入，用戶可以打不在清單裡的答案。送出時直接交付成用戶打的字串 — agent 拿到的就是該字串，沒有特殊 sentinel；host 在 event 層用 `index === -1` 區分是 free-text 還是 canonical 選項，然後呼叫 `agent.respond(value)`。
+`allowFreeText` 預設 `true`：picker 的最後一列是 free-text 輸入，使用者可以打不在清單裡的答案。送出時直接交付成使用者打的字串 — agent 拿到的就是該字串，沒有特殊 sentinel；host 在 event 層用 `index === -1` 區分是 free-text 還是 canonical 選項，然後呼叫 `agent.respond(value)`。
 
 兩個 action 行為對等：呼叫後 agent 進入 `waiting`，loop 停在那裡直到 host 呼叫 `respond(value)`。
 
@@ -62,7 +62,7 @@
 
 CoT envelope 有顯式的結束信號：
 
-- `{ task_finish: true }` — 放在 `actions[]` **最後**一項，當用戶的 task 已經完整滿足。Runtime 跑完前面 actions 立刻結束 loop。**不要**跟 `ask_user_choice` / `navigate` / `click` / `fill_input` 等「結果還沒讀」的 tool 同 turn — runtime 會 drop 誤用的 task_finish 並 log warning
+- `{ task_finish: true }` — 放在 `actions[]` **最後**一項，當使用者的 task 已經完整滿足。Runtime 跑完前面 actions 立刻結束 loop。**不要**跟 `ask_user_choice` / `navigate` / `click` / `fill_input` 等「結果還沒讀」的 tool 同 turn — runtime 會 drop 誤用的 task_finish 並 log warning
 - 空 / 省略 `actions` — 舊式收尾路徑；沒 actions runtime 自然關掉字幕條
 
 Classic（非 CoT）mode：model 該 turn 只有文字、沒 tool call 時（`finish_reason=stop`）自動結束。
@@ -121,7 +121,7 @@ agent.config.customActions = [
 
 ## 關掉用不到的內建 action
 
-上面表格列的每個 action 預設都會註冊，這樣任何 host 接上 SDK 就能跑。但如果你網站只用到一個子集（例如沒有 `<select>` 元素、沒有破壞性操作、不需要 agent 反問用戶），可以用 `disableBuiltinActions` 把列在裡面的 action 從 agent 看到的 tool schema 完全拿掉，降低每 turn 的 token 成本、也減少「選錯工具」的可能。
+上面表格列的每個 action 預設都會註冊，這樣任何 host 接上 SDK 就能跑。但如果你網站只用到一個子集（例如沒有 `<select>` 元素、沒有破壞性操作、不需要 agent 反問使用者），可以用 `disableBuiltinActions` 把列在裡面的 action 從 agent 看到的 tool schema 完全拿掉，降低每 turn 的 token 成本、也減少「選錯工具」的可能。
 
 ```ts
 new DotDotDuck({

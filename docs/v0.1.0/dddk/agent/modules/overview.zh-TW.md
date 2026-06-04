@@ -86,7 +86,7 @@ agent.on('subtitle', (text) => {
 ## Selection Agent
 
 ### 是什麼
-用戶選取一段文字 → 對選取內容做事（翻譯 / 摘要 / 改寫 / 解釋 / 搜尋）。dddk 的 `space` 長按會用到。
+使用者選取一段文字 → 對選取內容做事（翻譯 / 摘要 / 改寫 / 解釋 / 搜尋）。dddk 的 `space` 長按會用到。
 
 ### API
 ```ts
@@ -96,7 +96,7 @@ const sa = new InlineAgent({ llm: provider });
 
 const result = await sa.process(
   selectedText,
-  instruction,    // 用戶講的話：「翻譯」「摘要」「改寫得更專業」
+  instruction,    // 使用者講的話：「翻譯」「摘要」「改寫得更專業」
   images?,        // 選區內如果有圖片
 );
 ```
@@ -135,7 +135,7 @@ const voice = new Voice({
 });
 
 voice.start();
-// 用戶講話...
+// 使用者講話...
 const cleaned = await voice.stop();  // 回語音轉文字 + LLM 清理過的版本
 ```
 
@@ -146,7 +146,7 @@ Web Speech API 出來的文字常常有：
 - 中英混講會跳行
 - 同音字錯誤
 
-跑一次 LLM cleanup 出來的文字才能直接給用戶看。Cleanup prompt 很短，幾乎不增加成本。
+跑一次 LLM cleanup 出來的文字才能直接給使用者看。Cleanup prompt 很短，幾乎不增加成本。
 
 ---
 

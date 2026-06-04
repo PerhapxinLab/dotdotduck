@@ -1,6 +1,6 @@
 # dotdotduck — 字幕條 UI
 
-> 字幕條 — dotdotduck 跟用戶溝通的主要介面。用戶按 space 確認、按雙 space 拒絕、按 Tab 接受部分、按 Escape 取消。
+> 字幕條 — dotdotduck 跟使用者溝通的主要介面。使用者按 space 確認、按雙 space 拒絕、按 Tab 接受部分、按 Escape 取消。
 
 ## 結構
 
@@ -14,7 +14,7 @@
 
 | Type | 觸發者 | 行為 |
 |---|---|---|
-| `voice` | 語音轉文字結果 | 顯示 + 等用戶 accept / reject |
+| `voice` | 語音轉文字結果 | 顯示 + 等使用者 accept / reject |
 | `selection` | InlineAgent 結果 | 顯示 + 提供 copy / accept |
 | `agent` | webagent 的 `show_subtitle` | 顯示 + 允許 agent 繼續 |
 | `post` | 一般文字建議（autocomplete） | accept 直接插入 / reject 消失 |
@@ -35,7 +35,7 @@ subtitle.show({
   onCancel: () => agent.stop(),
   onCopy: () => navigator.clipboard.writeText('...'),  // 選填，會多畫一顆 copy 鈕
   hints: '...',                  // 自訂 hint 文字，預設用 locale 內建的 accept/reject 提示
-  autoHide: 0,                   // ms；預設 0 = sticky 等用戶手動關
+  autoHide: 0,                   // ms；預設 0 = sticky 等使用者手動關
   maxCharsPerPage: 220,          // 分頁 — 在句子邊界把長文切開
 });
 
@@ -53,7 +53,7 @@ subtitle.setRunningLabel('Agent 執行中…');  // Space accept 後等下一輪
 
 ### Indicator 跟 subtitle 互斥
 
-字幕條顯示中時，`showIndicator(state, label)` **不**會疊在上面 — 會被排到佇列。等字幕條被收掉（用戶 accept / reject / 取消）後，排隊中的 indicator 才出來。適合做「agent 播完第 N 步 → 開始想第 N+1 步」這種流程。
+字幕條顯示中時，`showIndicator(state, label)` **不**會疊在上面 — 會被排到佇列。等字幕條被收掉（使用者 accept / reject / 取消）後，排隊中的 indicator 才出來。適合做「agent 播完第 N 步 → 開始想第 N+1 步」這種流程。
 
 ```ts
 subtitle.showIndicator('processing', 'Agent 執行中…');   // 沒字幕時才會畫
@@ -62,14 +62,14 @@ subtitle.hideIndicator();                                // 順便清掉 pending
 
 ## 多選 picker（`showChoice`）
 
-`show()` 的形狀是給 binary yes/no 用的（一個 accept callback、一個 reject）。當用戶要在 2–4 個離散選項裡**挑一個**時，改 call `showChoice()` — 同一個字幕條 slot 改 render 編號選項列表，下面再帶一個 free-text 輸入列，host 已經 style 好 `show()` 的話兩種模式長相一致。
+`show()` 的形狀是給 binary yes/no 用的（一個 accept callback、一個 reject）。當使用者要在 2–4 個離散選項裡**挑一個**時，改 call `showChoice()` — 同一個字幕條 slot 改 render 編號選項列表，下面再帶一個 free-text 輸入列，host 已經 style 好 `show()` 的話兩種模式長相一致。
 
 ```ts
 subtitle.showChoice({
   question: '要對這個做什麼?',
   options: ['解說', '摘要', '翻譯', 'Other (輸入)'],
   onChoose: (value, index) => {
-    if (index === -1) startAgent(value);              // 用戶自己打的
+    if (index === -1) startAgent(value);              // 使用者自己打的
     else if (index === 0) startAgent('Explain this'); // 預設選項
     // ...
   },
@@ -82,16 +82,16 @@ subtitle.showChoice({
 |---|---|---|---|
 | `question` | `string` | — | 問題本身。TTS hook 會原文唸出來 — 用自然口語寫。 |
 | `options` | `string[]` | — | 2–6 個預設選項。畫成編號列（1、2、3 …）。 |
-| `allowFreeText` | `boolean` | `true` | 最後再接一條 free-text 輸入，讓用戶打不在清單內的答案。 |
+| `allowFreeText` | `boolean` | `true` | 最後再接一條 free-text 輸入，讓使用者打不在清單內的答案。 |
 | `freeTextLabel` | `string` | 內建翻譯 | free-text 輸入的 placeholder。 |
 | `onChoose` | `(value, index) => void` | — | 必填。`index` 語意見下方。 |
 | `onCancel` | `() => void` | — | Esc / 程式化關閉。 |
-| `autoHide` | `number` | — | 自動消失 ms 數。預設不消失，等用戶互動。 |
+| `autoHide` | `number` | — | 自動消失 ms 數。預設不消失，等使用者互動。 |
 
 ### `onChoose(value, index)` 語意
 
-- `index >= 0` — 用戶點了該位置的選項，`value` 就是該選項字串。
-- `index === -1` — 用戶在 free-text 列打字後按 Enter，`value` 是他打的字串（沒有特殊的「Other」sentinel — host 直接用 `index === -1` 判斷）。
+- `index >= 0` — 使用者點了該位置的選項，`value` 就是該選項字串。
+- `index === -1` — 使用者在 free-text 列打字後按 Enter，`value` 是他打的字串（沒有特殊的「Other」sentinel — host 直接用 `index === -1` 判斷）。
 
 ### 鍵盤
 
@@ -102,11 +102,11 @@ subtitle.showChoice({
 | `Enter`（只在 free-text 輸入內） | 用 `index === -1` 送出打的字。 |
 | `Esc` | 觸發 `onCancel`，然後關掉。 |
 
-**Focus guard**：當焦點在別的 `<input>` / `<textarea>` / `<select>` / contenteditable 元素上時，數字鍵**不會**被攔截 — 所以 picker 還在的時候開 palette（或任何別的輸入欄）不會吃掉用戶第一個按鍵。點擊跟 Esc 還是照常。
+**Focus guard**：當焦點在別的 `<input>` / `<textarea>` / `<select>` / contenteditable 元素上時，數字鍵**不會**被攔截 — 所以 picker 還在的時候開 palette（或任何別的輸入欄）不會吃掉使用者第一個按鍵。點擊跟 Esc 還是照常。
 
 ### `showChoice` 跟 `show` 怎麼挑
 
-用戶要在 2–4 個離散選項裡**挑一個**（「解說 / 摘要 / 翻譯」）時用 `showChoice()`；問題是「對這個動作 yes 或 no」時用 `show()`。兩個都走同一個字幕條 slot，視覺語言一致，差別只在請用戶回什麼形狀的答案。
+使用者要在 2–4 個離散選項裡**挑一個**（「解說 / 摘要 / 翻譯」）時用 `showChoice()`；問題是「對這個動作 yes 或 no」時用 `show()`。兩個都走同一個字幕條 slot，視覺語言一致，差別只在請使用者回什麼形狀的答案。
 
 ## 鍵盤對應
 

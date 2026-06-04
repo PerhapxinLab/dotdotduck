@@ -1,6 +1,6 @@
 # Palette attachments
 
-Palette 可以收**圖片附件** — 上傳檔案或截圖 — 然後帶到用戶接下來做的事情裡面。附件放在 `palette.context.attachments`，skill handler 自己讀，orchestrator 也會把它丟給 webagent 變 `selection.images`。
+Palette 可以收**圖片附件** — 上傳檔案或截圖 — 然後帶到使用者接下來做的事情裡面。附件放在 `palette.context.attachments`，skill handler 自己讀，orchestrator 也會把它丟給 webagent 變 `selection.images`。
 
 相機按鈕是 **opt-in** — 要在 `DotDotDuckConfig` 設 `camera` 才會出來。沒設就什麼都不會 render。
 
@@ -40,7 +40,7 @@ new DotDotDuck({
 | field         | type                                                                  | 預設            | 做什麼                                                                      |
 | ------------- | --------------------------------------------------------------------- | --------------- | -------------------------------------------------------------------------- |
 | `mode`        | `'upload' \| 'screenshot'`                                            | —               | upload 開檔案選擇器；screenshot 開區域拖選 overlay。                       |
-| `onCapture`   | `(file: File \| Blob, source: 'upload' \| 'screenshot') => void`       | —               | 用戶選 / 截完之後 fire。SDK 那時候**已經**把附件 queue 進去了 — 這個 callback 用來做 host 端的 analytics / 副作用。 |
+| `onCapture`   | `(file: File \| Blob, source: 'upload' \| 'screenshot') => void`       | —               | 使用者選 / 截完之後 fire。SDK 那時候**已經**把附件 queue 進去了 — 這個 callback 用來做 host 端的 analytics / 副作用。 |
 | `accept`      | `string`                                                              | `'image/*'`     | 只有 upload mode 用。File-picker 的 accept filter。                        |
 | `capture`     | `boolean`                                                             | `false`         | 只有 upload mode 用。手機上會直接開相機。                                  |
 | `title`       | `string`                                                              | `'Attach image'` | 相機 icon 的 tooltip。                                                    |
@@ -50,8 +50,8 @@ new DotDotDuck({
 
 ### 截圖 UX
 
-1. 用戶點相機 icon → palette 隱形，dddk 顯示一個全螢幕的十字 overlay。
-2. 用戶在可見頁面上拖一個矩形。
+1. 使用者點相機 icon → palette 隱形，dddk 顯示一個全螢幕的十字 overlay。
+2. 使用者在可見頁面上拖一個矩形。
 3. dddk 把 rect（viewport 座標）丟給你，`captureRect` 回一個 `Blob`。
 4. 那個 Blob 自動 queue 進 `palette.context.attachments`（palette 上會看到 chip）。
 5. `onCapture` fire 給 host 端做紀錄。
@@ -62,7 +62,7 @@ Esc、右鍵、或鬆手太靠近（< 8px）任何時候都可以取消。
 
 dddk 不附 screenshot backend — `html2canvas` / `modern-screenshot` 多 ~50KB，而且每個站都有自己怪的 quirks（CORS、web components、fixed 元素 ...）。host 自己挑適合自家頁面的 lib。
 
-上面範例用 `html2canvas` 配 dynamic import — lib 只有用戶第一次按相機才會載入，初始 bundle 不會被拖大。
+上面範例用 `html2canvas` 配 dynamic import — lib 只有使用者第一次按相機才會載入，初始 bundle 不會被拖大。
 
 ---
 
@@ -112,7 +112,7 @@ dddk.palette.context;  // { selectionText, selectionElement, attachments }
         ▼
 palette.context.attachments  ◄────── chip-bar 每張顯示一個 preview
         │
-        ▼ (用戶選了某一列 / fallback)
+        ▼ (使用者選了某一列 / fallback)
 handler 讀 palette.context
         │
         ├── handler 自己處理，或
@@ -141,7 +141,7 @@ orchestrator → webagent  ◄────── 附件在 agent turn 變 select
 }
 ```
 
-Agent 讀完 `selection.images` 之後 dddk 會把 palette 那邊的附件清掉 — 不會留到下一輪，除非用戶又附一張。
+Agent 讀完 `selection.images` 之後 dddk 會把 palette 那邊的附件清掉 — 不會留到下一輪，除非使用者又附一張。
 
 ---
 

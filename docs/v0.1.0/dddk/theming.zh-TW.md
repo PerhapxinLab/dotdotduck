@@ -5,7 +5,7 @@
 ## 設計原則
 
 1. **每個視覺值都是變數** — SDK 內沒有 hardcode 的顏色 / 邊角 / 字型
-2. **預設值合理** — 用戶不設定也好看
+2. **預設值合理** — 使用者不設定也好看
 3. **支援亮 / 暗主題** — 用 `[data-theme="dark"]` 切
 4. **不污染 host CSS** — 所有 dddk selector 都在 `[data-dddk-ui]` scope 下
 5. **走 global CSS 變數，不走 Shadow DOM** — rationale 見下方 [Shadow DOM 段落](#shadow-dom-為什麼我們不用)
@@ -247,7 +247,7 @@ Sepia 配色給人的感覺是溫、低對比。重點不在 accent，在 surfac
 
 ### 範例 2：高對比 / 無障礙
 
-給需要極高對比的用戶（低視力、強光環境、無障礙合規）。重點在 border 跟 shadow — **不在** accent。
+給需要極高對比的使用者（低視力、強光環境、無障礙合規）。重點在 border 跟 shadow — **不在** accent。
 
 ```css
 :root {
@@ -436,7 +436,7 @@ dotdotduck 不夾帶字型。host 自己 load：
 
 1. **Host 本來就想主題化 dddk。** Shadow DOM 存在的目的是*阻止* host CSS 進來 widget。但我們看到的每個 dddk 整合都想要相反 — 對齊 host 的品牌色、字體、radius。Shadow DOM 會強迫每個 theme override 都走 JS API 或 `::part()` selector，兩個都沒 global CSS 變數靈活。
 2. **CSS 變數本來就會跨邊界。** 就算 dddk 在 shadow root 裡，CSS custom properties 還是會穿透 inherit。所以你還是需要那組變數 token API。Shadow DOM 多一層 indirection，卻沒解決真正的問題（host CSS 漏*進* dddk）。
-3. **Inspector / devtools 不順手。** 看 shadow root 要顯式打開。對用戶天天看到的 UI 來說，這是開發者每天的麻煩。
+3. **Inspector / devtools 不順手。** 看 shadow root 要顯式打開。對使用者天天看到的 UI 來說，這是開發者每天的麻煩。
 4. **Keyboard event 微妙。** 部分 keyboard event 在 shadow root 內行為不同（focus boundary、retargeting）。dddk 重度依賴鍵盤輸入 — palette、gesture、語音 trigger — 我們不想招惹這些邊角案例。
 5. **Tree-shake + bundle size。** Shadow DOM 模式要自己的 style injection path。出一個 CSS 檔讓 host bundler 自己 dedupe 比較簡單也比較小。
 

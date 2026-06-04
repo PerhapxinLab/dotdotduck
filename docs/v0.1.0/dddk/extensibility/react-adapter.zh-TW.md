@@ -1,6 +1,6 @@
 # dotdotduck — React Adapter
 
-> dotdotduck core 是純 DOM + event emitter，無框架。React adapter 把它包成 React hooks 讓 React 用戶更舒服。Vue / Svelte 用戶可以直接用 core API，未來有需求再加 adapter。
+> dotdotduck core 是純 DOM + event emitter，跟框架無關。React adapter 把它包成 React hooks，讓 React 使用者用起來更順手。Vue / Svelte 使用者可以直接用 core API，未來有需求再加 adapter。
 
 ## 安裝
 
@@ -145,7 +145,7 @@ function SurfaceLayer() {
 同上，預設不需要。
 
 ### `<SurfaceHost placement="center" />`
-Surface 的 portal host — 預先把 `useSurface()` 跟 `PieceRenderer` 接到指定 placement 上。React 用戶可以自己決定 portal target。
+Surface 的 portal host — 預先把 `useSurface()` 跟 `PieceRenderer` 接到指定 placement 上。React 使用者可以自己決定 portal target。
 
 ## SSR
 
@@ -201,8 +201,8 @@ export function Providers({ children }) {
 
 ## 為什麼分開包 React adapter
 
-- 純 core 用戶不必拉 React peer dep
-- React 用戶可以雙包都裝
+- 純 core 使用者不必拉 React peer dep
+- React 使用者可以雙包都裝
 - Vue / Svelte adapter 未來照樣加
 
 `@perhapxin/dddk-react` 的 peer deps：
