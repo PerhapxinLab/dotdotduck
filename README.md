@@ -49,9 +49,7 @@
 <td width="45%" valign="top">
 
 - **DOM-grounded autonomous loop.** Reads the visible page, picks one tool at a time, narrates each step in the subtitle bar before it runs.
-- **Indexed DOM dump.** Every actionable element gets a numeric `[N]` index; the LLM passes that index back instead of guessing CSS selectors. Viewport markers (`↑` / `↓`) tell it what the user can actually see.
 - **12 built-in actions** — `navigate`, `click`, `fill_input`, `ask_user_choice`, and friends. Add your own; the LLM picks them.
-- **Optional page screenshots.** Off by default; opt in with `screenshot: 'viewport'` or `'full-page'` (auto-split for tall pages) when the agent needs to comment on visual content the DOM dump can't convey.
 - **Space-gated every step.** Single tap accept · double-tap reject · Esc cancel. Users see what's about to happen *before* it happens.
 - **Asks back when ambiguous.** `ask_user_choice` for 2-4 options, `ask_user` for free text. No silent decisions, no guessing.
 - **Bring your own keys.** LLM via OpenAI, Google AI Studio, or a server-side `ProxyProvider`; per-role routing keeps cheap models on cleanup and the flagship on the agent loop. STT defaults to the browser's Web Speech for zero-setup; swap to Whisper or any vendor via one `transcribe(audio)` callback.
@@ -74,7 +72,6 @@
 - **Highlight any text** in any `<input>` / `<textarea>` / `[contenteditable]` — a floating toolbar appears below the selection. Pick an action, the result streams back in place of the selection.
 - **Seven default actions** — Translate, Improve writing, Fix spelling & grammar, Make shorter, Make longer, Change to professional tone, Explain this. Drop the defaults, add your own (`/translate-with-glossary`, `/rewrite-as-email`).
 - **Two-column layout** option for editor hosts that want a `Format` column next to an `AI` column. Optional keyboard shortcuts (e.g. `Ctrl+Shift+R` to rewrite without opening the menu).
-- **IME-composition-aware** — typing Chinese / Japanese / Korean candidate characters never accidentally triggers the toolbar. Critical for CJK users; nothing else handles this right.
 
 </td>
 </tr>
@@ -197,10 +194,10 @@ Four physical ways to send context into dddk. No new vocabulary to learn.
 </td>
 <td width="45%" valign="top">
 
-- **Every interaction emits a typed event.** Palette opens, voice transcripts, agent answers, accept / reject gestures, Dwell pins, multi-choice picks — all flow through one structured stream.
-- **Event types** include `palette_activated` · `voice_attempt` · `proactive_accepted` · `agent_choice` · `agent_feedback` · `dwell_pinned` · `inline_ai_applied`. Add your own and they ride the same channel.
+- **Every interaction emits a typed event.** Palette opens, voice transcripts, agent answers, accept / reject gestures, Dwell selections, multi-choice picks, even per-LLM-call streaming perf — all flow through one structured stream.
+- **Event types** include `palette_activated` · `voice_captured` · `agent_asked` / `agent_answered` (with `latencyMs`) · `agent_run_started` / `completed` / `stopped` · `agent_pause_decision` · `agent_llm_call` (TTFT, tokens/sec, model) · `confirm_action` · `selection_used` · `skill_started` / `finished` · `agent_feedback`. Add your own and they ride the same channel.
 - **Clean behavioural data, no big-data fishing.** You learn what users want from what they actually asked + answered, not from inferring through clickstreams.
-- **Bundled dashboard route** turns the stream into charts out of the box, or subscribe in code and pipe to Mixpanel / Amplitude / your own BI.
+- **Bundled dashboard route** turns the stream into charts out of the box — yes-rate over time, TTFT / tok-per-sec by model, agent-run completion rate, top palette items, geography — or subscribe in code and pipe to Mixpanel / Amplitude / your own BI.
 
 </td>
 </tr>
