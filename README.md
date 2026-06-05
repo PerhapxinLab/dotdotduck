@@ -191,6 +191,8 @@ Four physical ways to send context into dddk. No new vocabulary to learn.
 <tr>
 <td width="55%" valign="top">
   <img src="./media/readme/dddk-dashboard.png" alt="dotdotduck dashboard: 3 sessions, 2 visitors, 577 events, 118 palette opens, geography panel, top palette items table" />
+  <br /><br />
+  <img src="./media/readme/dddk-dashboard-2.png" alt="dotdotduck dashboard — LLM streaming perf tile (avg TTFT, tok/s, duration) + by-model breakdown table + agent runs summary" />
 </td>
 <td width="45%" valign="top">
 
