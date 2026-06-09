@@ -132,6 +132,14 @@ export class WebAgent {
       // section) makes clear the user's actual input language overrides
       // this hint on every turn — so the locale is "starting guess",
       // not a hard signal that biases the model.
+      // Spread INPUT FIRST so the defaults below win for any property
+      // the host left undefined. Previously the spread came LAST and
+      // would overwrite the defaults with `undefined` when the host
+      // passed a partial config — this is why navigate confirm dialogs
+      // were rendering in English even when the host was clearly on
+      // a Chinese page (the locale default was being clobbered by the
+      // host's missing `locale` field).
+      ...config,
       locale:
         config.locale ??
         ((typeof navigator !== 'undefined' && navigator.language?.startsWith('zh')
@@ -144,7 +152,6 @@ export class WebAgent {
       sessionStorageKey: config.sessionStorageKey ?? DEFAULT_SESSION_KEY,
       sessionContinuityMs: config.sessionContinuityMs ?? DEFAULT_CONTINUITY_MS,
       sessionScope: config.sessionScope ?? 'time',
-      ...config,
     };
 
     // Filter builtins by host's `disableBuiltinActions` list. Use a Set
