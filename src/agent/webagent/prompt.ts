@@ -121,7 +121,7 @@ function renderDefault(ctx: PromptContext): string {
   // Persona, if supplied, comes RIGHT AFTER the header so identity
   // framing dominates downstream rules. Without this it tends to lose
   // to the more concrete narration / safety rules below.
-  const personaBlock = renderPersona(ctx.persona);
+  const personaBlock = renderPersona(ctx.persona, ctx.siteName);
   if (personaBlock) sections.push(personaBlock);
   sections.push(renderNarrationRules());
   // (Palette command list is injected into `run_palette`'s tool
@@ -161,7 +161,7 @@ function renderCotDefault(ctx: PromptContext): string {
   const dd = String(now.getDate()).padStart(2, '0');
   sdkBlock.push(`You are ${ctx.agentName}${siteClause}, an in-page assistant. Today is ${yyyy}-${mm}-${dd}.`);
 
-  const personaBlock = renderPersona(ctx.persona);
+  const personaBlock = renderPersona(ctx.persona, ctx.siteName);
   if (personaBlock) sdkBlock.push(personaBlock);
 
   if (ctx.toolReference) {
@@ -172,14 +172,24 @@ ${ctx.toolReference}`);
 
   sdkBlock.push(`# Envelope
 
-Each turn call \`agent_turn\` with:
-- **memory** — private 1-2 sentence recap: "Last turn: <what just finished>. Still remaining: <head of todos>." When the original request is fully covered, write "All done — ending loop." and emit todos_remaining = [] + actions = [] / omitted. Items already covered are DONE WELL — never re-explain, re-frame, or add supplementary detail. Only describe forward motion.
+Each turn calls \`agent_turn\` with:
+- **memory** — private 1-2 sentence recap of the previous turn. Items already covered stay covered. Only describe forward motion.
 - **todos_remaining** — items still owed to the user's original request.
-- **actions** — ordered list of steps. Each step is one of:
-  - \`{tool, args}\` — DO it. Pick the tool that fits the next required step: navigate when the todo needs a page change, click when something needs activating, ask_user_choice when the user has to decide, etc. Tool calls are how real things happen.
-  - \`{narrate, about?}\` — SAY it (declarative statement streamed to the subtitle). Used to describe / explain / point at things. \`about\` = \`[id]\` of the element being described; runtime auto-borders it. NEVER a question, NEVER a substitute for a tool call. If the head of \`todos_remaining\` requires a tool, narrating about it does NOT clear it — the tool must appear in this turn's actions[].
-  - \`{task_finish: true}\` — end-of-loop marker. Use ONLY when the user's original TASK is FINISHED — fully satisfied AND there is nothing more to do. NEVER use \`task_finish\` in the same turn as \`ask_user_choice\` (user hasn't answered yet), \`navigate\` / \`click\` / \`fill_input\` (page just changed, you must react first), or any tool whose result you have not yet observed. task_finish = "the user's request has been completely satisfied"; not "I have planned my next step".
+- **actions** — ordered list of steps for this turn. Each step is one of:
+  - \`{tool, args}\` — perform an action. Tool calls are how real things happen on the page.
+  - \`{narrate, about?}\` — speak a declarative sentence to the subtitle. \`about\` is the \`[id]\` of the element being described; runtime auto-borders it. A narrate never substitutes for a tool the todo requires.
+  - \`{task_finish: true}\` — see # Finishing below.
   - Empty / omitted \`actions\` also ends the loop (legacy path).`);
+
+  sdkBlock.push(`# Finishing
+
+When the user's original ask is covered, emit \`{task_finish: true}\` in the same turn that finishes the answer. Once the answer is given, the task is over. Do not add follow-up narrates restating the same thing in different words. Do not add a closing summary. Do not ask whether the user wants anything else.
+Re-narrating something already covered is a bug, not thoroughness. If memory says it is covered, it is covered.
+The only reason to delay task_finish is when the current turn's last action has not produced its result yet — a reaction-requiring tool whose answer the next turn must read.`);
+
+  sdkBlock.push(`# Language
+
+Reply in the language of the user's latest message. The user, not the page and not the browser, decides the conversation language. Only fall back to a default when the user's input carries no language signal at all.`);
 
   sdkBlock.push(`# DOM
 
@@ -277,20 +287,26 @@ function renderBrand(brand: BrandPrompt): string {
  * input returns '' so the section is silently skipped — the SDK ships
  * with NO default persona, hosts opt in.
  *
- * The block is intentionally directive ("you ARE …, speak as 'we'") so
- * smaller models actually shift voice. Without this, models default to
- * a third-person observer narrating the page DOM — which reads to users
- * as the agent being unaware of its own context.
+ * The block is directive so smaller models actually shift voice.
+ * Without this, models default to a third-person observer narrating
+ * the page DOM, which reads to users as the agent being unaware of
+ * its own context.
+ *
+ * Default identity: when the host passes no persona, the SDK still
+ * ships a baseline that frames the agent as the team behind the
+ * product. Hosts wanting a different voice override by passing a
+ * full `PersonaConfig`.
  */
-function renderPersona(persona: PersonaInput | undefined): string {
-  if (!persona) return '';
-  const cfg: PersonaConfig = typeof persona === 'string'
-    ? { identity: persona }
-    : persona;
-  if (!cfg.identity?.trim()) return '';
-  const lines: string[] = ['# Who you are', '', cfg.identity.trim()];
+function renderPersona(persona: PersonaInput | undefined, siteName?: string): string {
+  const cfg: PersonaConfig = persona === undefined
+    ? { identity: defaultIdentity(siteName) }
+    : typeof persona === 'string'
+      ? { identity: persona }
+      : persona;
+  const identity = cfg.identity?.trim() || defaultIdentity(siteName);
+  const lines: string[] = ['# Who you are', '', identity];
   lines.push('');
-  lines.push('Speak as this identity — first-person ("we"), never "the site says…".');
+  lines.push('Speak first-person plural about anything this site / product offers. You are the team, not an observer narrating the page.');
   if (cfg.voice?.trim()) {
     lines.push('');
     lines.push(`Voice: ${cfg.voice.trim()}`);
@@ -301,6 +317,13 @@ function renderPersona(persona: PersonaInput | undefined): string {
     for (const c of cfg.constraints) lines.push(`- ${c}`);
   }
   return lines.join('\n');
+}
+
+function defaultIdentity(siteName?: string): string {
+  const site = siteName?.trim();
+  return site
+    ? `You are part of ${site} — the team that built and runs the product the user is on right now. You are not a tour guide. You are not narrating the page. You ARE the company, answering as we would answer a real customer.`
+    : 'You are part of the team that built and runs the product the user is on right now. You are not a tour guide. You are not narrating the page. You ARE the team, answering as we would answer a real customer.';
 }
 
 /**

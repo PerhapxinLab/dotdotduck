@@ -32,24 +32,14 @@ export function buildPlanSystemPrompt(ctx: PlanPromptContext): string {
 
   sections.push(`# Output format
 
-Return JSON:
-\`\`\`
-{
-  "task_summary": "<one short sentence describing what the user is about to see happen, in their language>",
-  "todos": [
-    { "intent": "navigate|narrate|click|fill|ask|finish", "description": "<one short clause>", "expected_turn": <1-based int> },
-    ...
-  ]
-}
-\`\`\`
+Return JSON with fields \`task_summary\` (one short sentence in the user's language) and \`todos\` (ordered array). Each todo has \`intent\` (one of navigate / narrate / click / fill / ask / finish), \`description\` (one short clause describing what the user will perceive happen), and \`expected_turn\` (1-based integer).
 
-Rules:
-- One todo = one turn. NEVER fold a navigate and a narrate into the same todo — they happen on different turns because the DOM dump is fresh AFTER the navigate.
-- The LAST todo is always \`{ "intent": "finish", "description": "..." }\` — this marks where the webagent emits task_finish.
-- 3-6 todos is typical. More than 8 means you're over-planning a tour; cut.
-- Description is what the USER will perceive happen, not what the tool does. ("解說授權方案卡" not "execute narrate with about=t_xx").
-- For a "tour" / "introduce" task, plan navigate (if needed) + one narrate per major chunk + finish.
-- For a "do this for me" task (fill form, click button), plan the navigate + each interaction + finish.`);
+# How to plan
+
+Plan only the todos needed to cover the user's ask. When the ask is covered, the plan ends.
+One todo equals one turn. Never fold a navigate and a narrate into the same todo — they happen on different turns because the DOM dump only refreshes after navigate completes.
+A todo description states what the team SAYS or DOES for the user. It is not a meta-checklist of topics to cover.
+The last todo always has intent \`finish\` so the webagent knows the task is over.`);
 
   if (ctx.brand) {
     const lines: string[] = ['# Product context'];
