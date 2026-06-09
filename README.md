@@ -19,6 +19,10 @@
 
 <p align="center"><a href="./README.zh-TW.md">繁體中文 →</a></p>
 
+<p align="center">
+  <a href="./media/battle-for-the-browser.mp3">♪ Battle for the Browser — dotdotduck theme song</a>
+</p>
+
 ---
 
 ## 01 · Command palette — every feature, behind one panel
@@ -340,8 +344,4 @@ See [LICENSE](./LICENSE) for the full text or reach the maintainer through the r
 
 ---
 
-<p align="center">
-  Built by Perhapxin Team
-  &nbsp;·&nbsp;
-  <a href="./media/battle-for-the-browser.mp3">♪ Battle for the Browser — dotdotduck theme song</a>
-</p>
+<p align="center">Built by Perhapxin Team</p>

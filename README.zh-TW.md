@@ -19,6 +19,10 @@
 
 <p align="center"><a href="./README.md">English →</a></p>
 
+<p align="center">
+  <a href="./media/battle-for-the-browser.mp3">♪ Battle for the Browser — dotdotduck 主題曲</a>
+</p>
+
 ---
 
 ## 01 · 命令面板 — 所有功能，住進同一塊面板
@@ -340,8 +344,4 @@ dddk.mount();
 
 ---
 
-<p align="center">
-  Built by Perhapxin Team
-  &nbsp;·&nbsp;
-  <a href="./media/battle-for-the-browser.mp3">♪ Battle for the Browser — dotdotduck 主題曲</a>
-</p>
+<p align="center">Built by Perhapxin Team</p>
