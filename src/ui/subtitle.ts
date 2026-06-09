@@ -1112,14 +1112,22 @@ export class Subtitle {
 
   private formatPageHint(idx: number, total: number, isLast: boolean): string {
     const zh = this.locale === 'zh-TW';
-    if (isLast) {
-      return zh
-        ? `${idx}/${total} ｜ space 同意 ｜ 雙擊 space 拒絕`
-        : `${idx}/${total} · space accept · double-tap reject`;
-    }
-    return zh
-      ? `${idx}/${total} ｜ space → 下一段`
-      : `${idx}/${total} · space → next page`;
+    // Returns HTML directly (the caller's `startsWith('<div bar-hints')`
+    // path inlines it without escaping). Left span = page counter,
+    // right span = navigation hint, flex justified so they read as
+    // two separate pieces of info rather than one concatenated string.
+    // Both intermediate and last pages carry the exit hint so the user
+    // always sees the double-space-to-exit option mid-tour.
+    const counter = `${idx}/${total}`;
+    const action = isLast
+      ? (zh ? 'space 下一步 ｜ 兩下 space 直接結束' : 'space → next · double space → exit')
+      : (zh ? 'space → 下一段 ｜ 兩下 space 直接結束' : 'space → next page · double space → exit');
+    return (
+      `<div ${UI_ATTR}="bar-hints" style="display:flex;justify-content:space-between;gap:16px;">`
+      + `<span>${counter}</span>`
+      + `<span>${escapeHtml(action)}</span>`
+      + `</div>`
+    );
   }
 
   private renderHints(opts: SubtitleShowOptions): string {
@@ -1162,17 +1170,17 @@ export class Subtitle {
       },
     } : {
       'zh-TW': {
-        voice: 'Tab 一行 ｜ space 同意 ｜ 雙擊 space 拒絕',
-        selection: 'space 接受 ｜ 雙擊 space 拒絕',
-        agent: 'space 繼續 ｜ 雙擊 space 結束',
-        post: 'space 接受 ｜ 雙擊 space 拒絕',
+        voice: 'Tab 一行 ｜ space 同意 ｜ 兩下 space 拒絕',
+        selection: 'space 接受 ｜ 兩下 space 拒絕',
+        agent: 'space 下一步 ｜ 兩下 space 直接結束',
+        post: 'space 接受 ｜ 兩下 space 拒絕',
         info: '按 space 關閉',
       },
       en: {
-        voice: 'Tab line · space accept · double-tap reject',
-        selection: 'space accept · double-tap reject',
-        agent: 'space continue · double-tap exit',
-        post: 'space accept · double-tap reject',
+        voice: 'Tab line · space to accept · double space to reject',
+        selection: 'space to accept · double space to reject',
+        agent: 'space → next · double space → exit',
+        post: 'space to accept · double space to reject',
         info: 'press space to close',
       },
     };
