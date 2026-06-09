@@ -1607,28 +1607,44 @@ export class DotDotDuck {
 
   private async runScriptSkill(skill: ScriptSkill): Promise<void> {
     let i = 0;
-    for (const step of skill.steps) {
-      this.emitter.emit('skill_step', { skillId: skill.id, stepIndex: i });
+    try {
+      for (const step of skill.steps) {
+        this.emitter.emit('skill_step', { skillId: skill.id, stepIndex: i });
 
-      if (step.page) this.navigate(step.page);
-      if (step.subtitle) {
-        this.subtitle.show({ text: step.subtitle, type: 'agent' });
-      }
-      if (step.action) {
-        await step.action(this.buildSkillTools());
-      }
-      if (step.waitForUser !== false) {
-        const outcome = await this.waitForAcceptOrEscape();
-        // Esc OR double-tap space both exit the tour early — double-tap
-        // is the canonical "no/dismiss" gesture and should behave like Esc.
-        if (outcome !== 'accept') {
-          this.subtitle.hide();
-          this.clearHighlight();
-          break;
+        if (step.page) this.navigate(step.page);
+        if (step.subtitle) {
+          this.subtitle.show({ text: step.subtitle, type: 'agent' });
         }
+        if (step.action) {
+          await step.action(this.buildSkillTools());
+        }
+        if (step.waitForUser !== false) {
+          const outcome = await this.waitForAcceptOrEscape();
+          // Esc OR double-tap space both exit the tour early — double-tap
+          // is the canonical "no/dismiss" gesture and should behave like Esc.
+          if (outcome !== 'accept') {
+            break;
+          }
+        }
+        this.subtitle.hide();
+        i++;
       }
+    } finally {
+      // Every exit path (normal completion, user double-tap exit, esc,
+      // thrown step) clears ALL agent / tour surface state. Without this
+      // the last subtitle / streaming indicator / highlight could linger
+      // and the user thinks the agent is still working when the tour
+      // actually ended. Belt-and-braces — individual break paths used
+      // to clear partially; centralising it here means there is exactly
+      // one "skill is over" cleanup contract.
       this.subtitle.hide();
-      i++;
+      this.subtitle.hideIndicator();
+      this.clearHighlight();
+      // If a webagent loop happened to be running alongside the script
+      // (rare — host might have started one for unrelated work), stop it
+      // so the user's idea of "the tour ended" matches reality. Safe
+      // no-op when no agent is running.
+      try { this.stopAgent(); } catch { /* swallow */ }
     }
   }
 
