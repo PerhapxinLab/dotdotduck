@@ -262,6 +262,16 @@ export class Dwell {
     // Mouse
     const mouseDown = (e: MouseEvent) => {
       if (e.button !== 0) return; // only primary button
+      // Scrollbar guard. Browser-rendered scrollbars sit OUTSIDE the
+      // document's `clientWidth` / `clientHeight` rect — clicks on them
+      // still arrive at `<html>` as the event target. Without this
+      // check, holding the scrollbar to scroll triggered Dwell and
+      // framed the entire <html> element.
+      const doc = document.documentElement;
+      if (
+        e.clientX > doc.clientWidth ||
+        e.clientY > doc.clientHeight
+      ) return;
       onDown(e.clientX, e.clientY, e.target, modifiersFromEvent(e));
     };
     const mouseMove = (e: MouseEvent) => onMove(e.clientX, e.clientY, e.target);
