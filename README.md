@@ -17,6 +17,8 @@
   <a href="https://dddk.perhapxin.com/docs/v0.1.0/dddk/overview"><img src="https://img.shields.io/badge/docs-online-blue?style=flat-square" alt="docs" /></a>
 </p>
 
+<p align="center"><a href="./README.zh-TW.md">繁體中文 →</a></p>
+
 ---
 
 ## 01 · Command palette — every feature, behind one panel
