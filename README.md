@@ -19,10 +19,6 @@
 
 <p align="center"><a href="./README.zh-TW.md">繁體中文 →</a></p>
 
-<p align="center">
-  <a href="./media/battle-for-the-browser.mp3">♪ Battle for the Browser — dotdotduck theme song</a>
-</p>
-
 ---
 
 ## 01 · Command palette — every feature, behind one panel
