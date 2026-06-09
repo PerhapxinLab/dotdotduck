@@ -340,4 +340,8 @@ See [LICENSE](./LICENSE) for the full text or reach the maintainer through the r
 
 ---
 
-<p align="center">Built by Perhapxin Team</p>
+<p align="center">
+  Built by Perhapxin Team
+  &nbsp;·&nbsp;
+  <a href="./media/battle-for-the-browser.mp3">♪ Battle for the Browser — dotdotduck theme song</a>
+</p>

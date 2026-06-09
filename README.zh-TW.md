@@ -340,4 +340,8 @@ dddk.mount();
 
 ---
 
-<p align="center">Built by Perhapxin Team</p>
+<p align="center">
+  Built by Perhapxin Team
+  &nbsp;·&nbsp;
+  <a href="./media/battle-for-the-browser.mp3">♪ Battle for the Browser — dotdotduck 主題曲</a>
+</p>
