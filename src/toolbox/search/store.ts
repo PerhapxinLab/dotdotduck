@@ -10,22 +10,26 @@ export class SearchStore {
   docs = new Map<string, Doc>();
   fieldStats = new Map<string, { totalLength: number; docCount: number }>();
   totalDocs = 0;
-  features = new Map<string, string[]>(); // docId → unique features (for similarTo / removal)
+  features = new Map<string, string[]>();
+  private docFieldLengths = new Map<string, Record<string, number>>();
 
   add(doc: Doc, extract: Extract): void {
     if (this.docs.has(doc.id)) this.remove(doc.id);
     this.docs.set(doc.id, doc);
     this.totalDocs++;
     const fieldFeats = new Map<string, string[]>();
+    const perFieldLen: Record<string, number> = {};
     for (const [field, value] of Object.entries(doc.fields)) {
       const str = String(value ?? '');
       const feats = extract(str);
       fieldFeats.set(field, feats);
+      perFieldLen[field] = feats.length;
       const stat = this.fieldStats.get(field) ?? { totalLength: 0, docCount: 0 };
       stat.totalLength += feats.length;
       stat.docCount++;
       this.fieldStats.set(field, stat);
     }
+    this.docFieldLengths.set(doc.id, perFieldLen);
     const featCounts = new Map<string, Record<string, number>>();
     for (const [field, feats] of fieldFeats) {
       for (const f of feats) {
@@ -61,14 +65,15 @@ export class SearchStore {
       if (next.length === 0) this.postings.delete(f);
       else this.postings.set(f, next);
     }
-    for (const [field, value] of Object.entries(doc.fields)) {
+    const perFieldLen = this.docFieldLengths.get(docId) ?? {};
+    for (const field of Object.keys(doc.fields)) {
       const stat = this.fieldStats.get(field);
       if (!stat) continue;
-      const guessLen = this.features.get(docId)?.length ?? 0;
-      stat.totalLength = Math.max(0, stat.totalLength - guessLen);
+      const len = perFieldLen[field] ?? 0;
+      stat.totalLength = Math.max(0, stat.totalLength - len);
       stat.docCount = Math.max(0, stat.docCount - 1);
-      void value;
     }
+    this.docFieldLengths.delete(docId);
     this.features.delete(docId);
     this.docs.delete(docId);
     this.totalDocs = Math.max(0, this.totalDocs - 1);

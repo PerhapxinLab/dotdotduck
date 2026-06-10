@@ -14,8 +14,6 @@ import type {
 
 export type { SearchOpts, SearchResult, SearchScorer, SearchContext, QueryOpts } from './types.js';
 export const builtin = builtinAll.builtin;
-export { learnRankingWeights } from './learn.js';
-export type { ClickEvent, LearnOpts, LearnedWeights } from './learn.js';
 
 const SNAPSHOT_KEY = (id: string) => `search:${id}:snapshot`;
 const VERSION_KEY = (id: string) => `search:${id}:version`;
@@ -125,7 +123,8 @@ export class Search<TRow = unknown> {
     }
     results.sort((a, b) => b.score - a.score);
     const top = results.slice(0, opts.topK ?? this.topK);
-    if (this.lowConfHook && top.length > 0 && (top[0]?.score ?? 0) < (opts.scoreThreshold ?? this.scoreThreshold) * 2) {
+    const threshold = opts.scoreThreshold ?? this.scoreThreshold;
+    if (this.lowConfHook && top.length > 0 && threshold > 0 && (top[0]?.score ?? 0) < threshold * 2) {
       return await this.lowConfHook(text, top);
     }
     return top;

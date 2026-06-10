@@ -1,107 +1,61 @@
 /**
- * Structured CoT turn — per-turn schema that forces the model to emit
- * memory + next_goal BEFORE the action list.
+ * Structured CoT turn — per-turn schema that wraps the model's response
+ * in a single `agent_turn` tool call with strict JSON schema.
  *
- * Wraps the entire turn response inside a single tool call (`agent_turn`)
- * with a strict JSON schema. The runtime parses the tool args, then
- * iterates `actions[]` in order — emitting `narrate` items to the subtitle
- * bar and dispatching `tool` items through the regular action handlers.
- *
- * Why a single wrapping tool rather than `response_format: json_schema`:
- *   - All providers (OpenAI / Anthropic / Gemini / DeepSeek) support
- *     forced tool calls with strict schemas; not all support json_schema
- *     response format yet.
- *   - Tool-call streaming gives us the function.arguments token stream
- *     we can incrementally parse for narration deltas.
+ * Schema property order matters for streaming: `actions` is always emitted
+ * BEFORE `is_final` so the model fully commits to the work plan before
+ * declaring the task complete.
  */
 
 import type { ToolDefinition } from '../llm/types';
 
-/**
- * Minimal tool reference passed to `buildAgentTurnTool`. The runtime
- * exposes each built-in action's `{ name, description, parameters }`
- * here so the model sees per-tool arg schemas inline in the agent_turn
- * description — without this, the model only saw tool names as an enum
- * and had to guess argument shapes (which manifested as `navigate` calls
- * with empty path, etc.).
- */
 export interface CotToolRef {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
 }
 
-/** One step inside a CoT turn — narration, a tool call, or an explicit
- *  end-of-loop signal. */
+/** One step inside a CoT turn — narration or a tool call. Finish is now a
+ *  turn-level `is_final` boolean (see TurnResponse). The legacy
+ *  `{ task_finish: true }` action is parsed for back-compat and folded
+ *  into `is_final` on the parsed TurnResponse. */
 export type TurnAction =
   | { narrate: string; about?: string }
-  | { tool: string; args?: Record<string, unknown> }
-  | { task_finish: true };
+  | { tool: string; args?: Record<string, unknown> };
 
-/** Per-turn planning fields — present only when the webagent run started
- *  with a pre-loop `Plan.makeTodos()` call. They force the model to be
- *  explicit about what last turn did, what this turn is doing, and
- *  whether this turn closes the run. Without them ("legacy" mode), the
- *  model just emits `memory + todos_remaining`. */
+/** Per-turn planning fields — present only in planned mode. browser-use's
+ *  minimal validated set: previous-eval + next-goal. The top-level `memory`
+ *  field on TurnResponse carries the progress recap. */
 export interface TurnPlanning {
-  /** What did the previous turn try, and did it work? Read action_results
-   *  from the prior tool message before writing. */
-  last_turn_outcome: string;
-  /** Briefly describe what you see on the page RIGHT NOW from the latest
-   *  DOM dump — chunks, sections, anything that informs this turn's pick. */
-  current_page_observation: string;
-  /** What this turn's actions[] will accomplish — anchor to a specific
-   *  todo id from the master plan. */
-  this_turn_does: string;
-  /** True iff this turn's actions[] ends with `{task_finish: true}`. */
-  will_finish_this_turn: boolean;
+  evaluation_previous_goal: string;
+  next_goal: string;
 }
 
 /** Mutations applied to `session.plan.todos` after this turn's actions
  *  run. NO insert — the master plan is locked at run start; mid-loop the
  *  model can only mark items done (`remove`) or rewrite stale ones
- *  (`replace`). If the plan was wildly wrong, the model uses `replace`
- *  aggressively rather than adding new entries. */
+ *  (`replace`). */
 export interface TodoAdjust {
-  /** Master todo ids the previous turn completed. */
   remove?: string[];
-  /** Master todos whose description / intent diverged from reality —
-   *  rewrite in place (id preserved). */
   replace?: Array<{ id: string; new_description: string; new_intent?: string }>;
 }
 
-/** Full parsed turn response. Two modes:
- *
- *  - **legacy** — `memory + todos_remaining + actions`. Used when
- *    `WebAgentConfig.planner` is unset; the model carries the plan in
- *    `todos_remaining`.
- *  - **planned** — `memory + turn_planning + todo_adjust + actions`.
- *    Used when a pre-loop planner produced a `session.plan.todos`
- *    master list. The model reads the master plan as context, declares
- *    this turn's intent via `turn_planning`, and mutates the master via
- *    `todo_adjust`. */
+/** Full parsed turn response. */
 export interface TurnResponse {
-  /** Short progress note. ~1-2 sentences. */
   memory: string;
-  /** Legacy mode only. */
   todos_remaining?: string[];
-  /** Planned mode only. */
   turn_planning?: TurnPlanning;
-  /** Planned mode only. */
   todo_adjust?: TodoAdjust;
-  /** This turn's actions, in order. */
   actions: TurnAction[];
+  /** True iff the user's original task has been fully satisfied by this
+   *  turn's actions[]. Set ONLY after actions[] is complete. Ending a turn
+   *  with `is_final: true` terminates the run; `false` (or omitted) keeps
+   *  the loop going. */
+  is_final?: boolean;
 }
 
-/** Name of the synthetic tool that wraps every CoT turn. */
 export const AGENT_TURN_TOOL = 'agent_turn';
 
-/**
- * Render the tool reference (name + description + JSON Schema for args)
- * for every action exposed this turn. Lives on the SYSTEM prompt now —
- * the agent_turn tool description only carries the envelope shape so
- * we don't duplicate the tool list in two places the model has to read.
- */
 export function renderToolReference(availableTools: readonly CotToolRef[]): string {
   return availableTools.map((t) => {
     const params = JSON.stringify(t.parameters);
@@ -109,14 +63,6 @@ export function renderToolReference(availableTools: readonly CotToolRef[]): stri
   }).join('\n\n');
 }
 
-/**
- * Tool definition the LLM sees when CoT mode is on. The runtime forces
- * `tool_choice: { type: 'function', function: { name: 'agent_turn' } }`
- * so every turn returns one (and only one) `agent_turn` call.
- */
-/** Whether the webagent run has a master plan attached. Controls which
- *  envelope shape the model is asked for: legacy (todos_remaining) vs
- *  planned (turn_planning + todo_adjust). */
 export interface AgentTurnSchemaOptions {
   planned?: boolean;
 }
@@ -133,33 +79,25 @@ export function buildAgentTurnTool(
     type: 'string',
     description: planned
       ? 'Private 1-2 sentence recap of what the previous turn tried and whether it worked. Read action_results from the previous tool message before writing. A failure means the next turn retries with a corrected arg, not moves on.'
-      : 'Private 1-2 sentence progress recap. Describe forward motion only. Items already covered in previous turns are DONE — never go back to re-explain, re-frame, or supplement them. Do not invent new todos because the DOM dump shows more content than the user asked about; todos are derived from the user\'s original request, not from the page. NEVER ask the user a question they already answered earlier in this run — reuse their prior choice. When a tool fails, retry with a corrected arg, not by restarting from the user.',
+      : 'Private 1-2 sentence progress recap. Describe forward motion only. Items already covered in previous turns are DONE — never go back to re-explain. Do not invent new todos because the DOM dump shows more than the user asked about; todos are derived from the user\'s original request. NEVER ask the user a question they already answered. When a tool fails, retry with a corrected arg, not by restarting from the user.',
   };
 
   if (planned) {
     properties.turn_planning = {
       type: 'object',
       additionalProperties: false,
-      required: ['last_turn_outcome', 'current_page_observation', 'this_turn_does', 'will_finish_this_turn'],
+      required: ['evaluation_previous_goal', 'next_goal'],
       properties: {
-        last_turn_outcome: {
+        evaluation_previous_goal: {
           type: 'string',
           description: 'One short clause: what the previous turn tried and whether it succeeded or failed. For turn 1, say so explicitly.',
         },
-        current_page_observation: {
-          type: 'string',
-          description: 'What the latest DOM dump shows that informs this turn — what changed since last turn, what confirms or contradicts the master plan.',
-        },
-        this_turn_does: {
+        next_goal: {
           type: 'string',
           description: 'Anchor to a specific master-plan todo id and describe what this turn\'s actions[] will accomplish.',
         },
-        will_finish_this_turn: {
-          type: 'boolean',
-          description: 'True iff this turn\'s actions[] ends with `{task_finish: true}`.',
-        },
       },
-      description: 'Per-turn planning fields. Forces explicit "last did / now seeing / now doing / will finish?" framing so the model never confuses this-turn vs next-turn work.',
+      description: 'Per-turn planning fields.',
     };
     properties.todo_adjust = {
       type: 'object',
@@ -168,7 +106,7 @@ export function buildAgentTurnTool(
         remove: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Master-plan todo ids the PREVIOUS turn completed. Removed from the live list before this turn\'s actions run.',
+          description: 'Master-plan todo ids the PREVIOUS turn completed.',
         },
         replace: {
           type: 'array',
@@ -182,23 +120,23 @@ export function buildAgentTurnTool(
               new_intent: { type: 'string' },
             },
           },
-          description: 'Master todos whose description / intent no longer matches reality — rewrite in place (id preserved). No insert — the master list size is locked at run start; morph an existing todo instead.',
+          description: 'Master todos whose description / intent no longer matches reality — rewrite in place (id preserved). No insert.',
         },
       },
-      description: 'Mutations to the master plan applied before this turn\'s actions run. Both fields optional.',
+      description: 'Mutations to the master plan. Both fields optional.',
     };
   } else {
     properties.todos_remaining = {
       type: 'array',
       items: { type: 'string' },
-      description: 'Concrete items still owed to the user\'s original request. Each turn: remove completed items. No verification items, no "ask the user if they want more" items. Empty array ends the run — omit `actions` or set to [].',
+      description: 'Concrete items still owed to the user\'s original request. Each turn: remove completed items. No verification items, no "ask the user if they want more" items. Empty array ends the run.',
     };
   }
 
   properties.actions = {
     type: 'array',
     description: planned
-      ? 'This turn\'s steps, in order. MUST be non-empty. Either narrate / tool entries to do work (then loop continues), OR `[..., {task_finish: true}]` as the LAST entry to end the run. Omitting actions ends the run with no work done — almost never what you want in planned mode.'
+      ? 'This turn\'s steps, in order. MUST be non-empty when the run is ongoing. Narrate / tool entries do the work; the loop continues until is_final is true.'
       : 'This turn\'s steps, in order. Empty / omitted ends the loop (legacy path).',
     items: {
       type: 'object',
@@ -206,11 +144,11 @@ export function buildAgentTurnTool(
       properties: {
         narrate: {
           type: 'string',
-          description: 'A short declarative statement streamed into the subtitle bar — the content the user should read. Not a preview of your next move. Not a meta status; the runtime shows its own thinking indicator. Not a question; questions go through the `ask_user_choice` tool. For multi-item content split items with `\\n` newlines rather than packing into one paragraph.',
+          description: 'A short declarative statement streamed into the subtitle bar — the content the user should read. Not a preview of your next move. Not a meta status. Not a question (use the `ask_user_choice` tool). For multi-item content split items with `\\n` newlines.',
         },
         about: {
           type: 'string',
-          description: 'Selector ([id] from DOM dump, or CSS) of the element this narrate describes. When set, the runtime auto-borders that element before streaming the narrate. Required whenever the narrate refers to anything visible on the page. Omit only for narrates not tied to any specific element.',
+          description: 'Selector ([id] from DOM dump, or CSS) of the element this narrate describes. When set, the runtime auto-borders that element before streaming. Required whenever the narrate refers to anything visible on the page.',
         },
         tool: {
           type: 'string',
@@ -222,27 +160,25 @@ export function buildAgentTurnTool(
           additionalProperties: true,
           description: 'Arguments for the tool. Required keys depend on the tool.',
         },
-        task_finish: {
-          type: 'boolean',
-          description: 'Set the action to `{ "task_finish": true }` (no narrate / tool fields) to declare the user\'s task is finished. Use only when the original request is fully satisfied and there is nothing more to do — typically as the last item in actions[] after narrates that closed the task. Do not use in the same turn as a tool whose result has not yet been observed.',
-        },
       },
     },
   };
 
-  // In legacy mode, `actions` is intentionally NOT in `required` — an
-  // empty / omitted actions array is the valid end-of-loop signal.
-  // In planned mode there's no `todos_remaining`, so the ONLY way to
-  // end the loop is `{task_finish: true}` inside actions[]; therefore
-  // actions becomes required + must be non-empty (description enforces
-  // the non-empty constraint).
+  properties.is_final = {
+    type: 'boolean',
+    description: 'Write this field LAST, AFTER actions[] is fully written. Set true ONLY when the original user request is now fully satisfied by the actions just emitted, and there is nothing more to do. False (or omitted) means the loop continues. Do not set true in the same turn as a tool whose result the next turn must observe (navigate / click / fill_input / ask_user_choice).',
+  };
+
+  // Schema requires actions and is_final in planned mode so the run has a
+  // clear terminator. In legacy mode actions can be omitted to end the
+  // loop (no is_final required).
   const required = planned
-    ? ['memory', 'turn_planning', 'actions']
+    ? ['memory', 'turn_planning', 'actions', 'is_final']
     : ['memory', 'todos_remaining'];
 
   return {
     name: AGENT_TURN_TOOL,
-    description: `Your full response for this turn. Call exactly once; don't call any other tool directly. Envelope shape and tool reference live in the system prompt.`,
+    description: `Your full response for this turn. Call exactly once; don't call any other tool directly. Property order: write memory, turn_planning, todo_adjust, actions FIRST, then is_final LAST.`,
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -252,11 +188,10 @@ export function buildAgentTurnTool(
   };
 }
 
-/**
- * Parse the JSON args from an `agent_turn` tool call into a TurnResponse.
- * Tolerant of partial / malformed input — returns `null` if unparseable
- * so the runtime can yield an error event instead of throwing.
- */
+/** Parse the JSON args from an `agent_turn` tool call. Tolerant of partial
+ *  / malformed input — returns `null` if unparseable. Back-compat: the
+ *  legacy `{ task_finish: true }` action and `will_finish_this_turn`
+ *  planning flag both fold into the parsed `is_final`. */
 export function parseTurnResponse(rawArgs: string | Record<string, unknown>): TurnResponse | null {
   let obj: unknown;
   if (typeof rawArgs === 'string') {
@@ -271,30 +206,26 @@ export function parseTurnResponse(rawArgs: string | Record<string, unknown>): Tu
   if (!obj || typeof obj !== 'object') return null;
   const r = obj as Partial<TurnResponse> & Record<string, unknown>;
 
-  // The only hard parse requirement: a memory string. Everything else is
-  // tolerated as missing — the chain naturally terminates when actions
-  // is empty.
   if (typeof r.memory !== 'string') return null;
 
   const todos_remaining: string[] | undefined = Array.isArray(r.todos_remaining)
     ? r.todos_remaining.filter((t): t is string => typeof t === 'string')
     : undefined;
 
+  let legacyFinishFromPlanning = false;
   const turn_planning: TurnPlanning | undefined = (() => {
     const tp = r.turn_planning;
     if (!tp || typeof tp !== 'object') return undefined;
-    const o = tp as Record<string, unknown>;
-    if (
-      typeof o.last_turn_outcome !== 'string'
-      || typeof o.current_page_observation !== 'string'
-      || typeof o.this_turn_does !== 'string'
-    ) return undefined;
-    return {
-      last_turn_outcome: o.last_turn_outcome,
-      current_page_observation: o.current_page_observation,
-      this_turn_does: o.this_turn_does,
-      will_finish_this_turn: o.will_finish_this_turn === true,
-    };
+    const o = tp as unknown as Record<string, unknown>;
+    if (o.will_finish_this_turn === true) legacyFinishFromPlanning = true;
+    const epg = typeof o.evaluation_previous_goal === 'string'
+      ? o.evaluation_previous_goal
+      : typeof o.last_turn_outcome === 'string' ? o.last_turn_outcome : null;
+    const ng = typeof o.next_goal === 'string'
+      ? o.next_goal
+      : typeof o.this_turn_does === 'string' ? o.this_turn_does : null;
+    if (epg === null || ng === null) return undefined;
+    return { evaluation_previous_goal: epg, next_goal: ng };
   })();
 
   const todo_adjust: TodoAdjust | undefined = (() => {
@@ -322,6 +253,7 @@ export function parseTurnResponse(rawArgs: string | Record<string, unknown>): Tu
   })();
 
   const actions: TurnAction[] = [];
+  let legacyFinishFromAction = false;
   if (Array.isArray(r.actions)) {
     for (const a of r.actions) {
       if (!a || typeof a !== 'object') continue;
@@ -331,32 +263,27 @@ export function parseTurnResponse(rawArgs: string | Record<string, unknown>): Tu
         actions.push(about ? { narrate: obj.narrate, about } : { narrate: obj.narrate });
       } else if (typeof obj.tool === 'string') {
         const args = (obj.args && typeof obj.args === 'object') ? obj.args as Record<string, unknown> : {};
-        // Strip the OpenAI-style `functions.` prefix that nano sometimes
-        // leaks into the tool field even when the schema enum is strict.
-        // The webagent dispatches by bare action name, so a leaked prefix
-        // would resolve to `Unknown action: functions.immersive_translate`
-        // and silently fail.
         const tool = obj.tool.replace(/^functions\./, '');
         actions.push({ tool, args });
       } else if (obj.task_finish === true) {
-        actions.push({ task_finish: true });
+        legacyFinishFromAction = true;
       }
     }
   }
+
+  const isFinal = r.is_final === true || legacyFinishFromAction || legacyFinishFromPlanning;
+
   const out: TurnResponse = { memory: r.memory, actions };
   if (todos_remaining !== undefined) out.todos_remaining = todos_remaining;
   if (turn_planning) out.turn_planning = turn_planning;
   if (todo_adjust) out.todo_adjust = todo_adjust;
+  if (isFinal) out.is_final = true;
   return out;
 }
 
-/** Type guards. */
 export function isNarrateAction(a: TurnAction): a is { narrate: string; about?: string } {
   return 'narrate' in a;
 }
 export function isToolAction(a: TurnAction): a is { tool: string; args?: Record<string, unknown> } {
   return 'tool' in a;
-}
-export function isTaskFinishAction(a: TurnAction): a is { task_finish: true } {
-  return 'task_finish' in a && a.task_finish === true;
 }

@@ -34,7 +34,7 @@ export interface AgentCursorConfig {
   enabled?: boolean;
 }
 
-const UI_ATTR = 'data-dddk-ui';
+import { UI_ATTR } from '../utils/dom';
 const STYLE_ID = 'dddk-agent-cursor-style';
 
 type Resolver = () => void;

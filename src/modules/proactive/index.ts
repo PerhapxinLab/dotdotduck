@@ -1,7 +1,11 @@
 import { resolveStorage } from '../../utils/storage/index.js';
 import type { StorageAdapter, StorageKind } from '../../utils/storage/types.js';
 import { betaSample } from '../../utils/text/sampling.js';
-import type { Memory } from '../../agent/memory/index.js';
+import type { Memory, DrawerMemory } from '../../agent/memory/index.js';
+
+/** Memory passed into trigger conditions — either the new 3-tier Memory
+ *  or the legacy DrawerMemory; triggers narrow as needed. */
+export type TriggerMemory = Memory | DrawerMemory;
 import { sdkString } from '../../utils/sdk-i18n';
 
 /**
@@ -25,7 +29,7 @@ export type TriggerContext = {
   dwellMs?: number;
   scrollDepth?: number;
   user?: Record<string, unknown>;
-  memory?: Memory;
+  memory?: TriggerMemory;
   customMeta?: Record<string, unknown>;
 };
 
@@ -76,7 +80,7 @@ export type FatigueConfig = {
 
 export type ProactiveOpts = {
   analytics?: AnalyticsLike;
-  memory?: Memory;
+  memory?: TriggerMemory;
   storage?: StorageKind;
   fatigue?: FatigueConfig;
   keys?: { yes?: string; no?: string; dismiss?: string };
@@ -119,7 +123,7 @@ export class Proactive {
   private state = new Map<string, PromptState>();
   private storage: StorageAdapter;
   private analytics?: AnalyticsLike;
-  private memory?: Memory;
+  private memory?: TriggerMemory;
   private opts: ProactiveOpts;
   private opened = false;
   private sessionShown = 0;
@@ -188,10 +192,13 @@ export class Proactive {
       if (!st) continue;
       if (st.dismissedInSession && fatigue.dismissPenalty?.sameId === 'session') continue;
       if (fatigue.dismissPenalty?.sameCategory && p.category) {
-        const recentSame = [...this.state.values()].some(
-          (s) => s.category === p.category && Date.now() - s.lastShownAt < (fatigue.dismissPenalty!.sameCategory ?? 0)
+        const recentDismissed = [...this.state.values()].some(
+          (s) => s.category === p.category
+            && s.dismissedInSession
+            && s.lastShownAt > 0
+            && Date.now() - s.lastShownAt < (fatigue.dismissPenalty!.sameCategory ?? 0)
         );
-        if (recentSame) continue;
+        if (recentDismissed) continue;
       }
       const results = await Promise.all(p.triggers.map((t) => t.condition(full)));
       const ok = (p.triggerLogic ?? 'AND') === 'OR' ? results.some(Boolean) : results.every(Boolean);

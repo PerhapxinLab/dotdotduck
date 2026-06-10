@@ -13,7 +13,7 @@
  */
 
 import type { OverlayItem, OverlayType } from './types';
-import { injectScopedStyle } from '../../utils/inject-style';
+import { injectScopedStyle } from '../../utils/dom';
 import { genId } from '../../utils/id';
 
 const OVERLAY_ATTR = 'data-webagent-overlay';

@@ -86,8 +86,8 @@ export interface PinnedPanelHandle {
   unmount(): void;
 }
 
+import { UI_ATTR } from '../utils/dom';
 const STYLE_ID = 'dddk-pinned-panel-style';
-const UI_ATTR = 'data-dddk-ui';
 
 const PANEL_CSS = `
   [${UI_ATTR}="pinned-panel"] {

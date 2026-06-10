@@ -1,6 +1,6 @@
-import { injectScopedStyle } from '../../utils/dom';
+import { injectScopedStyle, UI_ATTR } from '../../utils/dom';
 
-export const POPOVER_ATTR = 'data-dddk-ui';
+export const POPOVER_ATTR = UI_ATTR;
 export const POPOVER_STYLE_ID = 'dddk-dwell-style';
 
 export function ensureDwellStyles(): void {

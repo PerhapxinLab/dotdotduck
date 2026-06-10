@@ -1,53 +1,51 @@
 /**
- * LLMRouter — pick a provider per role. Lets you mix OpenAI + Gemini and
- * use different models for different jobs (cheap model for short tasks,
- * smart model for the main agent).
+ * LLMRouter — pick a provider per role.
  *
- * Pass either a single LLMProvider (same model everywhere — simplest) or
- * an LLMRouter (one provider per role).
+ * 4 roles:
+ *   - `webagent` — main agent loop (text-only)
+ *   - `vision`   — webagent with images / screenshot context. Falls back to webagent.
+ *   - `utility`  — short single-shot calls (inline AI / voice cleanup / etc). Falls back to webagent.
+ *   - `plan`     — pre-loop planner. Falls back to webagent.
  *
- * Roles fall back to `webagent` if not set, so you only have to declare
- * what you want to override.
+ * Legacy field names (`webagentWithSelection`, `inline`, `voiceCleanup`)
+ * are still accepted as fallback sources so existing host configs keep
+ * working; prefer the new names for new code.
  */
 
 import type { LLMProvider } from './types';
 
 export type LLMRole =
-  /** Main webagent loop, no selection context. */
   | 'webagent'
-  /** Webagent loop when the user had something selected on open. Falls back to `webagent`. */
+  | 'vision'
+  | 'utility'
+  | 'plan'
+  /** @deprecated — alias for `vision`. */
   | 'webagentWithSelection'
-  /** Inline AI (input-field editing, short single-shot LLM calls). Falls back to `webagent`. */
+  /** @deprecated — alias for `utility`. */
   | 'inline'
-  /** Voice transcript cleanup (remove fillers, fix punctuation). Falls back to `webagent`. */
-  | 'voiceCleanup'
-  /** Plan module — one-shot planning calls + markdown LLM edits. Falls back to `webagent`. */
-  | 'plan';
+  /** @deprecated — alias for `utility`. */
+  | 'voiceCleanup';
 
 export interface LLMRouter {
   /** Required. Default LLM for the webagent loop. All other roles fall back here. */
   webagent: LLMProvider;
-  /** Optional. Cheaper model when webagent runs with selection context. */
-  webagentWithSelection?: LLMProvider;
-  /** Optional. Small/fast model for inline AI (input-field rewrite, translate, etc). */
-  inline?: LLMProvider;
-  /** Optional. Tiny model for voice transcript cleanup. */
-  voiceCleanup?: LLMProvider;
-  /** Optional. Planning-stage model — runs once per agent run before the
-   *  turn loop. Can be the same as `webagent` (default) or a larger model
-   *  if planning quality matters more than per-turn cost. */
+  /** Used when the agent has images / screenshots to reason about. */
+  vision?: LLMProvider;
+  /** Short single-shot calls — inline AI, voice cleanup, immersive translate. */
+  utility?: LLMProvider;
+  /** Pre-loop planner. */
   plan?: LLMProvider;
+  /** @deprecated — use `vision`. */
+  webagentWithSelection?: LLMProvider;
+  /** @deprecated — use `utility`. */
+  inline?: LLMProvider;
+  /** @deprecated — use `utility`. */
+  voiceCleanup?: LLMProvider;
 }
 
 export type LLMSource = LLMProvider | LLMRouter;
 
 export function isLLMRouter(v: LLMSource): v is LLMRouter {
-  // Multi-field duck-type: a LLMRouter must be a plain object with a
-  // `webagent` member that is itself an LLMProvider (has `.complete`). This
-  // is more robust than a single negative check on `complete` — an
-  // LLMProvider implemented via subclass / proxy where `complete` is
-  // attached to the prototype rather than the instance would otherwise be
-  // misclassified.
   if (!v || typeof v !== 'object') return false;
   if (!('webagent' in v)) return false;
   const inner = (v as LLMRouter).webagent;
@@ -59,12 +57,13 @@ export function resolveLLM(source: LLMSource, role: LLMRole): LLMProvider {
   switch (role) {
     case 'webagent':
       return source.webagent;
+    case 'vision':
     case 'webagentWithSelection':
-      return source.webagentWithSelection ?? source.webagent;
+      return source.vision ?? source.webagentWithSelection ?? source.webagent;
+    case 'utility':
     case 'inline':
-      return source.inline ?? source.webagent;
     case 'voiceCleanup':
-      return source.voiceCleanup ?? source.webagent;
+      return source.utility ?? source.inline ?? source.voiceCleanup ?? source.webagent;
     case 'plan':
       return source.plan ?? source.webagent;
   }

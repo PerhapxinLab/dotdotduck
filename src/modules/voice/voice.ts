@@ -652,7 +652,7 @@ Rules:
 - Handle self-corrections: when the speaker corrects themselves mid-utterance (any phrasing equivalent to "X — no wait, Y" / "X, I mean Y" / "make it X, actually Y"), keep ONLY the final intended meaning and drop the misspoken part.
 - Preserve the speaker's original tone and register — do not rewrite into formal style.
 - Output the cleaned transcript ONLY. No preface, no explanation, no surrounding quotes, no markdown.${langHint}`);
-    const llm = resolveLLM(this.config.llm!, 'voiceCleanup');
+    const llm = resolveLLM(this.config.llm!, 'utility');
     const response = await llm.complete({
       messages: [
         { role: 'system', content: system },

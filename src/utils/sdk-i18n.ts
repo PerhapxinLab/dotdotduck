@@ -61,6 +61,9 @@ const STRINGS = {
     'palette.section.ai': 'AI',
     'palette.section.commands': 'Commands',
     'palette.section.docs': 'Docs',
+    'palette.screenshot.hint': 'Drag to select · Esc cancels',
+    'form.assist.scanning': 'Scanning {count} fields…',
+    'prefs.title': 'Settings: {skill}',
   },
   'zh-TW': {
     'agent.thinking': '思考中…',
@@ -109,6 +112,9 @@ const STRINGS = {
     'palette.section.ai': 'AI',
     'palette.section.commands': '指令',
     'palette.section.docs': '文件',
+    'palette.screenshot.hint': '拖曳框選 · Esc 取消',
+    'form.assist.scanning': '正在分析 {count} 個欄位…',
+    'prefs.title': '設定：{skill}',
   },
 } as const;
 

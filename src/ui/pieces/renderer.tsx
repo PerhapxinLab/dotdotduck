@@ -1,14 +1,13 @@
 /**
  * PieceRenderer — unified React renderer for any catalog.
- *
- * Same renderer drives:
- *  - Direct authoring (Pieces.Card({ children: [...] }))
- *  - Flat surface envelopes (translated to PieceNode then rendered)
- *  - Skill detail views in the palette
+ * Drives direct authoring, flat envelopes, and palette detail views.
  */
 
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import type { PieceCatalog, PieceContext, PieceNode, PieceSurface } from './types';
+import { readPointer, applyPointer } from './pointer';
+
+export { readPointer } from './pointer';
 
 export interface PieceRendererProps {
   surface: PieceSurface;
@@ -60,58 +59,6 @@ function renderNode(node: PieceNode, ctx: PieceContext, catalog: PieceCatalog): 
     );
   }
   return def.render(node, ctx);
-}
-
-// ─── JSON Pointer (RFC 6901, simplified) ──────────────────────────
-
-export function readPointer(data: Record<string, unknown>, path: string): unknown {
-  if (!path) return undefined;
-  if (!path.startsWith('/')) return data[path];
-  const parts = path.slice(1).split('/').map((p) => p.replace(/~1/g, '/').replace(/~0/g, '~'));
-  let cur: unknown = data;
-  for (const p of parts) {
-    if (cur && typeof cur === 'object' && p in (cur as object)) {
-      cur = (cur as Record<string, unknown>)[p];
-    } else {
-      return undefined;
-    }
-  }
-  return cur;
-}
-
-function applyPointer(
-  data: Record<string, unknown>,
-  path: string,
-  value: unknown
-): Record<string, unknown> {
-  if (!path) return data;
-  if (!path.startsWith('/')) {
-    return { ...data, [path]: value };
-  }
-  const parts = path.slice(1).split('/').map((p) => p.replace(/~1/g, '/').replace(/~0/g, '~'));
-  const last = parts.pop();
-  // Path-based shallow clone: only clone the objects on the write path. The
-  // rest of the tree keeps reference equality so consumers using `===` on
-  // unrelated sibling branches won't re-render unnecessarily, and we don't
-  // pay the structuredClone cost on every keystroke for large forms.
-  const next: Record<string, unknown> = { ...data };
-  if (!last) return next;
-  let cur: Record<string, unknown> = next;
-  for (const p of parts) {
-    const existing = cur[p];
-    if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
-      // Shallow-clone this level so we don't mutate the original.
-      const cloned = { ...(existing as Record<string, unknown>) };
-      cur[p] = cloned;
-      cur = cloned;
-    } else {
-      const fresh: Record<string, unknown> = {};
-      cur[p] = fresh;
-      cur = fresh;
-    }
-  }
-  cur[last] = value;
-  return next;
 }
 
 /** Resolve a value via bind (preferred) or fallback to a literal prop. */

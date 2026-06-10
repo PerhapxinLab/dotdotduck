@@ -1,6 +1,6 @@
-import { injectScopedStyle } from '../../utils/dom';
+import { injectScopedStyle, UI_ATTR } from '../../utils/dom';
 
-export const UI_ATTR = 'data-dddk-ui';
+export { UI_ATTR };
 export const STYLE_ID = 'dddk-inline-agent-style';
 
 export function ensureInlineAgentStyles(): void {

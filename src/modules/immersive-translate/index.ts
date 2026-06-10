@@ -238,7 +238,11 @@ export class ImmersiveTranslate {
       }
       for (let i = 0; i < batch.length; i++) {
         const out = finalOutputs[i];
-        if (out && out !== inputs[i]) this.appendTranslation(batch[i]!.el, out);
+        if (out && out !== inputs[i]) {
+          this.appendTranslation(batch[i]!.el, out);
+        } else {
+          batch[i]!.el.removeAttribute(TRANSLATED_ATTR);
+        }
       }
       done += batch.length;
       updateProgress();

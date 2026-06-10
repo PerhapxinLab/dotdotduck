@@ -4,12 +4,11 @@
  */
 
 import { inferSelector } from '../utils/selector';
-import { injectScopedStyle } from '../utils/dom';
+import { injectScopedStyle, UI_ATTR } from '../utils/dom';
 
 const RING_DELAY_MS = 200;
 const MIN_LASSO_PX = 5;
 const STYLE_ID = 'dddk-spotter-style';
-const UI_ATTR = 'data-dddk-ui';
 
 export type SpotterState = 'idle' | 'ring' | 'lock' | 'lasso';
 

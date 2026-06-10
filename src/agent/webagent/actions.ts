@@ -43,16 +43,15 @@ function isInteractive(el: HTMLElement): boolean {
 
 // ─── navigation ─────────────────────────────────────────────────────
 
-const navigate: ActionDefinition<{ path: string }> = {
+const navigate: ActionDefinition<{ path: string; note?: string }> = {
   name: 'navigate',
-  description: 'Take the user to a SPA-friendly path (e.g. "/pricing"). Cross-page transition; the runtime asks the user to confirm before moving.',
-  parameters: objSchema({ path: { type: 'string' } }, ['path']),
-  // Cross-page transitions are the only routine built-in that gates by
-  // default. Other moves (scroll / border / highlight / click) are
-  // visual continuity within the same page and don't need a Space gate.
-  // Locale-aware confirmation copy lives in `narrateAction` in
-  // webagent.ts so this stays domain- and language-neutral.
+  description: 'Take the user to a SPA-friendly path. Cross-page transition; runtime gates with a confirm by default. Optional `note` overrides the confirm message — write it in the user\'s language and the persona\'s voice.',
+  parameters: objSchema({
+    path: { type: 'string' },
+    note: { type: 'string', description: 'Optional natural-language sentence shown to the user as the confirm copy instead of the SDK default.' },
+  }, ['path']),
   requireConfirmation: true,
+  confirmationMessage: ({ note }) => (note?.trim() ? note.trim() : undefined),
   handler: async ({ path }) => {
     if (typeof window === 'undefined') return { ok: false, reason: 'unknown', message: 'no window' };
     return { ok: true, data: path };

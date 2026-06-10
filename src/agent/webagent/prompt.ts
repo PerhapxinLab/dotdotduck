@@ -1,22 +1,11 @@
 /**
  * System prompt assembly — narrator persona.
  *
- * The agent is a real-time site guide. Its primary tools are:
- *   - **DOM-mutating actions** (navigate / scroll_to / click / fill / submit)
- *     that change what the user sees.
- *   - **Visual overlays** (border / highlight / spotlight) that frame the
- *     element the agent is currently talking about.
- *
- * Between tool calls, the LLM emits free-form text. That text streams
- * into the subtitle bar — it IS the agent's voice. There is no
- * `show_subtitle` tool, no `done` tool. The loop ends naturally when
- * the model emits a turn that contains only text (finish_reason=stop).
- *
- * Override layers (most → least common host need):
- *   1. `brand` — structured fields (productName / voice / constraints[]).
- *   2. `appendSystemPrompt` — plain string appended to the default.
- *   3. `systemPrompt` as function — receives default + ctx.
- *   4. `systemPrompt` as string — hard replace.
+ * Override layers (most → least common):
+ *   1. `brand` — structured fields (productName / voice / constraints[])
+ *   2. `appendSystemPrompt` — plain string appended to default
+ *   3. `systemPrompt` as function — receives default + ctx
+ *   4. `systemPrompt` as string — hard replace
  */
 
 import type { AgentSession, SitemapConfig, SitemapEntry, SelectionContext, AgentTurn } from './types';
@@ -29,42 +18,21 @@ export interface BrandPrompt {
   constraints?: string[];
 }
 
-/**
- * Persona — tells the agent who it IS and on whose behalf it speaks.
- * Without this, the agent narrates the page in third-person observer
- * voice ("the site states X"); with this, it speaks as the site's
- * representative ("we offer X").
- *
- * Default is `undefined` — no persona section is injected. Hosts that
- * want a representative voice supply either a free-form `string` or a
- * structured `PersonaConfig`.
- */
+/** Persona — tells the agent who it speaks AS. Without this the agent
+ *  narrates in third-person observer voice. */
 export interface PersonaConfig {
-  /**
-   * First-person identity statement. Required. The model is given this
-   * verbatim under a `# Who you are` heading, so write it as a direct
-   * instruction:
-   *
-   *   "You are the dotdotduck assistant, speaking on behalf of
-   *    perhapxin. Use 'we' for things this product / company does."
-   */
+  /** First-person identity statement. Required. */
   identity: string;
-  /** Optional voice / tone notes — concrete examples beat adjectives. */
+  /** Voice / tone notes. */
   voice?: string;
-  /** Hard rules — things the persona must never do or say. */
+  /** Hard rules the persona must never break. */
   constraints?: string[];
 }
 
 export type PersonaInput = string | PersonaConfig;
 
-/**
- * Summary of one palette command shown to the agent. The orchestrator
- * builds this list from `palette.getItems()` and passes it through to
- * the prompt so the agent sees what host-registered commands exist
- * BEFORE deciding to do anything manually. With this, "translate the
- * page" picks up `/immersive_translate`; "switch theme" picks up
- * `/theme`; etc. — no need to call list_palette first.
- */
+/** Summary of one palette command — orchestrator passes the list so the
+ *  agent sees host-registered commands in its system prompt. */
 export interface PaletteCommandSummary {
   id: string;
   name: string;
@@ -118,16 +86,11 @@ function renderDefault(ctx: PromptContext): string {
   if (ctx.cotMode) return renderCotDefault(ctx);
   const sections: string[] = [];
   sections.push(renderHeader(ctx));
-  // Persona, if supplied, comes RIGHT AFTER the header so identity
-  // framing dominates downstream rules. Without this it tends to lose
-  // to the more concrete narration / safety rules below.
+  // Persona goes right after header so identity framing wins over
+  // downstream rules.
   const personaBlock = renderPersona(ctx.persona, ctx.siteName);
   if (personaBlock) sections.push(personaBlock);
   sections.push(renderNarrationRules());
-  // (Palette command list is injected into `run_palette`'s tool
-  // description, not here — keeping it next to the tool means the
-  // model sees the available ids when it's deciding which tool to
-  // call, instead of a separate section it might overlook.)
   sections.push(renderSafety());
   if (ctx.brand) sections.push(renderBrand(ctx.brand));
   sections.push(renderOutputLanguage(ctx.locale));
@@ -135,23 +98,9 @@ function renderDefault(ctx: PromptContext): string {
   return sections.filter(Boolean).join('\n\n');
 }
 
-/**
- * CoT-mode system prompt — single top-of-conversation block carrying
- * identity, tool reference, envelope rules, DOM dump format, and any
- * host-supplied sitemap / appendSystemPrompt. No procedural rules; the
- * schema (`agent_turn` tool) enforces structure.
- *
- * The env block at the bottom of each turn re-injects only the current
- * page state (URL + date) and the fresh DOM dump.
- */
+/** CoT-mode system prompt. Two blocks: SDK default (identity / tools /
+ *  envelope / DOM format) + host appendSystemPrompt. */
 function renderCotDefault(ctx: PromptContext): string {
-  // Mental model: the LLM sees TWO conceptual blocks, joined by blank
-  // lines.
-  //   1. SDK default — identity (+ persona) + DOM dump format + Tools +
-  //      Envelope rules. Stable across hosts; describes how to operate.
-  //   2. Developer prompt — `appendSystemPrompt` from the host. Sitemap,
-  //      guidelines, language rules live here. Host writes whatever
-  //      they want; SDK doesn't double-emit anything in this slot.
   const siteClause = ctx.siteName ? ` on ${ctx.siteName}` : '';
   const sdkBlock: string[] = [];
 
@@ -172,20 +121,32 @@ ${ctx.toolReference}`);
 
   sdkBlock.push(`# Envelope
 
-Each turn calls \`agent_turn\` with:
-- **memory** — private 1-2 sentence recap of the previous turn. Items already covered stay covered. Only describe forward motion.
-- **todos_remaining** — items still owed to the user's original request.
-- **actions** — ordered list of steps for this turn. Each step is one of:
-  - \`{tool, args}\` — perform an action. Tool calls are how real things happen on the page.
-  - \`{narrate, about?}\` — speak a declarative sentence to the subtitle. \`about\` is the \`[id]\` of the element being described; runtime auto-borders it. A narrate never substitutes for a tool the todo requires.
-  - \`{task_finish: true}\` — see # Finishing below.
-  - Empty / omitted \`actions\` also ends the loop (legacy path).`);
+Each turn calls \`agent_turn\` with these fields, IN THIS ORDER:
+- **memory** — private 1-2 sentence recap of the previous turn. Items already covered stay covered.
+- **turn_planning** — \`{evaluation_previous_goal, next_goal}\` in planned mode.
+- **todo_adjust** — \`{remove, replace}\` mutations to the master plan (planned mode).
+- **actions** — ordered steps for this turn. Each step is one of:
+  - \`{tool, args}\` — perform an action.
+  - \`{narrate, about}\` — speak a declarative sentence. \`about\` is the \`[id]\` of the element runtime auto-borders. ALMOST ALWAYS REQUIRED.
+- **is_final** — Boolean. Write this LAST, AFTER actions[] is fully written. Closes the run when true.`);
+
+  sdkBlock.push(`# Narrate + about
+
+Narrate without \`about\` is rare. Whenever you're talking ABOUT a chunk on the page — a card, a section, a row, a heading, a paragraph — pass that element's \`[id]\` from the DOM dump as \`about\`. The runtime auto-borders it so the user sees the framing as you speak. Skipping \`about\` makes the agent feel like a chat box, not a tour.
+
+Omit \`about\` only when the narrate genuinely refers to nothing visible (a meta closing line, a status update unrelated to any element).`);
+
+  sdkBlock.push(`# Navigate semantics
+
+\`navigate\` is the act itself — the user perceives the page change as the announcement. Do NOT precede or follow navigate with a narrate that re-states "we'll go to X" or "we're now on X". On the destination page (the NEXT turn after navigate, when the new DOM dump arrives), narrate about the actual content with \`about\` pointing at a real element.
+
+If the navigate confirm copy needs to read in the user's voice, pass it via the navigate tool's optional \`note\` arg — that wording becomes the confirm message instead of the SDK default.`);
 
   sdkBlock.push(`# Finishing
 
-When the user's original ask is covered, emit \`{task_finish: true}\` in the same turn that finishes the answer. Once the answer is given, the task is over. Do not add follow-up narrates restating the same thing in different words. Do not add a closing summary. Do not ask whether the user wants anything else.
-Re-narrating something already covered is a bug, not thoroughness. If memory says it is covered, it is covered.
-The only reason to delay task_finish is when the current turn's last action has not produced its result yet — a reaction-requiring tool whose answer the next turn must read.`);
+Set \`is_final: true\` ONLY after the actions in this same turn fully cover the user's original ask. Once given, the task is over — no follow-up narrate restating the same thing, no closing summary, no "anything else?" question.
+Re-narrating something already covered is a bug, not thoroughness.
+Do NOT set is_final when this turn ran \`navigate\`, \`ask_user_choice\`, or any tool whose result the next turn must read — the run is not actually done yet.`);
 
   sdkBlock.push(`# Language
 
@@ -282,21 +243,8 @@ function renderBrand(brand: BrandPrompt): string {
   return lines.join('\n');
 }
 
-/**
- * Render the persona block when the host provides one. Empty / undefined
- * input returns '' so the section is silently skipped — the SDK ships
- * with NO default persona, hosts opt in.
- *
- * The block is directive so smaller models actually shift voice.
- * Without this, models default to a third-person observer narrating
- * the page DOM, which reads to users as the agent being unaware of
- * its own context.
- *
- * Default identity: when the host passes no persona, the SDK still
- * ships a baseline that frames the agent as the team behind the
- * product. Hosts wanting a different voice override by passing a
- * full `PersonaConfig`.
- */
+/** Render the persona block. Falls back to a baseline "you are the
+ *  team" identity so smaller models don't drift to observer voice. */
 function renderPersona(persona: PersonaInput | undefined, siteName?: string): string {
   const cfg: PersonaConfig = persona === undefined
     ? { identity: defaultIdentity(siteName) }
@@ -326,16 +274,8 @@ function defaultIdentity(siteName?: string): string {
     : 'You are part of the team that built and runs the product the user is on right now. You are not a tour guide. You are not narrating the page. You ARE the team, answering as we would answer a real customer.';
 }
 
-/**
- * Render the host's palette as the body of the `run_palette` tool
- * description. Caller (the runtime, when rebuilding tool defs) appends
- * this to the static description so the model sees the available
- * command ids WITHIN the tool it's about to call — not in a separate
- * system prompt section it might overlook.
- *
- * Returns '' when the palette is empty / unavailable; callers should
- * skip appending in that case.
- */
+/** Append host palette commands to `run_palette`'s tool description so
+ *  the model sees command ids at decision time. */
 export function renderPaletteCommandsForToolDescription(items: PaletteCommandSummary[] | undefined): string {
   if (!items || items.length === 0) return '';
   const lines: string[] = ['', 'Registered palette commands:'];
@@ -421,10 +361,8 @@ export function renderPageStateBlock(opts: {
   return parts.join('\n');
 }
 
-/** Render the live master plan for the per-turn user message. Shows the
- *  task summary + the CURRENT todos list (already pruned by any prior
- *  `todo_adjust.remove`) so the model writes `turn_planning.this_turn_does`
- *  anchored to a real id and emits `todo_adjust.remove` on completion. */
+/** Render the live master plan. Model anchors `turn_planning.next_goal`
+ *  to a real id and emits `todo_adjust.remove` on completion. */
 function renderMasterPlan(plan: import('../plan/types').TaskPlan): string {
   const lines: string[] = ['# Master plan'];
   lines.push(`Task: ${plan.task_summary}`);
@@ -434,7 +372,7 @@ function renderMasterPlan(plan: import('../plan/types').TaskPlan): string {
     lines.push(`- ${t.id} (${t.intent}): ${t.description}${turnHint}`);
   }
   if (plan.todos.length === 0) {
-    lines.push('- (empty — emit `{task_finish: true}` and end the run)');
+    lines.push('- (empty — set `is_final: true` and end the run)');
   }
   return lines.join('\n');
 }

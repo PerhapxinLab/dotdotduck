@@ -100,7 +100,7 @@ export class PreferenceStore {
   } {
     const components: Array<Record<string, unknown>> = [
       { id: 'root', component: 'Card', children: ['title', 'form'] },
-      { id: 'title', component: 'Heading', text: `設定：${schema.skillId}` },
+      { id: 'title', component: 'Heading', text: sdkString(this.locale, 'prefs.title', { skill: schema.skillId }) },
       {
         id: 'form',
         component: 'Stack',

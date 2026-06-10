@@ -160,10 +160,11 @@ function toMarkdown(root: HTMLElement): string {
 function walk(root: HTMLElement, visit: (el: HTMLElement) => boolean): void {
   const stack: HTMLElement[] = [root];
   while (stack.length) {
-    const el = stack.shift()!;
+    const el = stack.pop()!;
     const recur = visit(el);
     if (recur) {
-      for (const child of Array.from(el.children) as HTMLElement[]) stack.push(child);
+      const children = Array.from(el.children) as HTMLElement[];
+      for (let i = children.length - 1; i >= 0; i--) stack.push(children[i]!);
     }
   }
 }

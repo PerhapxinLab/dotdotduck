@@ -1,9 +1,9 @@
 /**
  * Tiny DOM helpers shared across dddk modules.
- *
- * Kept private to dddk — webagent has its own escaping (it goes through React
- * + the agent's structured output, not raw innerHTML).
  */
+
+/** Canonical attribute every dddk-owned UI element carries. */
+export const UI_ATTR = 'data-dddk-ui';
 
 /**
  * Escape a string for safe injection into an HTML attribute or text node via
@@ -17,6 +17,30 @@ export function escapeHtml(s: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+/**
+ * Build a compact `<tag#id.class> inner` signature for an element — the
+ * same short-form descriptor used by the chip-bar and the Dwell capture
+ * flow when surfacing "what is selected" to the user / LLM. Truncates
+ * inner text at `maxInner` (default 1000) so we never paste a paragraph
+ * into a chip / context blob.
+ *
+ * Returns just `<tag#id.class>` when the element has no readable inner
+ * text — keeps the signature meaningful even for icon-only buttons.
+ */
+export function formatElementSignature(
+  el: HTMLElement,
+  opts: { maxInner?: number } = {},
+): string {
+  const maxInner = opts.maxInner ?? 1000;
+  const tag = el.tagName.toLowerCase();
+  const id = el.id ? `#${el.id}` : '';
+  const classList = el.classList ? Array.from(el.classList).slice(0, 3) : [];
+  const cls = classList.length ? '.' + classList.join('.') : '';
+  const sig = `<${tag}${id}${cls}>`;
+  const inner = ((el as HTMLElement).innerText ?? el.textContent ?? '').trim().slice(0, maxInner);
+  return inner ? `${sig} ${inner}` : sig;
 }
 
 /**

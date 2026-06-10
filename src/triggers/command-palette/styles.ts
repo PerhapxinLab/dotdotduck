@@ -1,7 +1,7 @@
-import { injectScopedStyle } from '../../utils/dom';
+import { injectScopedStyle, UI_ATTR } from '../../utils/dom';
 
+export { UI_ATTR };
 export const STYLE_ID = 'dddk-palette-style';
-export const UI_ATTR = 'data-dddk-ui';
 
 export function ensurePaletteStyles(): void {
   injectScopedStyle(STYLE_ID, `

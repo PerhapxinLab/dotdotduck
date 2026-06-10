@@ -93,14 +93,22 @@ export {
   type SitemapLearnerStorage,
 } from './sitemap/learner';
 
-// ─── Memory (agent's long-term recall layer) ───────────────────────
+// ─── Memory (agent's long-term recall + 3-tier hybrid memory) ──────
 
 export {
   Memory,
-  createMemory,
-  type Drawer,
-  type MemoryOpts,
-  type MemorySearchOpts,
+  CoreMemory,
+  EpisodicMemory,
+  SemanticMemory,
+  DrawerMemory,
+  createDrawerMemory,
+} from './memory';
+export type {
+  MemoryConfig, CoreMemoryConfig, CoreMemorySchema, CoreFieldType,
+  EpisodicMemoryConfig, EpisodicEntry,
+  SemanticMemoryConfig, SemanticMemoryEntry, MemoryProvider,
+  MemoryPrivacyConfig,
+  Drawer, DrawerMemoryOpts, DrawerSearchOpts,
 } from './memory';
 
 // ─── Plan (LLM-mediated structured artifact module) ────────────────

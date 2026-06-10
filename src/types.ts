@@ -86,34 +86,7 @@ export interface SubtitleChoiceOptions {
   autoHide?: number;
 }
 
-export type DddkEventName =
-  | 'subtitle_show'
-  | 'subtitle_hide'
-  | 'palette_open'
-  | 'palette_close'
-  | 'palette_command'
-  | 'voice_start'
-  | 'voice_end'
-  | 'voice_text'
-  | 'voice_indicator'
-  | 'gesture_accept'
-  | 'gesture_reject'
-  | 'gesture_escape'
-  | 'pointer_ring_show'
-  | 'pointer_ring_hide'
-  | 'pointer_lock'
-  | 'pointer_lasso'
-  | 'skill_start'
-  | 'skill_step'
-  | 'skill_done'
-  | 'surface'
-  | 'agent_start'
-  | 'agent_tool_start'
-  | 'agent_tool_end'
-  | 'agent_thinking'
-  | 'agent_final'
-  | 'agent_error'
-  | 'intent';
+export type DddkEventName = keyof DddkEventMap;
 
 /**
  * Unified intent event — emitted on every user decision / activation that
@@ -135,7 +108,7 @@ export type IntentEvent =
    * `runId` joins back to the agent run. `model` is the resolved provider
    * model id when available, otherwise omitted.
    */
-  | { kind: 'agent_llm_call'; runId: string; role: 'webagent' | 'webagentWithSelection'; ttftMs: number; durationMs: number; outputTokens?: number; inputTokens?: number; tokensPerSec?: number; model?: string; timestamp: number }
+  | { kind: 'agent_llm_call'; runId: string; role: 'webagent' | 'vision'; ttftMs: number; durationMs: number; outputTokens?: number; inputTokens?: number; tokensPerSec?: number; model?: string; timestamp: number }
   | { kind: 'confirm_action'; actionName: string; params: Record<string, unknown>; approved: boolean; timestamp: number }
   | { kind: 'voice_captured'; text: string; cleanedText?: string; timestamp: number }
   | { kind: 'selection_used'; selectionText: string; selectorHint?: string; itemId: string; timestamp: number }
@@ -170,34 +143,17 @@ export type IntentEvent =
    */
   | { kind: 'agent_pause_decision'; runId: string; decision: 'continue' | 'stop'; timestamp: number }
   /**
-   * Fired when the SDK's `gateAgentSubtitles` mode is on and the user
-   * responds to the final done summary. `satisfied: true` = Space
-   * accept, `false` = double-tap reject, `null` = explicit cancel
-   * (Esc / click-outside). Useful for measuring agent quality from
-   * the intent stream.
-   */
-  /**
-   * Fired by the end-of-loop closure when the host opts into
-   * `kind: 'feedback'` or `kind: 'ask_user'` via WebAgentConfig.onLoopEnd.
-   * `satisfied: true` = Space accept; `false` = double-tap reject; `null`
-   * = ask_user picker (the chosen value lives in `summary`). `runId`
-   * ties the rating back to the agent_run_started this run came from,
-   * so dashboards can compute per-run satisfaction without time-window
-   * heuristics. `skillId` is set when a skill triggered the run, so
-   * per-skill quality breakdowns work directly off the intent stream.
+   * End-of-loop closure response. `satisfied: true` = Space accept;
+   * `false` = double-tap reject; `null` = picker selection (value in
+   * `summary`). `runId` joins back to `agent_run_started`; `skillId` set
+   * when a skill triggered the run.
    */
   | { kind: 'agent_feedback'; runId?: string; skillId?: string; satisfied: boolean | null; summary: string; timestamp: number };
 
 export interface DddkEventMap {
-  subtitle_show: SubtitleShowOptions;
-  subtitle_hide: void;
   palette_open: { selection: string };
-  palette_close: void;
-  palette_command: { commandId: string };
   voice_start: void;
   voice_end: { text: string };
-  voice_text: { text: string; selection?: string };
-  voice_indicator: { state: 'listening' | 'processing'; label?: string };
   gesture_accept: void;
   gesture_reject: void;
   gesture_escape: void;

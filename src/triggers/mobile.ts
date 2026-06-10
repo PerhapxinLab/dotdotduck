@@ -130,7 +130,7 @@ export interface MobileTriggerConfig {
   fab?: MobileFABConfig | false;
 }
 
-const UI_ATTR = 'data-dddk-ui';
+import { UI_ATTR } from '../utils/dom';
 const STYLE_ID = 'dddk-mobile-trigger-style';
 
 interface SwipeSample {
@@ -282,16 +282,19 @@ export class MobileTrigger {
       }
     };
 
-    element.addEventListener('touchstart', (e) => { e.preventDefault(); press(); }, { passive: false });
-    element.addEventListener('touchend',   (e) => { e.preventDefault(); release(); }, { passive: false });
+    const onTouchStart = (e: TouchEvent) => { e.preventDefault(); press(); };
+    const onTouchEnd = (e: TouchEvent) => { e.preventDefault(); release(); };
+
+    element.addEventListener('touchstart', onTouchStart, { passive: false });
+    element.addEventListener('touchend', onTouchEnd, { passive: false });
     element.addEventListener('touchcancel', cancel);
-    element.addEventListener('mousedown',  press);
-    element.addEventListener('mouseup',    release);
+    element.addEventListener('mousedown', press);
+    element.addEventListener('mouseup', release);
     element.addEventListener('mouseleave', cancel);
 
     const off = () => {
-      element.removeEventListener('touchstart', press);
-      element.removeEventListener('touchend', release);
+      element.removeEventListener('touchstart', onTouchStart);
+      element.removeEventListener('touchend', onTouchEnd);
       element.removeEventListener('touchcancel', cancel);
       element.removeEventListener('mousedown', press);
       element.removeEventListener('mouseup', release);

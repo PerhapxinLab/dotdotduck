@@ -267,7 +267,8 @@ function resolvePrompt(skill: PromptSkill, vars: Record<string, string>): string
   const merged = { ...skill.variables, ...vars };
   let p = skill.prompt;
   for (const [k, v] of Object.entries(merged)) {
-    p = p.replace(new RegExp(`\\{\\{\\s*${k}\\s*\\}\\}`, 'g'), v);
+    const escapedKey = k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    p = p.replace(new RegExp(`\\{\\{\\s*${escapedKey}\\s*\\}\\}`, 'g'), v);
   }
   return p;
 }

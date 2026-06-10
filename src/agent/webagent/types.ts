@@ -70,8 +70,9 @@ export interface ActionDefinition<P = unknown, R = unknown> {
    */
   requireConfirmation?: boolean | ((params: P, ctx: ActionContext) => boolean | Promise<boolean>);
 
-  /** Override the confirmation prompt. */
-  confirmationMessage?: (params: P) => string;
+  /** Override the confirmation prompt. Return undefined to fall through
+   *  to host-level / SDK-default copy. */
+  confirmationMessage?: (params: P) => string | undefined;
 }
 
 // ─── Selection (captured at run start) ──────────────────────────────
@@ -352,6 +353,17 @@ export interface WebAgentConfig {
    * rely only on per-action `requireConfirmation`.
    */
   destructivePatterns?: RegExp[];
+
+  /**
+   * When true, no tool call ever pauses for user confirmation — including
+   * actions whose `requireConfirmation` is explicitly true. Use on sites
+   * where the agent's surface is non-destructive (demos / docs / read-only
+   * exploration) and the confirm-pause feels like friction.
+   *
+   * Per-action `requireConfirmation: true` is still respected for the
+   * default destructive-pattern auto-gate when this flag is unset.
+   */
+  disableConfirmations?: boolean;
 
   /**
    * Opt the agent in to the `present_surface` tool — lets the model

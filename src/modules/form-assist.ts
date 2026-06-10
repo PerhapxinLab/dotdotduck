@@ -42,7 +42,7 @@ export interface FormAssistInfo {
   fields: Array<{ name: string; label: string; type: string; required: boolean }>;
 }
 
-const UI_ATTR = 'data-dddk-ui';
+import { UI_ATTR } from '../utils/dom';
 const STYLE_ID = 'dddk-form-assist-style';
 
 export class FormAssistModule {
@@ -90,7 +90,11 @@ export class FormAssistModule {
       e.preventDefault();
       e.stopPropagation();
       const info = inspectForm(form);
-      subtitle?.show({ text: `分析 ${info.fields.length} 個欄位中…`, type: 'info', autoHide: 1500 });
+      subtitle?.show({
+        text: sdkString(this.cfg.locale, 'form.assist.scanning', { count: info.fields.length }),
+        type: 'info',
+        autoHide: 1500,
+      });
       this.cfg.onAssist(info);
     };
     // place inside form, top-right corner. `position: static` is the default

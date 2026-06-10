@@ -61,17 +61,20 @@ export class Analytics {
 
   track(event: string, payload?: Record<string, unknown>, overrides?: { identity?: Record<string, unknown> }): void {
     const dyn = this.identity?.() ?? {};
+    const ts = Date.now();
+    const storageKey = `event:${ts}-${Math.random().toString(36).slice(2, 6)}`;
     const e: AnalyticsEvent = {
-      ts: Date.now(),
+      ts,
       event,
       ...this.staticIdentity,
       ...dyn,
       ...(overrides?.identity ?? {}),
       payload,
+      _storageKey: storageKey,
     };
     this.buffer.push(e);
     if (this.storage) {
-      void this.storage.set(`event:${e.ts}-${Math.random().toString(36).slice(2, 6)}`, e);
+      void this.storage.set(storageKey, e);
     }
     if (this.buffer.length >= this.batchSize) void this.flush();
   }
@@ -91,12 +94,11 @@ export class Analytics {
       }
       if (this.storage) {
         for (const e of batch) {
-          // best-effort clean up — keyed by ts is approximate
-          void this.storage.delete(`event:${e.ts}`);
+          const key = (e as AnalyticsEvent)._storageKey;
+          if (typeof key === 'string') void this.storage.delete(key);
         }
       }
     } catch {
-      // Re-queue for retry
       this.buffer.unshift(...batch);
     }
   }

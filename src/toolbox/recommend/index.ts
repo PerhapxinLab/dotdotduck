@@ -107,10 +107,13 @@ export class Recommend {
     await this.storage.open(`dddk-recommend-${this.id}`);
     this.opened = true;
     const snap = (await this.storage.get('recommend:prefs')) as Preference[] | undefined;
-    if (snap) this.prefs = snap;
-    else if (this.opts.prefsSync?.bootstrap) {
+    if (snap != null && snap.length > 0) {
+      this.prefs = snap;
+    } else if (this.opts.prefsSync?.bootstrap) {
       this.prefs = await this.opts.prefsSync.bootstrap();
       await this.storage.set('recommend:prefs', this.prefs);
+    } else if (snap != null) {
+      this.prefs = snap;
     }
   }
 
