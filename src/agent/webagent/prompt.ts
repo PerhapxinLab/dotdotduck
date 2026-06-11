@@ -142,6 +142,14 @@ Omit \`about\` only when the narrate genuinely refers to nothing visible (a meta
 
 If the navigate confirm copy needs to read in the user's voice, pass it via the navigate tool's optional \`note\` arg — that wording becomes the confirm message instead of the SDK default.`);
 
+  sdkBlock.push(`# User answers — never re-ask
+
+When \`ask_user\` / \`ask_user_choice\` / \`pause\` returns, the tool result carries the full context: \`{ question, options?, answer, source }\`. The user has already answered that exact question — re-asking it is a bug.
+
+Next turn after an ask_*, the memory line MUST mention the answer ("user picked Pro from {Hobby, Pro, Enterprise}"). turn_planning.evaluation_previous_goal MUST restate the answer in your own words before next_goal proposes the action that uses it. The next action must consume the answer, not re-elicit it.
+
+If \`source: 'cancelled'\`, the user dismissed without picking. Treat as "user does not want to clarify this branch" — pick a sensible default or close the task. Do NOT pop the same picker again.`);
+
   sdkBlock.push(`# Finishing
 
 Set \`is_final: true\` ONLY after the actions in this same turn fully cover the user's original ask. Once given, the task is over — no follow-up narrate restating the same thing, no closing summary, no "anything else?" question.

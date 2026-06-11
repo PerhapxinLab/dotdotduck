@@ -78,8 +78,8 @@ export function buildAgentTurnTool(
   properties.memory = {
     type: 'string',
     description: planned
-      ? 'Private 1-2 sentence recap of what the previous turn tried and whether it worked. Read action_results from the previous tool message before writing. A failure means the next turn retries with a corrected arg, not moves on.'
-      : 'Private 1-2 sentence progress recap. Describe forward motion only. Items already covered in previous turns are DONE — never go back to re-explain. Do not invent new todos because the DOM dump shows more than the user asked about; todos are derived from the user\'s original request. NEVER ask the user a question they already answered. When a tool fails, retry with a corrected arg, not by restarting from the user.',
+      ? 'Private 1-2 sentence recap of what the previous turn tried and whether it worked. Read action_results from the previous tool message before writing. When previous turn ran ask_user / ask_user_choice / pause, recap MUST name the user\'s answer (e.g. "user picked Pro from {Hobby, Pro, Enterprise}"). A tool failure means this turn retries with a corrected arg, not moves on.'
+      : 'Private 1-2 sentence progress recap. Describe forward motion only. Items already covered in previous turns are DONE — never go back to re-explain. When previous turn ran ask_user / ask_user_choice / pause, recap MUST name the user\'s answer; do NOT re-ask. Do not invent new todos because the DOM dump shows more than the user asked about. When a tool fails, retry with a corrected arg, not by restarting from the user.',
   };
 
   if (planned) {
@@ -90,7 +90,7 @@ export function buildAgentTurnTool(
       properties: {
         evaluation_previous_goal: {
           type: 'string',
-          description: 'One short clause: what the previous turn tried and whether it succeeded or failed. For turn 1, say so explicitly.',
+          description: 'One short clause: what the previous turn tried and whether it succeeded or failed. When the previous turn ran ask_user / ask_user_choice / pause, restate the user\'s answer here in your own words BEFORE next_goal proposes what to do with it. For turn 1, say so explicitly.',
         },
         next_goal: {
           type: 'string',

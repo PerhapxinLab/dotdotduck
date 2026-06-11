@@ -141,42 +141,41 @@ export async function executeAction(
   };
 
   if (name === 'ask_user') {
+    const question = String(params.question ?? '');
     const answer = await new Promise<string>((resolve) => {
       bindings.registerPendingResolver(resolve);
-      bindings.emitAskUser({ question: String(params.question ?? ''), resolve });
+      bindings.emitAskUser({ question, resolve });
     });
-    return { ok: true, data: answer };
+    return { ok: true, data: { question, answer } };
   }
 
   if (name === 'pause') {
-    // Narrator-controlled mid-narrative beat. Uses its OWN envelope
-    // (not ask_user) so hosts can render it differently — typically by
-    // attaching a "press space to continue" hint INSIDE the existing
-    // streaming subtitle bar instead of replacing the bar with a
-    // standalone prompt.
+    // Narrator's mid-narrative beat. Own envelope (not ask_user) so the
+    // host can render it as a "space to continue" hint on the streaming
+    // bar instead of replacing the bar with a prompt.
     const llmNote = typeof params.note === 'string' && params.note ? params.note : null;
     const hint = llmNote ?? bindings.defaultPauseNote ?? SDK_DEFAULT_PAUSE_NOTE;
     const answer = await new Promise<string>((resolve) => {
       bindings.registerPendingResolver(resolve);
       bindings.emitPause({ hint, resolve });
     });
-    return { ok: true, data: answer };
+    return { ok: true, data: { hint, answer } };
   }
 
   if (name === 'ask_user_choice') {
     const rawOptions = Array.isArray(params.options) ? params.options : [];
     const options = rawOptions.map((o) => String(o));
+    const question = String(params.question ?? '');
     const allowFreeText = params.allowFreeText !== false;
     const answer = await new Promise<string>((resolve) => {
       bindings.registerPendingResolver(resolve);
-      bindings.emitAskUserChoice({
-        question: String(params.question ?? ''),
-        options,
-        allowFreeText,
-        resolve,
-      });
+      bindings.emitAskUserChoice({ question, options, allowFreeText, resolve });
     });
-    return { ok: true, data: answer };
+    const source: 'option' | 'free_text' | 'cancelled' =
+      answer === '' ? 'cancelled'
+        : options.includes(answer) ? 'option'
+        : 'free_text';
+    return { ok: true, data: { question, options, answer, source } };
   }
 
   if (name === 'present_surface') {
@@ -198,6 +197,10 @@ export async function executeAction(
     const placement = (typeof params.placement === 'string'
       ? params.placement
       : 'subtitle') as 'subtitle' | 'modal' | 'dock' | 'inline';
+    const surfaceObj = surface as Record<string, unknown>;
+    const surfaceId = typeof surfaceObj.id === 'string' ? surfaceObj.id
+      : typeof surfaceObj.kind === 'string' ? surfaceObj.kind
+      : 'surface';
     const result = await new Promise<{ value: string | null; cancelled: boolean }>((resolve) => {
       bindings.registerPendingResolver((raw) => {
         try { resolve(JSON.parse(raw)); } catch { resolve({ value: null, cancelled: true }); }
@@ -208,7 +211,15 @@ export async function executeAction(
         resolve: (pick) => resolve(pick),
       });
     });
-    return { ok: true, data: result };
+    return {
+      ok: true,
+      data: {
+        surface_id: surfaceId,
+        placement,
+        answer: result.value,
+        cancelled: result.cancelled,
+      },
+    };
   }
 
   try {
