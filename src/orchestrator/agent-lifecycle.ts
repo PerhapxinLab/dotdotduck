@@ -408,13 +408,22 @@ export class AgentLifecycle {
         host.subtitle.applyStreamingPauseHint({
           hint,
           onAccept: () => {
-            // Wipe the streamed text so the NEXT subject starts in a
-            // clean bar. Each subject in the walkthrough is its own
-            // paragraph; accumulating across subjects makes the bar
-            // read as one tangled wall-of-text. (The streaming bar el
-            // itself stays mounted so the next text-delta appends
-            // smoothly with no visible flicker.)
-            host.subtitle.replaceStreamed('');
+            // Tear the streaming bar down + immediately show the
+            // thinking pip. Previous design used `replaceStreamed('')`
+            // which only blanked the text but left the bar el mounted
+            // in 'streaming' mode — that kept `isStreaming()` true,
+            // suppressed the next `thinking` event's pip (see
+            // pumpAgentStream case 'thinking'), and the user stared at
+            // an empty bar with just a close × for the entire 1-3s
+            // LLM TTFT before the next turn streamed in.
+            // hide() removes the bar el; showIndicator drops in the
+            // pip so the user gets clear "next step loading" feedback
+            // until the next text-delta auto-replaces the pip with a
+            // fresh streaming bar via ensureStreamingBar.
+            host.subtitle.hide();
+            const label = this.resolveIndicatorOverride('processing')
+              ?? sdkString(host._config.locale, 'agent.thinking');
+            host.subtitle.showIndicator('processing', label);
             emitPauseDecision('continue');
             resolve('continue');
           },
