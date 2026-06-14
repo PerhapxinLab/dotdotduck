@@ -7,7 +7,7 @@
 
 <p align="center">
   Command palette + voice + long-press selection + inline AI + DOM-grounded agent in one SDK.
-  The opposite of a chatbot widget — your product's verbs sit where users already work, not in a corner bubble.
+  The opposite of a chatbot widget — your product's verbs sit where users already work, not behind a sidebar.
 </p>
 
 <p align="center">

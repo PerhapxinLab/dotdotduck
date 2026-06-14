@@ -7,7 +7,7 @@
 
 <p align="center">
   命令面板、語音、長按選取、輸入框 inline AI、DOM-grounded agent 全部包在同一個 SDK 裡。
-  跟 chatbot widget 的相反 — 把產品的「動詞」放在使用者本來就在動手的地方，而不是縮在右下角的氣泡。
+  跟 chatbot widget 的相反 — 把產品的「動詞」放在使用者本來就在動手的地方，而不是塞進側邊欄。
 </p>
 
 <p align="center">
