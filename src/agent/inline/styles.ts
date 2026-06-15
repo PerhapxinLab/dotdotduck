@@ -31,6 +31,47 @@ export function ensureInlineAgentStyles(): void {
       color: var(--dddk-text-muted, #6b6b6b);
       padding: 4px 8px 2px;
     }
+    /* Toolbar layout — a horizontal, icon-only formatting bar anchored
+       above the selection (AFFiNE / Notion style). */
+    [${UI_ATTR}="inline-agent"][data-layout="toolbar"] {
+      min-width: 0; max-width: none; width: auto;
+      padding: 3px;
+    }
+    [${UI_ATTR}="inline-agent"] .ia-toolbar {
+      flex-direction: row; align-items: center; gap: 2px;
+    }
+    [${UI_ATTR}="inline-agent"] .ia-tool {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 1px;
+      min-width: 30px; height: 30px; padding: 0 6px;
+      background: transparent; border: 0; cursor: pointer;
+      color: var(--dddk-text, #18181b);
+      font: inherit; font-size: 14px;
+      border-radius: 6px;
+    }
+    [${UI_ATTR}="inline-agent"] .ia-tool:hover,
+    [${UI_ATTR}="inline-agent"] .ia-tool[data-active] {
+      background: var(--dddk-accent-soft, rgba(99,102,241,0.1));
+    }
+    [${UI_ATTR}="inline-agent"] .ia-tool .ia-icon {
+      width: auto; height: auto;
+      color: inherit;
+    }
+    [${UI_ATTR}="inline-agent"] .ia-chevron {
+      font-size: 9px; line-height: 1;
+      color: var(--dddk-text-muted, #6b6b6b);
+      margin-left: 1px;
+    }
+    [${UI_ATTR}="inline-agent"] .ia-toolbar-sep {
+      width: 1px; height: 18px; margin: 0 3px;
+      background: var(--dddk-border, rgba(0,0,0,0.12));
+      flex: 0 0 auto;
+    }
+    /* Dropdown sub-menu for toolbar dropdown buttons — vertical list,
+       anchored under the button. Reuses the .ia-submenu shell. */
+    [${UI_ATTR}="inline-agent"].ia-submenu[data-dropdown] {
+      min-width: 160px; max-width: 240px; padding: 4px;
+    }
     [${UI_ATTR}="inline-agent"].ia-submenu { display: block; }
     [${UI_ATTR}="inline-agent"] .ia-header {
       font-size: 10px; font-weight: 700;

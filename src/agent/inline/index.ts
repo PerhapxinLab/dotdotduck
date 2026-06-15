@@ -64,12 +64,20 @@ export interface InlineAgentConfig {
    *  - `'two-column'`: two columns side-by-side. Each action's `row` (1 | 2)
    *    decides which column it belongs to. Optional `rowLabel` on each
    *    action surfaces a small header above the first action of that row.
+   *  - `'toolbar'`: a horizontal, icon-only formatting bar (AFFiNE / Notion
+   *    style) anchored ABOVE the selection, horizontally centred. No header.
+   *    Each action renders as a square icon button — its `label` becomes the
+   *    `title` / `aria-label` (no visible text). Use `group` to draw a thin
+   *    divider between adjacent actions of different groups (e.g. format /
+   *    block / AI). Use `kind: 'dropdown'` + `items` to collapse a cluster
+   *    (turn-into, AI rewrite/translate/summarise) behind a single button
+   *    that opens a vertical sub-menu on click.
    *
    * Two-column is the recommended layout for note-taking / editor hosts
    * that want one column of formatting actions (Bold / Italic / H1 / Color)
    * and another of AI actions (Translate / Improve / …).
    */
-  layout?: 'single-column' | 'two-column';
+  layout?: 'single-column' | 'two-column' | 'toolbar';
   /** Optional headers shown above column 1 / column 2 in `two-column` layout. */
   columnLabels?: { col1?: string; col2?: string };
   /**
@@ -172,6 +180,31 @@ export interface InlineAction {
   icon?: string;
   /** Which column this action lives in when `layout: 'two-column'`. Default 1. Ignored in single-column. */
   row?: 1 | 2;
+  /**
+   * `layout: 'toolbar'` only. A group key for visual clustering. A thin
+   * vertical divider is drawn between two adjacent toolbar buttons whose
+   * `group` differs — e.g. tag format actions `'format'`, block actions
+   * `'block'`, AI actions `'ai'` to get three visually separated clusters.
+   * Ignored in single / two-column layouts.
+   */
+  group?: string;
+  /**
+   * Action kind. Default `'button'` — runs the action directly.
+   * `'dropdown'` (toolbar layout) renders the button with a small chevron;
+   * clicking it opens a vertical sub-menu of `items` instead of running an
+   * action. Each item is itself an `InlineAction` and runs through the
+   * normal handler / build / instruction flow when picked.
+   */
+  kind?: 'button' | 'dropdown';
+  /**
+   * Sub-menu entries for a `kind: 'dropdown'` action. Each item runs through
+   * the same `runAction` pipeline (handler > build > instruction) when the
+   * user picks it. Lets a host fold a "Turn into" menu (H1 / H2 / bullet /
+   * quote, each with a `handler` that reformats the block) or an "AI" menu
+   * (rewrite / translate / summarise, each with an `instruction`) behind one
+   * toolbar button so the bar stays compact.
+   */
+  items?: InlineAction[];
   /**
    * Where to put the LLM result.
    *  - `'replace'` (default): splice the result back over the user's
@@ -517,6 +550,22 @@ export class InlineAgent {
     const viewportRight = window.scrollX + document.documentElement.clientWidth;
     const viewportBottom = window.scrollY + document.documentElement.clientHeight;
 
+    // Toolbar: anchor ABOVE the selection, horizontally centred (AFFiNE /
+    // Notion style). Flip below only when there isn't room above.
+    if (this.cfg.layout === 'toolbar') {
+      const selCenter = rect.left + rect.width / 2 + window.scrollX;
+      let tLeft = selCenter - menuW / 2;
+      tLeft = Math.max(8, Math.min(tLeft, viewportRight - menuW - 8));
+      let tTop = rect.top + window.scrollY - menuH - 8;
+      if (tTop < window.scrollY + 4) {
+        // Not enough room above — drop below the selection.
+        tTop = rect.bottom + window.scrollY + 8;
+      }
+      this.menu.style.left = `${tLeft}px`;
+      this.menu.style.top = `${Math.max(8, tTop)}px`;
+      return;
+    }
+
     // Horizontal: anchor at the right edge of the selection. Flip left
     // if it'd overflow the viewport.
     let left = rect.right + window.scrollX + 8;
@@ -548,12 +597,16 @@ export class InlineAgent {
     const menu = document.createElement('div');
     menu.setAttribute(UI_ATTR, 'inline-agent');
     if (this.cfg.layout === 'two-column') menu.setAttribute('data-layout', 'two-column');
+    else if (this.cfg.layout === 'toolbar') menu.setAttribute('data-layout', 'toolbar');
     const list = document.createElement('div');
     list.className = 'ia-list';
-    const header = document.createElement('div');
-    header.className = 'ia-header';
-    header.textContent = this.t('header');
-    menu.appendChild(header);
+    // Toolbar is icon-only and intentionally has no title row.
+    if (this.cfg.layout !== 'toolbar') {
+      const header = document.createElement('div');
+      header.className = 'ia-header';
+      header.textContent = this.t('header');
+      menu.appendChild(header);
+    }
     menu.appendChild(list);
     document.body.appendChild(menu);
     this.menu = menu;
@@ -572,9 +625,143 @@ export class InlineAgent {
 
     if (this.cfg.layout === 'two-column') {
       this.renderTwoColumn();
+    } else if (this.cfg.layout === 'toolbar') {
+      this.renderToolbar();
     } else {
       this.renderSingleColumn();
     }
+  }
+
+  private renderToolbar(): void {
+    if (!this.menuList) return;
+    this.menuList.className = 'ia-list ia-toolbar';
+    let prevGroup: string | undefined;
+    this.actions.forEach((action, idx) => {
+      // Divider between adjacent buttons whose group differs.
+      if (idx > 0 && action.group !== prevGroup) {
+        const sep = document.createElement('span');
+        sep.className = 'ia-toolbar-sep';
+        sep.setAttribute('aria-hidden', 'true');
+        this.menuList!.appendChild(sep);
+      }
+      prevGroup = action.group;
+      this.menuList!.appendChild(this.buildToolbarButton(action, idx));
+    });
+  }
+
+  private buildToolbarButton(action: InlineAction, idx: number): HTMLButtonElement {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ia-tool';
+    btn.dataset.idx = String(idx);
+    const label = typeof action.label === 'string'
+      ? action.label
+      : (action.label as Record<string, string>)[this.cfg.locale] ?? action.label.en;
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+    const isDropdown = action.kind === 'dropdown';
+    if (isDropdown) {
+      btn.setAttribute('aria-haspopup', 'menu');
+      btn.innerHTML = `<span class="ia-icon">${action.icon ?? '·'}</span><span class="ia-chevron" aria-hidden="true">▾</span>`;
+    } else {
+      btn.innerHTML = `<span class="ia-icon">${action.icon ?? '·'}</span>`;
+    }
+    // mousedown preserves the editable's focus / selection.
+    btn.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      if (isDropdown) this.openDropdown(action, btn);
+      else this.runAction(action);
+    });
+    btn.addEventListener('mouseenter', () => { this.cursor = idx; this.paintActive(); });
+    return btn;
+  }
+
+  /**
+   * Open a vertical sub-menu under a toolbar dropdown button. Reuses the
+   * `.ia-submenu` shell + click-away / Esc handling. Picking an item runs
+   * it through the normal `runAction` pipeline and closes the dropdown.
+   */
+  private openDropdown(action: InlineAction, anchor: HTMLElement): void {
+    if (typeof document === 'undefined') return;
+    if (this.subMenu) { this.subMenu.remove(); this.subMenu = null; }
+    const items = action.items ?? [];
+    if (items.length === 0) return;
+
+    const wrap = document.createElement('div');
+    wrap.setAttribute(UI_ATTR, 'inline-agent');
+    wrap.className = 'ia-submenu';
+    wrap.setAttribute('data-dropdown', '');
+    const list = document.createElement('div');
+    list.className = 'ia-list';
+    wrap.appendChild(list);
+
+    let cursor = 0;
+    const paint = () => {
+      list.querySelectorAll<HTMLButtonElement>('[data-idx]').forEach((b) => {
+        if (Number(b.dataset.idx) === cursor) b.setAttribute('data-active', '');
+        else b.removeAttribute('data-active');
+      });
+    };
+    const cleanup = () => {
+      wrap.remove();
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('mousedown', onAway, true);
+      if (this.subMenu === wrap) this.subMenu = null;
+    };
+    const onAway = (e: MouseEvent) => {
+      if (e.target instanceof Node && (wrap.contains(e.target) || anchor.contains(e.target))) return;
+      cleanup();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); cleanup(); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); cursor = (cursor + 1) % items.length; paint(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); cursor = (cursor - 1 + items.length) % items.length; paint(); }
+      else if (e.key === 'Enter') {
+        e.preventDefault();
+        const it = items[cursor];
+        cleanup();
+        if (it) void this.runAction(it);
+      }
+    };
+
+    items.forEach((it, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ia-row';
+      b.dataset.idx = String(i);
+      const itLabel = typeof it.label === 'string'
+        ? it.label
+        : (it.label as Record<string, string>)[this.cfg.locale] ?? it.label.en;
+      b.innerHTML = `<span class="ia-icon">${it.icon ?? '·'}</span><span class="ia-label">${escapeHtml(itLabel)}</span>`;
+      b.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        cleanup();
+        void this.runAction(it);
+      });
+      b.addEventListener('mouseenter', () => { cursor = i; paint(); });
+      list.appendChild(b);
+    });
+
+    document.body.appendChild(wrap);
+    this.subMenu = wrap;
+    // Anchor under the button, left-aligned; flip up if it would overflow.
+    const r = anchor.getBoundingClientRect();
+    const subH = wrap.offsetHeight || 200;
+    const subW = wrap.offsetWidth || 180;
+    const viewportBottom = window.scrollY + document.documentElement.clientHeight;
+    const viewportRight = window.scrollX + document.documentElement.clientWidth;
+    let top = r.bottom + window.scrollY + 4;
+    if (top + subH > viewportBottom && (r.top + window.scrollY) - subH - 4 > window.scrollY) {
+      top = r.top + window.scrollY - subH - 4;
+    }
+    let left = r.left + window.scrollX;
+    if (left + subW > viewportRight) left = viewportRight - subW - 8;
+    wrap.style.left = `${Math.max(8, left)}px`;
+    wrap.style.top = `${Math.max(8, top)}px`;
+
+    document.addEventListener('keydown', onKey, true);
+    document.addEventListener('mousedown', onAway, true);
+    paint();
   }
 
   private renderSingleColumn(): void {
@@ -689,7 +876,13 @@ export class InlineAgent {
       // Use modifier + Enter so plain Enter in the editable still adds a newline.
       e.preventDefault();
       const action = this.actions[this.cursor];
-      if (action) this.runAction(action);
+      if (!action) return;
+      if (this.cfg.layout === 'toolbar' && action.kind === 'dropdown') {
+        const btn = this.menuList?.querySelector<HTMLElement>(`.ia-tool[data-idx="${this.cursor}"]`);
+        if (btn) this.openDropdown(action, btn);
+      } else {
+        this.runAction(action);
+      }
     }
   }
 
