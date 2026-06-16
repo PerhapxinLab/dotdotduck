@@ -57,8 +57,10 @@ export class VoiceModule {
     this.tts = new TTS(config.tts ?? {});
     this.autoSpeakSubtitles = config.autoSpeakSubtitles ?? false;
     this.captureTimeoutMs = config.captureTimeoutMs ?? 30_000;
-    this.listeningLabel = config.listeningLabel ?? 'Listening — release to send';
-    this.unsupportedLabel = config.unsupportedLabel ?? 'This browser does not support voice input';
+    // SDK defaults stay short + English-only. Hosts who want localised
+    // copy override via `listeningLabel` / `unsupportedLabel` at construct.
+    this.listeningLabel = config.listeningLabel ?? 'Listening';
+    this.unsupportedLabel = config.unsupportedLabel ?? 'Voice input not supported';
     this.skipEmptyTranscript = config.skipEmptyTranscript ?? true;
   }
 

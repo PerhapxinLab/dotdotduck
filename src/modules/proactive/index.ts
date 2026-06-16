@@ -171,6 +171,10 @@ export class Proactive {
   /** Evaluate all prompts; fire the highest-priority eligible one. Returns the prompt id if fired. */
   async tick(ctx: Omit<TriggerContext, 'now' | 'memory'> = {}): Promise<string | undefined> {
     if (this.paused) return;
+    // Empty registry — skip the fatigue + palette checks entirely.
+    // Hosts that scaffold proactive without yet registering prompts hit
+    // tick on a 5s timer otherwise.
+    if (this.prompts.size === 0) return;
     const fatigue = this.opts.fatigue ?? {};
     if (this.sessionShown >= (fatigue.maxPerSession ?? 3)) return;
     if (Date.now() - this.lastShownAt < (fatigue.cooldownMs ?? 60_000)) return;

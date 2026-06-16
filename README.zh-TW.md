@@ -14,7 +14,7 @@
   <a href="https://www.npmjs.com/package/@perhapxin/dddk"><img src="https://img.shields.io/npm/v/@perhapxin/dddk.svg?style=flat-square" alt="npm" /></a>
   <a href="https://www.npmjs.com/package/@perhapxin/dddk"><img src="https://img.shields.io/npm/dm/@perhapxin/dddk.svg?style=flat-square" alt="downloads" /></a>
   <a href="https://github.com/PerhapxinLab/dotdotduck/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue?style=flat-square" alt="license" /></a>
-  <a href="https://dddk.perhapxin.com/docs/v0.1.1/dddk/overview"><img src="https://img.shields.io/badge/docs-online-blue?style=flat-square" alt="docs" /></a>
+  <a href="https://dddk.perhapxin.com/docs/v0.1.3/dddk/overview"><img src="https://img.shields.io/badge/docs-online-blue?style=flat-square" alt="docs" /></a>
 </p>
 
 <p align="center"><a href="./README.md">English →</a></p>
@@ -32,7 +32,7 @@
 
 - **Ctrl/⌘+K 打開**。註冊的指令跟 Ask AI 並排在同一張清單 — 切主題、切語言、開帳單、找客戶，全部用同一個入口處理。
 - **前綴路由** — `/command`、`@entity`、`order:`、`#tag` — 給使用者一個方便的入口，不管當下卡在哪都能找得到答案。
-- **三層客製**疊在一起：CSS 變數換主題、Skill SDK（Script / Prompt / Action / Surface / Panel）寫劇本、或直接把現有的 host 功能接成 palette item。
+- **多層客製**疊在一起：CSS 變數換主題、Skill SDK（多數 host 只需要 Script / Prompt；進階再用 Action / Surface / Panel）寫劇本、或直接把現有的 host 功能接成 palette item。
 - **零內建指令** — palette 裡顯示什麼完全由你決定。SDK 提供基礎建設，詞彙交給你。
 
 </td>
@@ -51,7 +51,7 @@
 <td width="45%" valign="top">
 
 - **DOM-grounded 自主迴圈**。讀目前可見的頁面，一次選一個 tool，跑之前先把步驟唸到字幕條上給使用者看。
-- **12 個內建 action** — `navigate`、`click`、`fill_input`、`ask_user_choice` 等等。要加自己的也行，LLM 自己選用哪一個。
+- **內建 action 一籃子** — `navigate`、`click`、`fill_input`、`ask_user_choice`、`border`、`highlight` 等等。要加自己的也行，LLM 自己選用哪一個。
 - **每一步都靠 Space 把關**。單擊接受 · 雙擊拒絕 · Esc 取消。使用者在事情發生**之前**就看得到它要做什麼。
 - **不確定時主動問**。`ask_user_choice` 對應 2-4 個選項，`ask_user` 接收自由文字。不會偷偷做決定，也不會憑空猜。
 - **自帶 key**。LLM 可走 OpenAI、Google AI Studio、或 server 端的 `ProxyProvider`；per-role routing 把便宜的模型留給後處理、把旗艦留給 agent 迴圈。STT 預設用瀏覽器內建的 Web Speech 零設定，要換 Whisper 或任何廠商就一行 `transcribe(audio)` callback。
@@ -72,7 +72,7 @@
 <td width="45%" valign="top">
 
 - **反白任何文字**，只要在 `<input>` / `<textarea>` / `[contenteditable]` 裡都行，選取下方就會浮出小工具列。選一個 action，結果直接串流回填到原本反白的位置。
-- **七個預設 action** — 翻譯、潤稿、修文法、縮短、延長、改成正式語氣、解釋。可以全部換掉、加自家的（`/translate-with-glossary`、`/rewrite-as-email`）。
+- **預設一組 action 直接能用** — 翻譯、潤稿、修文法、縮短、延長、改成正式語氣、解釋。可以全部換掉、加自家的（`/translate-with-glossary`、`/rewrite-as-email`）。
 - **雙欄 layout** 給編輯器類型的 host 用 — 一邊 `Format`、一邊 `AI`。也可以掛快捷鍵（例如 `Ctrl+Shift+R` 不開選單直接改寫）。
 
 </td>
@@ -83,7 +83,7 @@
 
 ## 04 · 直覺操作 — 把現有手勢轉成 context
 
-四種把 context 餵進 dddk 的方式，沒有新的詞彙要學。
+多種把 context 餵進 dddk 的方式，沒有新的詞彙要學。
 
 <table>
 <tr>
@@ -244,22 +244,22 @@ dotdotduck 仍在積極開發中。能跑，但會有粗糙的邊角。先講幾
 
 目前的 stack：
 
-- **WebAgent** 迴圈、**InlineAgent**、語音轉錄後處理 → OpenAI `gpt-5.4-nano`
+- **4-axis LLM router**（`webagent` / `vision` / `utility` / `plan`）— host 一個 role 配一個 model；展示站目前用 OpenAI `gpt-5.4-nano` 跑主 agent 迴圈 + planner，用 `gpt-5.4-mini` 跑 InlineAgent + 語音後處理。
 - **語音辨識** → 瀏覽器內建的 Web Speech API（SDK 預設；demo 沒問題、沒 SLA — 正式環境的 host 自己接 `transcribe` 走 Whisper / Deepgram 等等）
 
 這些都不是 `@perhapxin/dddk` 寫死的。Package 本身只 ship LLM provider adapter（OpenAI / Google / proxy，加上任何 OpenAI-compatible 廠商透過 `baseURL` — 例如 DEepSeek、Qwen、OpenRouter）跟一個 `transcribe(audio)` 擴充點。Key、模型、ASR 廠商都自己帶 — SDK 不綁你。
 
 ## 文件
 
-- **v0.1.1 有什麼新東西** → [release notes](https://dddk.perhapxin.com/docs/v0.1.1/dddk/release-notes) · [migration guide](https://dddk.perhapxin.com/docs/v0.1.1/dddk/migrating)
+- **v0.1.3 有什麼新東西** → [release notes](https://dddk.perhapxin.com/docs/v0.1.3/dddk/release-notes) · [migration guide](https://dddk.perhapxin.com/docs/v0.1.3/dddk/migrating)
 
-- **完整文件** → [dddk.perhapxin.com/docs](https://dddk.perhapxin.com/docs/v0.1.1/dddk/overview)
-- **Agent**（DOM-grounded 迴圈 + InlineAgent + sitemap + Memory）→ [/dddk/agent](https://dddk.perhapxin.com/docs/v0.1.1/dddk/agent/overview)
-- **LLM** provider + router + adapter registry → [/dddk/llm](https://dddk.perhapxin.com/docs/v0.1.1/dddk/llm/providers)
-- **Skills** 系統 + evals → [/dddk/skills](https://dddk.perhapxin.com/docs/v0.1.1/dddk/skills/overview)
-- **Modules**（voice / Dwell / inline / immersive translate / proactive / analytics）→ [/dddk/modules](https://dddk.perhapxin.com/docs/v0.1.1/dddk/modules/overview)
-- **Toolbox**（search + recommend）→ [/dddk/toolbox](https://dddk.perhapxin.com/docs/v0.1.1/dddk/toolbox/overview)
-- **Theming** → [/dddk/theming](https://dddk.perhapxin.com/docs/v0.1.1/dddk/theming)
+- **完整文件** → [dddk.perhapxin.com/docs](https://dddk.perhapxin.com/docs/v0.1.3/dddk/overview)
+- **Agent**（DOM-grounded 迴圈 + InlineAgent + sitemap + Memory）→ [/dddk/agent](https://dddk.perhapxin.com/docs/v0.1.3/dddk/agent/overview)
+- **LLM** provider + router + adapter registry → [/dddk/llm](https://dddk.perhapxin.com/docs/v0.1.3/dddk/llm/providers)
+- **Skills** 系統 + evals → [/dddk/skills](https://dddk.perhapxin.com/docs/v0.1.3/dddk/skills/overview)
+- **Modules**（voice / Dwell / inline / immersive translate / proactive / analytics）→ [/dddk/modules](https://dddk.perhapxin.com/docs/v0.1.3/dddk/modules/overview)
+- **Toolbox**（search + recommend）→ [/dddk/toolbox](https://dddk.perhapxin.com/docs/v0.1.3/dddk/toolbox/overview)
+- **Theming** → [/dddk/theming](https://dddk.perhapxin.com/docs/v0.1.3/dddk/theming)
 
 ## 安裝
 
@@ -294,7 +294,7 @@ const dddk = new DotDotDuck({
 dddk.mount();
 ```
 
-按 `Ctrl/⌘+K`、打 `/introduce`、看它跑。完整的[安裝指南](https://dddk.perhapxin.com/docs/v0.1.1/dddk/quickstart-frameworks)有 React / Vue / Svelte / Solid 的整合說明。
+按 `Ctrl/⌘+K`、打 `/introduce`、看它跑。完整的[安裝指南](https://dddk.perhapxin.com/docs/v0.1.3/dddk/quickstart-frameworks)有 React / Vue / Svelte / Solid 的整合說明。
 
 ## 主題
 

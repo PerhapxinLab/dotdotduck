@@ -14,7 +14,7 @@
   <a href="https://www.npmjs.com/package/@perhapxin/dddk"><img src="https://img.shields.io/npm/v/@perhapxin/dddk.svg?style=flat-square" alt="npm" /></a>
   <a href="https://www.npmjs.com/package/@perhapxin/dddk"><img src="https://img.shields.io/npm/dm/@perhapxin/dddk.svg?style=flat-square" alt="downloads" /></a>
   <a href="https://github.com/PerhapxinLab/dotdotduck/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue?style=flat-square" alt="license" /></a>
-  <a href="https://dddk.perhapxin.com/docs/v0.1.1/dddk/overview"><img src="https://img.shields.io/badge/docs-online-blue?style=flat-square" alt="docs" /></a>
+  <a href="https://dddk.perhapxin.com/docs/v0.1.3/dddk/overview"><img src="https://img.shields.io/badge/docs-online-blue?style=flat-square" alt="docs" /></a>
 </p>
 
 <p align="center"><a href="./README.zh-TW.md">繁體中文 →</a></p>
@@ -32,7 +32,7 @@
 
 - **Ctrl/⌘+K opens it.** Your registered commands sit alongside Ask AI in the same list — switch theme, change language, open billing, find a customer, all addressable from one place.
 - **Prefix routing** — `/command`, `@entity`, `order:`, `#tag` — gives the user one convenient entry point that solves whatever they're stuck on, no matter where they are in the product.
-- **Three customisation layers** stack: CSS-variable theming, Skill SDK (Script / Prompt / Action / Surface / Panel), or wire your existing host features straight in as palette items.
+- **Layered customisation** — CSS-variable theming, Skill SDK (Script / Prompt for most hosts; Action / Surface / Panel for advanced cases), or wire your existing host features straight in as palette items.
 - **Zero built-in commands** — what shows up in the palette is entirely yours to decide. The SDK ships infrastructure, you ship the vocabulary.
 
 </td>
@@ -51,7 +51,7 @@
 <td width="45%" valign="top">
 
 - **DOM-grounded autonomous loop.** Reads the visible page, picks one tool at a time, narrates each step in the subtitle bar before it runs.
-- **12 built-in actions** — `navigate`, `click`, `fill_input`, `ask_user_choice`, and friends. Add your own; the LLM picks them.
+- **Built-in action catalog** — `navigate`, `click`, `fill_input`, `ask_user_choice`, `border`, `highlight`, and friends. Add your own; the LLM picks them.
 - **Space-gated every step.** Single tap accept · double-tap reject · Esc cancel. Users see what's about to happen *before* it happens.
 - **Asks back when ambiguous.** `ask_user_choice` for 2-4 options, `ask_user` for free text. No silent decisions, no guessing.
 - **Bring your own keys.** LLM via OpenAI, Google AI Studio, or a server-side `ProxyProvider`; per-role routing keeps cheap models on cleanup and the flagship on the agent loop. STT defaults to the browser's Web Speech for zero-setup; swap to Whisper or any vendor via one `transcribe(audio)` callback.
@@ -72,7 +72,7 @@
 <td width="45%" valign="top">
 
 - **Highlight any text** in any `<input>` / `<textarea>` / `[contenteditable]` — a floating toolbar appears below the selection. Pick an action, the result streams back in place of the selection.
-- **Seven default actions** — Translate, Improve writing, Fix spelling & grammar, Make shorter, Make longer, Change to professional tone, Explain this. Drop the defaults, add your own (`/translate-with-glossary`, `/rewrite-as-email`).
+- **Default action set out of the box** — Translate, Improve writing, Fix spelling & grammar, Make shorter, Make longer, Change to professional tone, Explain this. Drop the defaults, add your own (`/translate-with-glossary`, `/rewrite-as-email`).
 - **Two-column layout** option for editor hosts that want a `Format` column next to an `AI` column. Optional keyboard shortcuts (e.g. `Ctrl+Shift+R` to rewrite without opening the menu).
 
 </td>
@@ -83,7 +83,7 @@
 
 ## 04 · Direct manipulation — gestures you already know
 
-Four physical ways to send context into dddk. No new vocabulary to learn.
+Several physical entry points to send context into dddk. No new vocabulary to learn.
 
 <table>
 <tr>
@@ -244,21 +244,21 @@ dotdotduck is in active development. It works, but expect rough edges. A few thi
 
 Current stack:
 
-- **WebAgent** loop, **InlineAgent**, and voice transcript cleanup → OpenAI `gpt-5.4-nano`
+- **4-axis LLM router** (`webagent` / `vision` / `utility` / `plan`) — host configures one model per role; the bundled demo runs OpenAI `gpt-5.4-nano` for the main agent loop and planner, `gpt-5.4-mini` for InlineAgent + voice cleanup.
 - **Speech-to-text** → the browser's Web Speech API (the SDK default; fine for demo, no SLA — production hosts wire `transcribe` with Whisper / Deepgram / etc.)
 
 None of this is baked into `@perhapxin/dddk`. The package itself ships LLM provider adapters (OpenAI / Google / proxy, plus any OpenAI-compatible vendor via `baseURL` — e.g. DeepSeek, Qwen, OpenRouter) and a `transcribe(audio)` extension point. Bring your own keys, models, and ASR vendor — the SDK doesn't lock you in.
 
 ## Documentation
 
-- **What's new in v0.1.1** → [release notes](https://dddk.perhapxin.com/docs/v0.1.1/dddk/release-notes) · [migration guide](https://dddk.perhapxin.com/docs/v0.1.1/dddk/migrating)
-- **Full docs** → [dddk.perhapxin.com/docs](https://dddk.perhapxin.com/docs/v0.1.1/dddk/overview)
-- **Agent** (DOM-grounded loop + InlineAgent + sitemap + Memory) → [/dddk/agent](https://dddk.perhapxin.com/docs/v0.1.1/dddk/agent/overview)
-- **LLM** providers + router + adapter registry → [/dddk/llm](https://dddk.perhapxin.com/docs/v0.1.1/dddk/llm/providers)
-- **Skills** system + evals → [/dddk/skills](https://dddk.perhapxin.com/docs/v0.1.1/dddk/skills/overview)
-- **Modules** (voice / Dwell / inline / immersive translate / proactive / analytics) → [/dddk/modules](https://dddk.perhapxin.com/docs/v0.1.1/dddk/modules/overview)
-- **Toolbox** (search + recommend) → [/dddk/toolbox](https://dddk.perhapxin.com/docs/v0.1.1/dddk/toolbox/overview)
-- **Theming** → [/dddk/theming](https://dddk.perhapxin.com/docs/v0.1.1/dddk/theming)
+- **What's new in v0.1.3** → [release notes](https://dddk.perhapxin.com/docs/v0.1.3/dddk/release-notes) · [migration guide](https://dddk.perhapxin.com/docs/v0.1.3/dddk/migrating)
+- **Full docs** → [dddk.perhapxin.com/docs](https://dddk.perhapxin.com/docs/v0.1.3/dddk/overview)
+- **Agent** (DOM-grounded loop + InlineAgent + sitemap + Memory) → [/dddk/agent](https://dddk.perhapxin.com/docs/v0.1.3/dddk/agent/overview)
+- **LLM** providers + router + adapter registry → [/dddk/llm](https://dddk.perhapxin.com/docs/v0.1.3/dddk/llm/providers)
+- **Skills** system + evals → [/dddk/skills](https://dddk.perhapxin.com/docs/v0.1.3/dddk/skills/overview)
+- **Modules** (voice / Dwell / inline / immersive translate / proactive / analytics) → [/dddk/modules](https://dddk.perhapxin.com/docs/v0.1.3/dddk/modules/overview)
+- **Toolbox** (search + recommend) → [/dddk/toolbox](https://dddk.perhapxin.com/docs/v0.1.3/dddk/toolbox/overview)
+- **Theming** → [/dddk/theming](https://dddk.perhapxin.com/docs/v0.1.3/dddk/theming)
 
 ## Install
 
@@ -293,7 +293,7 @@ const dddk = new DotDotDuck({
 dddk.mount();
 ```
 
-Press `Ctrl/⌘+K`, type `/introduce`, watch it run. The full [quickstart guide](https://dddk.perhapxin.com/docs/v0.1.1/dddk/quickstart-frameworks) covers React / Vue / Svelte / Solid wiring.
+Press `Ctrl/⌘+K`, type `/introduce`, watch it run. The full [quickstart guide](https://dddk.perhapxin.com/docs/v0.1.3/dddk/quickstart-frameworks) covers React / Vue / Svelte / Solid wiring.
 
 ## Theming
 
