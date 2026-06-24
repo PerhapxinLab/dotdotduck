@@ -148,7 +148,20 @@ export type IntentEvent =
    * `summary`). `runId` joins back to `agent_run_started`; `skillId` set
    * when a skill triggered the run.
    */
-  | { kind: 'agent_feedback'; runId?: string; skillId?: string; satisfied: boolean | null; summary: string; timestamp: number };
+  | { kind: 'agent_feedback'; runId?: string; skillId?: string; satisfied: boolean | null; summary: string; timestamp: number }
+  /**
+   * v0.2.0 ROADMAP 7.3. Host-defined event emitted via the public
+   * `dddk.track(name, props?)` API. Goes through the same intent
+   * stream as the typed events; downstream sinks treat it like any
+   * other intent.
+   */
+  | { kind: 'custom_track'; name: string; props: Record<string, unknown>; timestamp: number }
+  /**
+   * v0.2.0 ROADMAP 4.7. Fired when the agent explicitly hands off to
+   * a human operator via the `escalate_to_human` action. `runId`
+   * ties back to the originating run.
+   */
+  | { kind: 'agent_escalated'; runId?: string; reason: string; context?: string; timestamp: number };
 
 export interface DddkEventMap {
   palette_open: { selection: string };

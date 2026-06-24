@@ -93,6 +93,12 @@ export interface ExecuteActionBindings {
    *  no `note`. Hosts pass their own string here for a localised UX;
    *  the LLM can still override per-call via the tool's `note` arg. */
   defaultPauseNote?: string;
+  /** UI hints forwarded into every ActionContext (see types.ts).
+   *  Wired by the WebAgent runtime from WebAgentConfig. */
+  uiHints?: {
+    cursorTrail?: boolean;
+    preferClickLinkOverNavigate?: boolean;
+  };
 }
 
 export async function executeAction(
@@ -109,6 +115,7 @@ export async function executeAction(
   const ctx: ActionContext = {
     session: bindings.session,
     signal,
+    uiHints: bindings.uiHints,
     resolveTarget: (target: string | number): Element | null => {
       if (typeof target === 'number') {
         // Legacy numeric path — keep working for old sessions persisted

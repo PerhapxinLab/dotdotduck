@@ -31,8 +31,9 @@ import { registerAdapter } from './registry';
 import { openaiAdapter } from './openai';
 import { googleAdapter } from './google';
 import { proxyAdapter } from './proxy';
+import { agnesAdapter } from './agnes';
 
-export { openaiAdapter, googleAdapter, proxyAdapter };
+export { openaiAdapter, googleAdapter, proxyAdapter, agnesAdapter };
 export {
   registerAdapter,
   getAdapter,
@@ -43,7 +44,7 @@ export {
 export type { LLMAdapter, AdapterConfig } from './types';
 
 /**
- * Register the three built-in adapters (`openai`, `google`, `proxy`).
+ * Register the built-in adapters (`openai`, `google`, `proxy`, `agnes`).
  * Idempotent: safe to call multiple times. Returns the list of registered
  * adapter ids for diagnostic logging.
  */
@@ -51,5 +52,6 @@ export function seedDefaultAdapters(): string[] {
   registerAdapter(openaiAdapter);
   registerAdapter(googleAdapter);
   registerAdapter(proxyAdapter);
-  return [openaiAdapter.id, googleAdapter.id, proxyAdapter.id];
+  registerAdapter(agnesAdapter);
+  return [openaiAdapter.id, googleAdapter.id, proxyAdapter.id, agnesAdapter.id];
 }

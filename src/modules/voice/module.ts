@@ -6,6 +6,7 @@ import { Voice, type VoiceConfig, type AudioTranscriber } from './voice';
 import { TTS, type TTSConfig } from './tts';
 import type { LLMSource } from '../../agent/llm/router';
 import type { Subtitle } from '../../ui/subtitle';
+import { sdkString } from '../../utils/sdk-i18n';
 
 export type { AudioTranscriber } from './voice';
 
@@ -25,10 +26,26 @@ export interface VoiceModuleConfig {
    * forever.
    */
   captureTimeoutMs?: number;
-  /** UI label shown in the subtitle indicator while listening. */
+  /**
+   * UI label shown in the subtitle indicator while listening. When
+   * omitted, falls back to the SDK i18n stub keyed by `locale`
+   * (`'Listening'` / `'聽取中'`).
+   */
   listeningLabel?: string;
-  /** UI label shown when the browser doesn't support STT. */
+  /**
+   * UI label shown when the browser doesn't support STT. When omitted,
+   * falls back to the SDK i18n stub keyed by `locale`.
+   */
   unsupportedLabel?: string;
+  /**
+   * Locale tag used to pick SDK i18n fallbacks for `listeningLabel` /
+   * `unsupportedLabel` when the host doesn't supply explicit overrides.
+   * Defaults to `'en'`. Hosts can call `setLocale(...)` at runtime to
+   * switch (e.g. when the user toggles UI language).
+   *
+   * @since v0.2.0
+   */
+  locale?: string;
   /**
    * Default `true`. When enabled, `captureOnce` returns `null` for any
    * capture that resolves to whitespace-only text — empty utterance,
@@ -45,8 +62,9 @@ export class VoiceModule {
   readonly tts: TTS;
   private autoSpeakSubtitles: boolean;
   private captureTimeoutMs: number;
-  private listeningLabel: string;
-  private unsupportedLabel: string;
+  private listeningLabelOverride: string | undefined;
+  private unsupportedLabelOverride: string | undefined;
+  private locale: string;
   private skipEmptyTranscript: boolean;
 
   constructor(config: VoiceModuleConfig = {}) {
@@ -57,11 +75,31 @@ export class VoiceModule {
     this.tts = new TTS(config.tts ?? {});
     this.autoSpeakSubtitles = config.autoSpeakSubtitles ?? false;
     this.captureTimeoutMs = config.captureTimeoutMs ?? 30_000;
-    // SDK defaults stay short + English-only. Hosts who want localised
-    // copy override via `listeningLabel` / `unsupportedLabel` at construct.
-    this.listeningLabel = config.listeningLabel ?? 'Listening';
-    this.unsupportedLabel = config.unsupportedLabel ?? 'Voice input not supported';
+    this.locale = config.locale ?? 'en';
+    this.listeningLabelOverride = config.listeningLabel;
+    this.unsupportedLabelOverride = config.unsupportedLabel;
     this.skipEmptyTranscript = config.skipEmptyTranscript ?? true;
+  }
+
+  /** Resolved listening label — host override if set, else SDK i18n fallback. */
+  private get listeningLabel(): string {
+    return this.listeningLabelOverride ?? sdkString(this.locale, 'voice.listening');
+  }
+
+  /** Resolved unsupported label — host override if set, else SDK i18n fallback. */
+  private get unsupportedLabel(): string {
+    return this.unsupportedLabelOverride ?? sdkString(this.locale, 'voice.unsupported');
+  }
+
+  /**
+   * Switch the locale used for the SDK i18n fallback labels at runtime.
+   * Hosts call this when the user toggles UI language. Has no effect on
+   * labels the host has explicitly overridden via constructor config.
+   *
+   * @since v0.2.0
+   */
+  setLocale(locale: string): void {
+    this.locale = locale;
   }
 
   /**

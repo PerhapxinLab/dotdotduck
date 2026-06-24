@@ -64,6 +64,10 @@ const STRINGS = {
     'palette.screenshot.hint': 'Drag to select · Esc cancels',
     'form.assist.scanning': 'Scanning {count} fields…',
     'prefs.title': 'Settings: {skill}',
+    // v0.2.0 ROADMAP 1.3 — voice module labels in the SDK i18n fallback
+    'voice.listening': 'Listening',
+    'voice.unsupported': 'Voice input not supported',
+    'voice.failed': 'Voice input failed',
   },
   'zh-TW': {
     'agent.thinking': '思考中…',
@@ -115,6 +119,9 @@ const STRINGS = {
     'palette.screenshot.hint': '拖曳框選 · Esc 取消',
     'form.assist.scanning': '正在分析 {count} 個欄位…',
     'prefs.title': '設定：{skill}',
+    'voice.listening': '聽取中',
+    'voice.unsupported': '此瀏覽器不支援語音輸入',
+    'voice.failed': '語音輸入失敗',
   },
 } as const;
 

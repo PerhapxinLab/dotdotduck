@@ -29,5 +29,6 @@ export {
   openaiAdapter,
   googleAdapter,
   proxyAdapter,
+  agnesAdapter,
 } from './adapters';
 export type { LLMAdapter, AdapterConfig } from './adapters';

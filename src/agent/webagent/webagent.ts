@@ -119,13 +119,28 @@ export class WebAgent {
       sessionScope: config.sessionScope ?? 'time',
     };
 
-    const disabled = new Set(config.disableBuiltinActions ?? []);
+    // Tool exclusion: legacy `disableBuiltinActions` is an alias for the
+    // new `excludeTools` field as of v0.2.0. Union both sets.
+    const excluded = new Set([
+      ...(config.disableBuiltinActions ?? []),
+      ...(config.excludeTools ?? []),
+    ]);
+    if (
+      typeof console !== 'undefined' &&
+      config.disableBuiltinActions !== undefined &&
+      config.disableBuiltinActions.length > 0
+    ) {
+      // One-line deprecation notice. Removed in v0.3.0.
+      console.warn(
+        '[dddk] `disableBuiltinActions` is deprecated since v0.2.0; rename to `excludeTools` (and consider `disableAutoPauseAfterNarrate` to control the runtime auto-pause separately).',
+      );
+    }
     for (const action of builtinActions) {
-      if (!disabled.has(action.name)) this.actions.set(action.name, action);
+      if (!excluded.has(action.name)) this.actions.set(action.name, action);
     }
     // present_surface is opt-in: registered only when the host enables it
-    // AND wires setSurfaceMounter. Still honours disableBuiltinActions.
-    if (config.allowPresent && !disabled.has(presentSurface.name)) {
+    // AND wires setSurfaceMounter. Still honours the exclusion set.
+    if (config.allowPresent && !excluded.has(presentSurface.name)) {
       this.actions.set(presentSurface.name, presentSurface as ActionDefinition);
     }
     for (const action of config.customActions ?? []) this.actions.set(action.name, action);

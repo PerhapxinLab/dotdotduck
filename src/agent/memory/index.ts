@@ -93,6 +93,9 @@ export class Memory {
 export { CoreMemory, EpisodicMemory, SemanticMemory };
 export { DrawerMemory, createDrawerMemory } from './drawer';
 export type { Drawer, DrawerMemoryOpts, DrawerSearchOpts } from './drawer';
+// v0.2.0 ROADMAP 1.1 — Unified memory facade (wraps Memory + DrawerMemory).
+export { UnifiedMemory, createUnifiedMemory } from './unified';
+export type { UnifiedMemoryConfig, RememberOpts, RecallResult } from './unified';
 export type {
   CoreMemoryConfig, CoreMemorySchema, CoreFieldType,
   EpisodicMemoryConfig, EpisodicEntry,

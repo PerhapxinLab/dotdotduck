@@ -16,6 +16,11 @@
 
 export { WebAgent } from './webagent/webagent';
 
+// v0.2.0 ROADMAP 1.9 — streaming envelope parser, public so adapters
+// and tests can feed it tool-call args deltas.
+export { StreamingEnvelopeParser } from './webagent/runtime/streaming-envelope';
+export type { EnvelopeStreamEvent } from './webagent/runtime/streaming-envelope';
+
 export {
   border,
   highlight,
@@ -28,7 +33,27 @@ export {
 
 export { readDOM, type DomReadOptions } from './webagent/dom-reader';
 
-export { builtinActions } from './webagent/actions';
+export {
+  builtinActions,
+  // Opt-in action exports — host registers via `customActions`.
+  escalateToHuman,
+  trackIntent,
+  workflowActions,
+  validateForm,
+  waitUntil,
+} from './webagent/actions';
+
+// v0.2.0 ROADMAP 2.4 — form widget adapter registry
+export {
+  registerFormWidget,
+  unregisterFormWidget,
+  listFormWidgets,
+  findFormWidget,
+} from './webagent/form-widgets';
+export type {
+  FormWidgetAdapter,
+  FormWidgetFillContext,
+} from './webagent/form-widgets';
 
 export type {
   WebAgentConfig,
@@ -102,6 +127,9 @@ export {
   SemanticMemory,
   DrawerMemory,
   createDrawerMemory,
+  // v0.2.0 ROADMAP 1.1 — unified facade
+  UnifiedMemory,
+  createUnifiedMemory,
 } from './memory';
 export type {
   MemoryConfig, CoreMemoryConfig, CoreMemorySchema, CoreFieldType,
@@ -109,6 +137,8 @@ export type {
   SemanticMemoryConfig, SemanticMemoryEntry, MemoryProvider,
   MemoryPrivacyConfig,
   Drawer, DrawerMemoryOpts, DrawerSearchOpts,
+  // v0.2.0 ROADMAP 1.1 — unified facade types
+  UnifiedMemoryConfig, RememberOpts, RecallResult,
 } from './memory';
 
 // ─── Plan (LLM-mediated structured artifact module) ────────────────

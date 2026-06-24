@@ -28,7 +28,36 @@ const STYLE_CSS = `
      they must never obscure the subtitle's text. */
   [${OVERLAY_ATTR}] { position: absolute; pointer-events: none; z-index: var(--webagent-z-overlay, 9100); }
   [${OVERLAY_ATTR}="highlight"] { background: var(--webagent-highlight, rgba(255, 235, 59, 0.4)); border-radius: var(--webagent-radius-xs, 4px); }
-  [${OVERLAY_ATTR}="border"]    { border: 2px solid var(--webagent-overlay-border, #ff9800); border-radius: var(--webagent-radius-sm, 6px); }
+  /* Border: container has no visible chrome — the SVG <rect> inside
+     paints the outline using stroke-dashoffset for the draw-in
+     animation. Set --webagent-overlay-border-anim-ms to 0 to skip the
+     animation (instant border). */
+  [${OVERLAY_ATTR}="border"]    { border-radius: var(--webagent-radius-sm, 6px); }
+  [${OVERLAY_ATTR}="border"] > svg.webagent-border-svg {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    overflow: visible;
+    pointer-events: none;
+  }
+  [${OVERLAY_ATTR}="border"] > svg.webagent-border-svg > rect {
+    fill: none;
+    stroke: var(--webagent-overlay-border, #ff9800);
+    stroke-width: 2;
+    rx: var(--webagent-radius-sm, 6);
+    ry: var(--webagent-radius-sm, 6);
+    stroke-dasharray: var(--webagent-border-perimeter, 800);
+    stroke-dashoffset: var(--webagent-border-perimeter, 800);
+    animation: webagent-border-draw var(--webagent-overlay-border-anim-ms, 480ms) cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+  @keyframes webagent-border-draw {
+    to { stroke-dashoffset: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    [${OVERLAY_ATTR}="border"] > svg.webagent-border-svg > rect {
+      animation: none;
+      stroke-dashoffset: 0;
+    }
+  }
   [${OVERLAY_ATTR}="spotlight"] { box-shadow: 0 0 0 9999px var(--webagent-spotlight, rgba(0,0,0,0.55)); border-radius: 8px; }
   [${OVERLAY_ATTR}="label"]     {
     padding: 4px 8px; background: var(--webagent-label-bg, #1a1a1a); color: var(--webagent-text-on-accent, #fff);
@@ -121,6 +150,19 @@ function position(overlay: HTMLElement, target: Element): void {
   overlay.style.top = `${rect.top + window.scrollY}px`;
   overlay.style.width = `${rect.width}px`;
   overlay.style.height = `${rect.height}px`;
+
+  // Border overlays animate the SVG <rect>'s stroke-dashoffset; the
+  // dash array must match the actual perimeter for a clean "draw in"
+  // visual. Cap at 4000 so a giant target doesn't slow the keyframe.
+  if (overlay.getAttribute(OVERLAY_ATTR) === 'border') {
+    const perimeter = Math.min(4000, Math.ceil((rect.width + rect.height) * 2 + 16));
+    overlay.style.setProperty('--webagent-border-perimeter', String(perimeter));
+    const svgRect = overlay.querySelector('svg.webagent-border-svg > rect') as SVGRectElement | null;
+    if (svgRect) {
+      svgRect.setAttribute('width', String(Math.max(0, rect.width - 2)));
+      svgRect.setAttribute('height', String(Math.max(0, rect.height - 2)));
+    }
+  }
 }
 
 /**
@@ -175,8 +217,28 @@ export function border(target: Element | string, color?: string, label?: string)
   ov.setAttribute(OVERLAY_ATTR, 'border');
   ov.dataset.overlayId = id;
   ov.dataset[SELECTOR_DS_KEY] = r.selector;
-  if (color) ov.style.borderColor = color;
+  // Custom colour applies to both the legacy border + the new SVG stroke
+  // (set as a CSS variable so the rule's `stroke: var(--webagent-overlay-border)`
+  // picks it up without overriding the rule).
+  if (color) {
+    ov.style.setProperty('--webagent-overlay-border', color);
+  }
   if (label) ov.dataset.overlayLabel = label;
+
+  // SVG rect that draws the border with stroke-dashoffset animation.
+  // Container `position()` sets the outer size; we update the rect's
+  // width/height + the --webagent-border-perimeter custom prop there.
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'webagent-border-svg');
+  svg.setAttribute('preserveAspectRatio', 'none');
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('x', '1');
+  rect.setAttribute('y', '1');
+  rect.setAttribute('width', '0');
+  rect.setAttribute('height', '0');
+  svg.appendChild(rect);
+  ov.appendChild(svg);
+
   position(ov, r.target);
   document.body.appendChild(ov);
   if (label) attachLabel(r.target, label, id, r.selector);

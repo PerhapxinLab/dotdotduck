@@ -29,6 +29,17 @@ export type ActionFailureReason =
   | 'navigation'
   | 'cancelled'
   | 'user_declined'
+  /**
+   * v0.2.0 ROADMAP 2.3: the target is in scope the agent can read but
+   * not act on — typically a cross-origin iframe or popup. The agent
+   * narrates the boundary to the user and may offer to hand off.
+   */
+  | 'cross_origin'
+  /**
+   * v0.2.0 ROADMAP 2.8: the route the agent navigated to requires
+   * authentication; user must sign in before the agent can proceed.
+   */
+  | 'auth_required'
   | 'unknown';
 
 export type ActionResult<T = unknown> =
@@ -50,6 +61,19 @@ export interface ActionContext {
    * the indexed-tree contract works uniformly.
    */
   resolveTarget(target: string | number): Element | null;
+
+  /**
+   * Visual / UX hints forwarded from `WebAgentConfig`. Actions read these
+   * to apply human-paced overlays (synthetic cursor, link-click vs push-
+   * state navigate, …) without each handler needing access to the full
+   * config object.
+   *
+   * @since v0.2.0
+   */
+  uiHints?: {
+    cursorTrail?: boolean;
+    preferClickLinkOverNavigate?: boolean;
+  };
 }
 
 export interface ActionDefinition<P = unknown, R = unknown> {
@@ -529,6 +553,104 @@ export interface WebAgentConfig {
    *
    * Hosts can still re-add specific actions (or custom ones) via
    * `customActions`, which run AFTER this filter.
+   *
+   * @deprecated Since v0.2.0. Use `excludeTools` for the same effect,
+   * and `disableAutoPauseAfterNarrate` to control the runtime-level
+   * pause behaviour. This field stays accepted as an alias to
+   * `excludeTools` for one minor version, then is removed in v0.3.0.
    */
   disableBuiltinActions?: string[];
+
+  /**
+   * Names of built-in or registered actions to hide from the agent's
+   * tool catalog. Equivalent to the older `disableBuiltinActions` —
+   * the rename clarifies that the field only filters the LLM-visible
+   * catalog, NOT the runtime auto-pause behavior (see
+   * `disableAutoPauseAfterNarrate` for that).
+   *
+   * If both `disableBuiltinActions` and `excludeTools` are set, the
+   * union is applied.
+   *
+   * @since v0.2.0
+   */
+  excludeTools?: string[];
+
+  /**
+   * Stop the runtime from auto-inserting a `pause` after every narrate
+   * action in CoT mode. The default behavior is "narrate → pause →
+   * wait for Space → next action". Disabling this collapses narrates
+   * into a single uninterrupted stream — suitable for hosts whose
+   * sites are read-only or whose users expect a chat-style experience
+   * with no per-step gating.
+   *
+   * Note: this is NOT the same as putting `'pause'` in `excludeTools`.
+   * `excludeTools: ['pause']` only stops the LLM from calling pause
+   * explicitly; the runtime still inserts auto-pauses after narrates.
+   * Setting `disableAutoPauseAfterNarrate: true` is what actually
+   * removes the gating.
+   *
+   * Default: `false`.
+   *
+   * @since v0.2.0
+   */
+  disableAutoPauseAfterNarrate?: boolean;
+
+  /**
+   * Enable the streaming `agent_turn` envelope path (v0.2.0 ROADMAP
+   * 1.9). When `true`, the runtime parses tool-call args incrementally
+   * as the LLM streams them, so `narrate` strings start appearing in
+   * the subtitle bar as the LLM types them — instead of waiting for
+   * the entire envelope to complete, then replaying via a local
+   * typewriter.
+   *
+   * Currently EXPERIMENTAL. Requires provider-side support for
+   * incremental tool-call args streaming (the bundled
+   * `OpenAIProvider` will gain this in a follow-up; until then setting
+   * this flag is a no-op for OpenAI). Other providers fall back to the
+   * non-streaming path automatically.
+   *
+   * Default: `false`.
+   *
+   * @since v0.2.0
+   * @experimental
+   */
+  enableStreamingEnvelope?: boolean;
+
+  /**
+   * Synthetic cursor overlay for click actions (v0.2.0 — ROADMAP).
+   *
+   * When `true`, every `click` action renders a small arrow cursor that
+   * slides from its last position to the target element (~360ms), plays
+   * a brief tap animation, THEN calls `el.click()`. The actual DOM
+   * event is still fired by `el.click()` — the cursor is purely visual.
+   *
+   * The point is human-paced feedback so users (and demo viewers) see
+   * the agent operate the page like a person, rather than buttons
+   * getting pressed by an invisible ghost. Respects
+   * `prefers-reduced-motion`.
+   *
+   * Default: `false`. Recommended `true` for marketing demos / screen
+   * recordings; either toggle is fine in production.
+   */
+  cursorTrail?: boolean;
+
+  /**
+   * Prefer clicking an `<a href>` over `history.pushState` when the
+   * `navigate` action runs (v0.2.0 — ROADMAP).
+   *
+   * When `true`, before falling back to `history.pushState(target)`,
+   * `navigate` looks for a visible `<a href="${target}">` on the page
+   * and (if `cursorTrail` is also enabled) glides the cursor to it +
+   * fires `.click()`. Behaviour collapses to the original push-state
+   * fallback if no matching link exists.
+   *
+   * Why: directly mutating history feels jarring on demo videos —
+   * the SPA route flips but the user never sees "the agent clicked
+   * nav". Click-the-link first surfaces the navigation as a real
+   * user action.
+   *
+   * Default: `false` (keep v0.1.x behaviour). Pair with `cursorTrail`
+   * for the full effect.
+   */
+  preferClickLinkOverNavigate?: boolean;
 }

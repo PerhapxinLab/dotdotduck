@@ -78,12 +78,16 @@ export {
   WebAgent,
   InlineAgent,
   AgentCursor,
+  StreamingEnvelopeParser,
   Memory,
   CoreMemory,
   EpisodicMemory,
   SemanticMemory,
   DrawerMemory,
   createDrawerMemory,
+  // v0.2.0 ROADMAP 1.1 — unified memory facade
+  UnifiedMemory,
+  createUnifiedMemory,
   Plan,
   TodosArtifact,
   MarkdownArtifact,
@@ -96,6 +100,12 @@ export {
   listOverlays,
   readDOM,
   builtinActions,
+  // Opt-in action exports — host opts in via `customActions: [...]`.
+  escalateToHuman,
+  trackIntent,
+  workflowActions,
+  validateForm,
+  waitUntil,
   serializeSitemap,
   resolvePath,
   searchSitemap,
@@ -146,6 +156,10 @@ export type {
   Drawer,
   DrawerMemoryOpts,
   DrawerSearchOpts,
+  // v0.2.0 ROADMAP 1.1 — unified memory facade types
+  UnifiedMemoryConfig,
+  RememberOpts,
+  RecallResult,
   MemoryConfig,
   CoreMemoryConfig,
   CoreMemorySchema,
@@ -156,6 +170,7 @@ export type {
   SemanticMemoryEntry,
   MemoryProvider,
   MemoryPrivacyConfig,
+  EnvelopeStreamEvent,
 } from './agent';
 
 // ─── LLM (providers, router, adapter registry) ─────────────────────
@@ -196,6 +211,7 @@ export {
   openaiAdapter,
   googleAdapter,
   proxyAdapter,
+  agnesAdapter,
 } from './agent/llm';
 export type { LLMAdapter, AdapterConfig } from './agent/llm';
 
@@ -232,6 +248,26 @@ export {
   MockLLM,
   mockToolCall,
 } from './skills/evals';
+
+// v0.2.0 ROADMAP 2.6 — multi-step transaction with rollback
+export { runTransaction } from './skills/transaction';
+export type {
+  TransactionStep,
+  TransactionOpts,
+  TransactionOutcome,
+} from './skills/transaction';
+
+// v0.2.0 ROADMAP 2.4 — form widget adapter registry
+export {
+  registerFormWidget,
+  unregisterFormWidget,
+  listFormWidgets,
+  findFormWidget,
+} from './agent/webagent/form-widgets';
+export type {
+  FormWidgetAdapter,
+  FormWidgetFillContext,
+} from './agent/webagent/form-widgets';
 export type {
   EvalSpec,
   EvalAssertion,
@@ -329,6 +365,32 @@ export type {
   HeatRankOptions,
   HeatRankAdapter,
 } from './utils/heat-rank';
+
+// ─── v0.2.0 ingest layer ──────────────────────────────────────────────
+
+export {
+  EVENT_SCHEMA_VERSION,
+  makeEvent,
+  Transport,
+  HttpSink,
+  DebugSink,
+  MultiSink,
+} from './ingest';
+export type {
+  EventCategory,
+  BaseEvent,
+  ClickEventProps,
+  ScrollEventProps,
+  HoverEventProps,
+  FocusEventProps,
+  RoutingEventProps,
+  PerformanceEventProps,
+  SessionStartProps,
+  PageViewProps,
+  CustomEventProps,
+  EventSink,
+  TransportOptions,
+} from './ingest';
 
 // ─── shared types ──────────────────────────────────────────────────
 

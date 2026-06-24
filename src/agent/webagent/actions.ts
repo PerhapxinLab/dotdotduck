@@ -11,6 +11,7 @@
 
 import type { ActionDefinition, ActionResult } from './types';
 import * as overlay from './overlay';
+import { moveCursorAndTap } from './cursor';
 
 const objSchema = (props: Record<string, unknown>, required: string[] = []) => ({
   type: 'object',
@@ -131,6 +132,11 @@ const click: ActionDefinition<{ selector: string }> = {
     const found = resolve(ctx, selector);
     if (!found.ok) return found.result;
     if (!isInteractive(found.el)) return { ok: false, reason: 'not_interactive' };
+    // Synthetic cursor pre-flight — opt-in via WebAgentConfig.cursorTrail.
+    // Pure visual; el.click() still fires the real DOM event afterward.
+    if (ctx.uiHints?.cursorTrail) {
+      try { await moveCursorAndTap(found.el); } catch { /* visual nicety; never block */ }
+    }
     found.el.click();
     // Settle so framework handlers re-render before the next agent turn
     // reads DOM.
@@ -367,6 +373,59 @@ export const presentSurface: ActionDefinition<{
   },
 };
 
+// ─── v0.2.0 generic action additions (ROADMAP 3.1 + 4.7) ──────────
+
+/** ROADMAP 4.7: escalate to a human operator. Host wires the actual
+ *  handoff (live chat, ticket, email) in their `escalate_to_human`
+ *  action override; the bundled definition is a typed stub that emits
+ *  the `agent_escalated` intent for analytics.
+ *  Opt-in: NOT in `builtinActions`. Host registers via `customActions`. */
+export const escalateToHuman: ActionDefinition<{ reason: string; context?: string }> = {
+  name: 'escalate_to_human',
+  description: 'Hand off the conversation to a human operator. Use when the user is frustrated, the request requires a human policy decision, or the agent has tried + failed N times. Provide `reason` describing why escalating. Optional `context` packages what to send the operator.',
+  parameters: objSchema(
+    {
+      reason: { type: 'string', description: 'Short reason for the handoff. Shown to the operator.' },
+      context: { type: 'string', description: 'Optional longer summary the operator needs.' },
+    },
+    ['reason'],
+  ),
+  handler: async ({ reason, context }) => {
+    return { ok: true, data: { reason, context: context ?? '' } };
+  },
+};
+
+/** ROADMAP 3.1: typed intent emission from agent. Lets the agent flag
+ *  notable moments in a run for the host's analytics ("user explicitly
+ *  asked about pricing", "agent recommended product X").
+ *  Opt-in: NOT in `builtinActions`. Host registers via `customActions`. */
+export const trackIntent: ActionDefinition<{ kind: string; payload?: Record<string, unknown> }> = {
+  name: 'track_intent',
+  description: 'Emit a typed intent event to the host\'s analytics stream. Use to flag notable moments mid-run — the user explicitly committed to a plan, the agent recommended a specific product, the conversation drifted into a new topic. Does NOT change the conversation flow; agent should still narrate / act as appropriate after calling this.',
+  parameters: objSchema(
+    {
+      kind: { type: 'string', description: 'Intent kind. Use snake_case + describe what happened, not what to do (e.g. "user_committed_to_pro_plan").' },
+      payload: { type: 'object', additionalProperties: true, description: 'Optional structured payload — the entities involved, the outcome, etc.' },
+    },
+    ['kind'],
+  ),
+  handler: async ({ kind, payload }) => {
+    return { ok: true, data: { kind, payload: payload ?? {} } };
+  },
+};
+
+// `summarize_page` was prototyped as a schema-only stub then removed —
+// the runtime hand-off never landed and shipping the schema without a
+// real handler made the LLM call a no-op. Will return once the
+// streaming-envelope loop wiring is in place. Host can register their
+// own `summarize_page` action today via `customActions`.
+
+// `open_popup` / `enter_iframe` (frame actions, ROADMAP 2.1/2.2) were
+// prototyped then removed — the use cases (OAuth windows, embedded
+// checkout) overlap with `navigate`+`auth_required` and add little
+// for the agent's typical product-driving flows. Re-introduce when a
+// real host needs popup-driven OAuth round-tripping.
+
 // ─── exports ────────────────────────────────────────────────────────
 
 export const builtinActions: ActionDefinition[] = [
@@ -390,6 +449,13 @@ export const builtinActions: ActionDefinition[] = [
   askUser,
   askUserChoice,
 ] as ActionDefinition[];
+
+// Opt-in: workflow actions (v0.2.0 ROADMAP 2.x) are NOT auto-registered.
+// Host opts in with `new WebAgent({ ..., customActions: workflowActions })`
+// — keeps the default prompt catalog focused on the actions the host
+// actually uses.
+export { workflowActions } from './actions-workflow';
+export { validateForm, waitUntil } from './actions-workflow';
 
 // Exported so hosts that want both visual styles can opt in:
 //   new WebAgent({ ..., customActions: [highlightAction] })

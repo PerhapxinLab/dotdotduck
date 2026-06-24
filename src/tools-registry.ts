@@ -150,6 +150,46 @@ export class ToolsRegistry {
     return [...this.tools.values()];
   }
 
+  /**
+   * v0.2.0 ROADMAP item 1.6.
+   *
+   * Wait for any in-flight agent turn to complete, so the very next
+   * turn observes whatever tools have just been registered. Without
+   * this, mid-flight `register(...)` calls only apply to subsequent
+   * turns — the in-flight turn finishes with the snapshot it started
+   * with, which is correct but surprises hosts.
+   *
+   * If no agent is attached or no run is in flight, resolves
+   * immediately. Otherwise resolves when the current run reaches idle.
+   *
+   * Implementation note: WebAgent doesn't expose a public event
+   * emitter, so this poll-until-idle approach is the lowest-coupling
+   * way to wire the same semantics. Poll interval is 100ms — agent
+   * turn boundaries are typically 1-3s on `gpt-5.4-nano`, so the
+   * loop tops out at ~30 polls per turn.
+   */
+  async flush(): Promise<void> {
+    const agent = this.liveAgent;
+    if (!agent) return;
+    // Peek at WebAgent's status via the public `isRunning` semantics.
+    // We can't import WebAgent's status directly without a type
+    // dependency, so probe via the session: a non-null session whose
+    // status is 'thinking' / 'executing' / 'waiting' means there's
+    // a turn in progress.
+    type StatusProbe = { isRunning?: () => boolean };
+    const probe = agent as unknown as StatusProbe;
+    if (typeof probe.isRunning !== 'function') return;
+    if (!probe.isRunning()) return;
+    return new Promise<void>((resolve) => {
+      const t = setInterval(() => {
+        if (typeof probe.isRunning !== 'function' || !probe.isRunning()) {
+          clearInterval(t);
+          resolve();
+        }
+      }, 100);
+    });
+  }
+
   // ─── QA convenience ────────────────────────────────────────────
 
   /**

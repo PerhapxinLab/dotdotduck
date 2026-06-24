@@ -373,6 +373,33 @@ export class DotDotDuck {
     this._intentBuffer.emitIntent(this._emitter, event);
   }
 
+  /**
+   * v0.2.0 ROADMAP item 7.3.
+   *
+   * Public host-facing `track(name, props?)` API. Mirrors the standard
+   * product-analytics surface — engineers recognise this from existing
+   * tooling. Routes through the same intent stream as the SDK's typed
+   * events; downstream sinks see one canonical pipe.
+   *
+   * `name` should be snake_case past-tense ("order_completed",
+   * "checkout_started") — describes what happened, not what to do.
+   *
+   * @example
+   * ```ts
+   * dddk.track('order_completed', { order_id, value: 49.99, items: 3 });
+   * dddk.track('survey_dismissed');
+   * ```
+   */
+  track(name: string, props?: Record<string, unknown>): void {
+    if (!name || typeof name !== 'string') return;
+    this.emitIntent({
+      kind: 'custom_track',
+      name,
+      props: props ?? {},
+      timestamp: Date.now(),
+    });
+  }
+
   // ─── highlight (frame any DOM element) ──────────────────────────
 
   /**

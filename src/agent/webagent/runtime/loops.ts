@@ -32,6 +32,40 @@ import {
 import { recordParseFail, recordTurn } from './debug';
 import { callLlmStream } from './messages';
 
+/**
+ * Look for a visible <a href> whose target matches `path`. Used by the
+ * `preferClickLinkOverNavigate` config flag — when the host opts in we
+ * trigger this anchor's `.click()` instead of calling the navigate bridge
+ * directly, so demos look like a real human clicking nav.
+ *
+ * Matches an anchor when either:
+ *   - href equals path exactly (`/dashboard`)
+ *   - href equals path with trailing slash trimmed
+ *   - the anchor's `pathname` matches path (handles fully-qualified hrefs)
+ *
+ * Skips disabled / `aria-disabled` / hidden anchors. Returns the first
+ * match in document order — usually the primary nav link.
+ */
+function findNavLink(path: string): HTMLAnchorElement | null {
+  if (typeof document === 'undefined' || !path) return null;
+  const want = path.replace(/\/$/, '') || '/';
+  const anchors = document.querySelectorAll<HTMLAnchorElement>('a[href]');
+  for (const a of Array.from(anchors)) {
+    if (a.getAttribute('aria-disabled') === 'true') continue;
+    if (a.hasAttribute('disabled')) continue;
+    if (!(a.offsetParent || a.getClientRects().length > 0)) continue; // not visible
+    const raw = a.getAttribute('href') ?? '';
+    const trimmed = raw.replace(/\/$/, '') || '/';
+    if (trimmed === want) return a;
+    try {
+      const u = new URL(a.href, location.origin);
+      const pn = u.pathname.replace(/\/$/, '') || '/';
+      if (pn === want) return a;
+    } catch { /* ignore malformed hrefs */ }
+  }
+  return null;
+}
+
 export async function* executeLoop(
   agent: WebAgent,
   signal: AbortSignal,
@@ -151,12 +185,38 @@ export async function* executeLoop(
       // Surface the loading beat BEFORE the router fires so the host can
       // show a loading indicator until `navigated` arrives.
       yield { kind: 'navigating', from, to: path };
+
+      // v0.2.0 ROADMAP — preferClickLinkOverNavigate.
+      // When the host opts in, look for a visible <a href="${path}"> on
+      // the page and trigger it like a user click (with the synthetic
+      // cursor if cursorTrail is also on). This keeps demos looking like
+      // a human navigating instead of a history.pushState ghost. Falls
+      // through to the standard bridge when no matching link exists.
+      let linkClicked = false;
+      if (agent.configRef.preferClickLinkOverNavigate && typeof document !== 'undefined') {
+        const anchor = findNavLink(path);
+        if (anchor) {
+          try {
+            if (agent.configRef.cursorTrail) {
+              const { moveCursorAndTap } = await import('../cursor');
+              await moveCursorAndTap(anchor);
+            }
+            anchor.click();
+            linkClicked = true;
+            await new Promise((r) => setTimeout(r, 80));
+          } catch {
+            linkClicked = false;
+          }
+        }
+      }
       try {
-        const bridgeResult = agent.navigateBridgeRef?.(path);
-        // Hosts whose router returns a Promise: await for the real
-        // "render complete" signal before declaring nav done.
-        if (bridgeResult && typeof (bridgeResult as Promise<void>).then === 'function') {
-          await bridgeResult;
+        if (!linkClicked) {
+          const bridgeResult = agent.navigateBridgeRef?.(path);
+          // Hosts whose router returns a Promise: await for the real
+          // "render complete" signal before declaring nav done.
+          if (bridgeResult && typeof (bridgeResult as Promise<void>).then === 'function') {
+            await bridgeResult;
+          }
         }
       } catch (err) {
         result = { ok: false, reason: 'navigation', message: (err as Error).message };
@@ -219,6 +279,10 @@ export async function* executeLoop(
           session,
           defaultPauseNote:
             agent.configRef.defaultPauseNote ?? sdkString(agent.configRef.locale, 'agent.press_space_continue'),
+          uiHints: {
+            cursorTrail: agent.configRef.cursorTrail,
+            preferClickLinkOverNavigate: agent.configRef.preferClickLinkOverNavigate,
+          },
         },
         toolCall.name,
         toolCall.arguments,
@@ -570,6 +634,12 @@ export async function* executeCotLoop(
         // while agent is running" is explicit, persistent state.
         let skipPause = false;
         if (isUserEditingInPalette()) {
+          skipPause = true;
+        }
+        // v0.2.0 ROADMAP 1.5: host can disable the runtime-level
+        // auto-pause entirely. Distinct from putting `'pause'` in
+        // `excludeTools` (which only hides the tool from the LLM).
+        if (agent.configRef.disableAutoPauseAfterNarrate === true) {
           skipPause = true;
         }
 
