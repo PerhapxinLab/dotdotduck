@@ -31,6 +31,27 @@ import {
 } from './helpers';
 import { recordParseFail, recordTurn } from './debug';
 import { callLlmStream } from './messages';
+import type { EnvelopeStreamEvent } from './streaming-envelope';
+
+/**
+ * Per-turn mutable dispatch state. The cot loop uses one of these and
+ * both the streaming dispatch path AND the JSON-parse fallback path
+ * thread the same instance through `dispatchOneAction` so flags +
+ * results aggregate identically.
+ */
+interface DispatchState {
+  actionResults: Array<
+    | { type: 'narrate'; text: string }
+    | { type: 'tool'; name: string; ok: boolean; reason?: string; data?: unknown }
+    | { type: 'done' }
+  >;
+  pageChanged: boolean;
+  endLoopRequested: boolean;
+  executedReactionRequiringTool: boolean;
+  actionErrorThisTurn: number;
+}
+
+const TOOLS_REQUIRING_NEXT_REACTION_SET = new Set(['ask_user', 'ask_user_choice', 'navigate']);
 
 /**
  * Look for a visible <a href> whose target matches `path`. Used by the
@@ -339,14 +360,47 @@ export async function* executePlanningPhase(
   const taskText = latestUser?.text ?? '';
   console.info('[dddk webagent] planning start', { task: taskText });
   try {
-    const plan = await agent.configRef.planner({
+    // Streaming announcement: the planner calls onSummaryDelta as nano
+    // types each char of `task_summary`. We push deltas to a queue +
+    // resume a waiter so the outer for-loop can yield them as
+    // text-delta AgentEvents WHILE the planner promise is still
+    // in-flight. After plan resolves we drain any tail deltas then
+    // pause for Space.
+    const announce = agent.configRef.announcePlan;
+    const deltaQueue: string[] = [];
+    let waiter: (() => void) | null = null;
+    let plannerDone = false;
+    const plannerPromise = agent.configRef.planner({
       task: taskText,
       sitemap: agent.configRef.sitemap,
       brand: agent.configRef.brand,
       persona: agent.configRef.persona,
       locale: agent.configRef.locale,
       selection: agent.currentSelectionRef ?? undefined,
+      onSummaryDelta: announce
+        ? (delta: string) => {
+            if (!delta) return;
+            deltaQueue.push(delta);
+            if (waiter) { const w = waiter; waiter = null; w(); }
+          }
+        : undefined,
+    } as Parameters<NonNullable<typeof agent.configRef.planner>>[0]);
+    plannerPromise.finally(() => {
+      plannerDone = true;
+      if (waiter) { const w = waiter; waiter = null; w(); }
     });
+    // Drain loop: yield deltas as they arrive, sleep on a waiter when
+    // empty, exit when planner resolved AND queue empty.
+    while (!plannerDone || deltaQueue.length > 0) {
+      if (deltaQueue.length > 0) {
+        yield { kind: 'text-delta', delta: deltaQueue.shift()! };
+        continue;
+      }
+      if (!plannerDone) {
+        await new Promise<void>((resolve) => { waiter = resolve; });
+      }
+    }
+    const plan = await plannerPromise;
     session.plan = plan;
     agent.persistSessionInternal();
     console.info('[dddk webagent] planning result', {
@@ -354,11 +408,9 @@ export async function* executePlanningPhase(
       todoCount: plan.todos.length,
       todos: plan.todos,
     });
-    if (agent.configRef.announcePlan && plan.task_summary?.trim()) {
-      yield {
-        kind: 'text-delta',
-        delta: plan.task_summary.trim() + '\n',
-      };
+    if (announce && plan.task_summary?.trim()) {
+      // Newline after summary for visual breathing room before pause hint.
+      yield { kind: 'text-delta', delta: '\n' };
       // Wait for user ack before turn 1 — otherwise the first turn's
       // confirm dialog covers the announce before the user can read it.
       if (agent.pauseHandlerRef) {
@@ -380,6 +432,234 @@ export async function* executePlanningPhase(
     yield { kind: 'error', error: err as Error, retrying: false };
     agent.setStatusInternal('failed');
     return false;
+  }
+}
+
+/**
+ * Dispatch a single CoT-envelope action (narrate or tool). Yields
+ * AgentEvents and mutates `state` so the caller can observe whether
+ * the page changed, whether an end was requested, etc.
+ *
+ * Two callers in v0.2.0:
+ *
+ *   1. Streaming path — fires from `executeCotLoop` as the envelope
+ *      parser emits `narrate_complete` / `tool_args_complete` events.
+ *      Each action runs to completion before the next parser event
+ *      is consumed (the LLM stream buffers in the meantime).
+ *
+ *   2. Non-streaming fallback — fires from `executeCotLoop` after the
+ *      full agent_turn tool call lands, iterating turn.actions[] in
+ *      order. Same code path so behavior is identical.
+ *
+ * `skipNarrateTypewriter=true` is used by the streaming path because
+ * narrate text was already streamed live via `narrate_delta` events.
+ * Fallback path leaves it false → original 4ms/char paced typewriter.
+ */
+async function* dispatchOneAction(
+  agent: WebAgent,
+  signal: AbortSignal,
+  stepIdx: number,
+  ai: number,
+  action: { narrate?: string; about?: string; tool?: string; args?: Record<string, unknown> },
+  state: DispatchState,
+  options: { skipNarrateTypewriter?: boolean },
+): AsyncIterable<AgentEvent> {
+  const session = agent.sessionRef;
+  if (!session) return;
+
+  if (isNarrateAction(action as never)) {
+    agent.setStatusInternal('executing');
+    const narrateAction = action as { narrate: string; about?: string };
+    const about = narrateAction.about;
+    if (about && about.trim().length > 0) {
+      const borderAction = agent.actionsRef.get('border');
+      if (borderAction) {
+        const synthId = `cot_about_${stepIdx}_${ai}_${Math.random().toString(36).slice(2, 6)}`;
+        yield {
+          kind: 'tool-start',
+          name: 'border',
+          args: { selector: about },
+          targetSelector: about,
+          toolCallId: synthId,
+        };
+        const borderResult = await executeAction(
+          {
+            actions: agent.actionsRef,
+            indexMap: agent.currentIndexMap,
+            registerPendingResolver: (r) => agent.registerPendingResolverInternal(r),
+            emitAskUser: () => {},
+            emitAskUserChoice: () => {},
+            emitPause: () => {},
+            emitPresentSurface: undefined,
+            session,
+            defaultPauseNote: '',
+          },
+          'border',
+          { selector: about },
+          signal,
+        );
+        yield { kind: 'tool-end', name: 'border', result: borderResult, toolCallId: synthId };
+        state.actionResults.push({
+          type: 'tool',
+          name: 'border',
+          ok: borderResult.ok,
+          reason: borderResult.ok ? undefined : borderResult.reason,
+          data: borderResult.ok ? borderResult.data : undefined,
+        });
+      }
+    }
+
+    // Skip the typewriter when narrate already streamed live via parser.
+    if (!options.skipNarrateTypewriter) {
+      const NARRATE_CHUNK_SIZE = 2;
+      const NARRATE_CHUNK_DELAY_MS = 8;
+      for (let i = 0; i < narrateAction.narrate.length; i += NARRATE_CHUNK_SIZE) {
+        if (signal.aborted) { agent.setStatusInternal('idle'); return; }
+        yield { kind: 'text-delta', delta: narrateAction.narrate.slice(i, i + NARRATE_CHUNK_SIZE) };
+        await sleep(NARRATE_CHUNK_DELAY_MS);
+      }
+    }
+    state.actionResults.push({ type: 'narrate', text: narrateAction.narrate });
+
+    let skipPause = false;
+    if (isUserEditingInPalette()) skipPause = true;
+    if (agent.configRef.disableAutoPauseAfterNarrate === true) skipPause = true;
+
+    if (!skipPause && agent.pauseHandlerRef) {
+      agent.setStatusInternal('waiting');
+      const pauseHint = sdkString(agent.configRef.locale, 'agent.press_space_continue');
+      const resolution = await new Promise<string>((resolve) => {
+        agent.pauseHandlerRef!({ hint: pauseHint, resolve });
+      });
+      if (signal.aborted || resolution === '') {
+        agent.setStatusInternal('idle');
+        return;
+      }
+    }
+    return;
+  }
+
+  if (isToolAction(action as never)) {
+    const toolAction = action as { tool: string; args?: Record<string, unknown> };
+    const synth: ToolCall = {
+      id: `cot_${stepIdx}_${Math.random().toString(36).slice(2, 8)}`,
+      name: toolAction.tool,
+      arguments: toolAction.args ?? {},
+    };
+    if (TOOLS_REQUIRING_NEXT_REACTION_SET.has(synth.name)) {
+      state.executedReactionRequiringTool = true;
+    }
+    const matched = agent.actionsRef.get(synth.name);
+
+    const needsConfirm = await agent.needsConfirmationInternal(synth, matched, signal);
+    if (needsConfirm) {
+      const locale = agent.configRef.locale ?? 'en';
+      const message = matched?.confirmationMessage?.(synth.arguments as never)
+        ?? agent.configRef.buildConfirmMessage?.(synth.name, synth.arguments, locale)
+        ?? narrateAction(synth.name, synth.arguments, locale);
+      let resolveConfirm!: (ok: boolean) => void;
+      const approvedPromise = new Promise<boolean>((r) => { resolveConfirm = r; });
+      agent.setStatusInternal('waiting');
+      yield {
+        kind: 'confirm',
+        actionName: synth.name,
+        args: synth.arguments,
+        message,
+        decide: resolveConfirm,
+      };
+      const approved = await Promise.race([
+        approvedPromise,
+        new Promise<boolean>((_, reject) => {
+          const onAbort = (): void => { signal.removeEventListener('abort', onAbort); reject(new Error('aborted')); };
+          signal.addEventListener('abort', onAbort, { once: true });
+        }),
+      ]).catch(() => false);
+      if (!approved) {
+        const result: ActionResult = { ok: false, reason: 'user_declined' };
+        yield { kind: 'tool-end', name: synth.name, result, toolCallId: synth.id };
+        state.actionResults.push({ type: 'tool', name: synth.name, ok: false, reason: 'user_declined' });
+        return;
+      }
+    }
+
+    const targetSelector = extractTargetSelector(synth.arguments);
+    yield { kind: 'tool-start', name: synth.name, args: synth.arguments, targetSelector, toolCallId: synth.id };
+
+    let result: ActionResult;
+    if (synth.name === 'navigate') {
+      const path = String(synth.arguments.path ?? '').trim();
+      if (!path) {
+        result = { ok: false, reason: 'unknown', message: 'navigate requires a non-empty `path` arg (e.g. "/docs")' };
+        yield { kind: 'tool-end', name: 'navigate', result, toolCallId: synth.id };
+        state.actionResults.push({ type: 'tool', name: 'navigate', ok: false, reason: 'missing path' });
+        state.actionErrorThisTurn += 1;
+        return;
+      }
+      agent.setStatusInternal('navigating');
+      const from = session.currentPage;
+      yield { kind: 'navigating', from, to: path };
+      try {
+        const bridgeResult = agent.navigateBridgeRef?.(path);
+        if (bridgeResult && typeof (bridgeResult as Promise<void>).then === 'function') {
+          await bridgeResult;
+        }
+      } catch (err) {
+        result = { ok: false, reason: 'navigation', message: (err as Error).message };
+        yield { kind: 'tool-end', name: 'navigate', result, toolCallId: synth.id };
+        state.actionResults.push({ type: 'tool', name: synth.name, ok: false, reason: 'navigation' });
+        state.actionErrorThisTurn += 1;
+        return;
+      }
+      await awaitNavSettle(2500);
+      yield { kind: 'navigated', from, to: path };
+      result = { ok: true, data: { path, arrivedAt: path } };
+      state.pageChanged = true;
+    } else {
+      const wasUserFacing = synth.name === 'ask_user' || synth.name === 'ask_user_choice';
+      agent.setStatusInternal(wasUserFacing ? 'waiting' : 'executing');
+      result = await executeAction(
+        {
+          actions: agent.actionsRef,
+          indexMap: agent.currentIndexMap,
+          registerPendingResolver: (r) => agent.registerPendingResolverInternal(r),
+          emitAskUser: (payload) => {
+            if (agent.askUserHandlerRef) agent.askUserHandlerRef(payload);
+            else payload.resolve('');
+          },
+          emitAskUserChoice: (payload) => {
+            if (agent.askUserChoiceHandlerRef) agent.askUserChoiceHandlerRef(payload);
+            else payload.resolve('');
+          },
+          emitPause: (payload) => {
+            if (agent.pauseHandlerRef) agent.pauseHandlerRef(payload);
+            else if (agent.askUserHandlerRef) {
+              agent.askUserHandlerRef({ question: payload.hint, resolve: payload.resolve });
+            } else {
+              payload.resolve('');
+            }
+          },
+          emitPresentSurface: agent.surfaceMounterRef
+            ? (payload) => agent.surfaceMounterRef!(payload)
+            : undefined,
+          session,
+          defaultPauseNote:
+            agent.configRef.defaultPauseNote ?? sdkString(agent.configRef.locale, 'agent.press_space_continue'),
+        },
+        synth.name,
+        synth.arguments,
+        signal,
+      );
+    }
+
+    yield { kind: 'tool-end', name: synth.name, result, toolCallId: synth.id };
+    state.actionResults.push({
+      type: 'tool',
+      name: synth.name,
+      ok: result.ok,
+      reason: result.ok ? undefined : result.reason,
+      data: result.ok ? result.data : undefined,
+    });
+    if (!result.ok) state.actionErrorThisTurn += 1;
   }
 }
 
@@ -418,11 +698,180 @@ export async function* executeCotLoop(
     // Single forced tool call to `agent_turn`. Stray text deltas are
     // ignored (schema doesn't allow them; we tolerate misbehaving providers).
     let agentTurnCall: ToolCall | undefined;
+    // v0.2.0 streaming-envelope: when the flag is on, the parser
+    // dispatches each action AS the LLM types it, instead of waiting
+    // for the full envelope JSON to settle. Per-action mid-stream
+    // dispatch — narrate text typewriters live in the subtitle bar
+    // AND the first tool action fires before the LLM has finished
+    // emitting later actions.
+    const useStreamingEnvelope = !!agent.configRef.enableStreamingEnvelope;
+    let envelopeParser: import('./streaming-envelope').StreamingEnvelopeParser | null = null;
+    let envelopeParserBailed = false;
+    if (useStreamingEnvelope) {
+      const { StreamingEnvelopeParser } = await import('./streaming-envelope');
+      envelopeParser = new StreamingEnvelopeParser();
+    }
+
+    // Streaming dispatch state — shared with the fallback path so the
+    // turn finalisation block at the bottom doesn't need to branch.
+    const dispatchState: DispatchState = {
+      actionResults: [],
+      pageChanged: false,
+      endLoopRequested: false,
+      executedReactionRequiringTool: false,
+      actionErrorThisTurn: 0,
+    };
+    // Per-index field accumulators — about_complete fires before the
+    // matching narrate_complete, so stash and pick up on the completion.
+    const perActionAbout = new Map<number, string>();
+    // Envelope-scoped fields the parser surfaces for finalisation.
+    let envelopeMemory: string | undefined;
+    let envelopeTodoAdjust: { remove?: string[]; replace?: Array<{ id: string; new_description: string; new_intent?: string }> } | undefined;
+    let envelopeTodosRemaining: string[] | undefined;
+    let envelopeIsFinal = false;
+    let envelopeCompleteFired = false;
+    let dispatchedAnyStreaming = false;
+    // Once pageChanged / endLoopRequested fires mid-stream, the remaining
+    // queued actions (next turn would re-plan against the new DOM) should
+    // be skipped. We keep draining the LLM stream so the request closes
+    // cleanly, but ignore further `*_complete` events from the parser.
+    let stopDispatchingFurther = false;
+
+    // Apply todo_adjust to the session plan. Mirrors the original
+    // post-parse logic, just done as soon as parser surfaces it so any
+    // ensuing actions see the updated plan.
+    const applyTodoAdjust = (adjust: typeof envelopeTodoAdjust): void => {
+      if (!adjust || !session.plan) return;
+      if (adjust.remove?.length) {
+        for (const id of adjust.remove) {
+          session.plan.todos = session.plan.todos.filter((t) => t.id !== id);
+        }
+      }
+      if (adjust.replace?.length) {
+        for (const r of adjust.replace) {
+          const idx = session.plan.todos.findIndex((t) => t.id === r.id);
+          if (idx < 0) continue;
+          session.plan.todos[idx] = {
+            ...session.plan.todos[idx]!,
+            description: r.new_description,
+            ...(r.new_intent ? { intent: r.new_intent } : {}),
+          };
+        }
+      }
+      agent.persistSessionInternal();
+    };
+
+    // Inner generator: dispatch one event from the parser. Yields any
+    // AgentEvents emitted by sub-dispatches. Sets stopDispatchingFurther
+    // when the action causes a navigate or signals end-of-loop.
+    async function* handleParserEvent(e: EnvelopeStreamEvent): AsyncIterable<AgentEvent> {
+      switch (e.kind) {
+        case 'memory_complete':
+          envelopeMemory = e.value;
+          break;
+        case 'turn_planning_complete':
+          // No mid-stream side effect — planning is informational.
+          break;
+        case 'todo_adjust_complete':
+          envelopeTodoAdjust = e.value as typeof envelopeTodoAdjust;
+          applyTodoAdjust(envelopeTodoAdjust);
+          break;
+        case 'todos_remaining_complete':
+          envelopeTodosRemaining = e.value;
+          break;
+        case 'action_start':
+          // Reset per-action accumulator slot.
+          perActionAbout.delete(e.index);
+          break;
+        case 'about_complete':
+          perActionAbout.set(e.index, e.value);
+          break;
+        case 'narrate_delta':
+          if (e.delta) {
+            console.info('[dddk stream] narrate_delta', { idx: e.index, delta: e.delta });
+            yield { kind: 'text-delta', delta: e.delta };
+          }
+          break;
+        case 'narrate_complete': {
+          console.info('[dddk stream] narrate_complete', { idx: e.index, len: e.full.length });
+          if (stopDispatchingFurther) break;
+          dispatchedAnyStreaming = true;
+          const about = perActionAbout.get(e.index);
+          yield* dispatchOneAction(
+            agent,
+            signal,
+            stepIdx,
+            e.index,
+            { narrate: e.full, about },
+            dispatchState,
+            { skipNarrateTypewriter: true },
+          );
+          if (dispatchState.pageChanged) stopDispatchingFurther = true;
+          break;
+        }
+        case 'tool_args_complete': {
+          console.info('[dddk stream] tool_args_complete', { idx: e.index, tool: e.tool, args: e.args });
+          if (stopDispatchingFurther) break;
+          dispatchedAnyStreaming = true;
+          yield* dispatchOneAction(
+            agent,
+            signal,
+            stepIdx,
+            e.index,
+            { tool: e.tool, args: e.args as Record<string, unknown> },
+            dispatchState,
+            { skipNarrateTypewriter: true },
+          );
+          if (dispatchState.pageChanged) stopDispatchingFurther = true;
+          break;
+        }
+        case 'is_final_complete':
+          envelopeIsFinal = e.value;
+          break;
+        case 'envelope_complete':
+          envelopeCompleteFired = true;
+          console.info('[dddk stream] envelope_complete (turn finished streaming)');
+          break;
+      }
+    }
+
+    let streamFragCount = 0;
     try {
       for await (const ev of callLlmStream(agent, signal)) {
         if (signal.aborted) { agent.setStatusInternal('idle'); return; }
+        if (ev.kind === 'tool-args-delta' && ev.name === AGENT_TURN_TOOL) {
+          streamFragCount += 1;
+          // Log EVERY fragment regardless of parser state. The previous
+          // version gated logging on `!envelopeParserBailed`, which made
+          // post-bail fragments invisible — looked like "stream ended
+          // after 1 fragment" when actually 300+ kept flowing through.
+          console.info(`[dddk stream] frag #${streamFragCount}`, { len: ev.deltaText.length, text: ev.deltaText });
+          if (envelopeParser && !envelopeParserBailed) {
+            const events = envelopeParser.feed(ev.deltaText);
+            if (events === null) {
+              envelopeParserBailed = true; // unknown shape — fall back to JSON-parse path
+              console.warn(`[dddk stream] parser bailed at frag #${streamFragCount} — falling back to JSON-parse path`);
+            } else {
+              for (const e of events) {
+                yield* handleParserEvent(e);
+              }
+            }
+          }
+        }
         if (ev.kind === 'tool-call' && ev.call.name === AGENT_TURN_TOOL) {
           agentTurnCall = ev.call;
+        }
+      }
+      if (streamFragCount > 0) {
+        console.info(`[dddk stream] LLM stream ended after ${streamFragCount} fragments`);
+      }
+      // Flush any tail-end envelope events.
+      if (envelopeParser && !envelopeParserBailed) {
+        const tail = envelopeParser.finish();
+        if (tail) {
+          for (const e of tail) {
+            yield* handleParserEvent(e);
+          }
         }
       }
       errorCount = 0;
@@ -444,6 +893,79 @@ export async function* executeCotLoop(
       return;
     }
 
+    // Decide which path finalises this turn:
+    //  - Streaming path: parser saw envelope_complete AND we dispatched
+    //    at least one action. Skip JSON-parse, trust dispatchState.
+    //  - Streaming partial: we dispatched some actions but stream broke
+    //    or parser bailed mid-way. Don't re-dispatch — finalise with
+    //    what we have so action history doesn't double up.
+    //  - Fallback path: streaming off, or parser bailed before any
+    //    dispatch. Parse the full tool-call args + run the dispatch
+    //    loop using the same helper.
+    const useStreamingFinalize = dispatchedAnyStreaming;
+
+    if (useStreamingFinalize) {
+      // Apply is_final closure under the same reaction-requiring-tool
+      // rule the fallback path uses.
+      if (envelopeIsFinal && !dispatchState.executedReactionRequiringTool) {
+        dispatchState.actionResults.push({ type: 'done' });
+        dispatchState.endLoopRequested = true;
+      } else if (envelopeIsFinal && dispatchState.executedReactionRequiringTool) {
+        console.warn('[dddk webagent] dropping is_final=true — turn included a reaction-requiring tool; the run is not actually finished yet');
+      }
+
+      const envelopeData = {
+        memory: envelopeMemory,
+        todos_remaining: envelopeTodosRemaining,
+        action_results: dispatchState.actionResults,
+        page_changed: dispatchState.pageChanged,
+        streamed: true,
+      };
+      const turnSummary: Record<string, unknown> = {
+        turn: stepIdx + 1,
+        url: session.currentPage,
+        memory: envelopeMemory,
+        streamed: true,
+      };
+      if (envelopeTodosRemaining !== undefined) turnSummary.todos_remaining = envelopeTodosRemaining;
+      if (envelopeTodoAdjust) turnSummary.todo_adjust = envelopeTodoAdjust;
+      if (session.plan) {
+        turnSummary.master_todos = session.plan.todos.map((t) => `${t.id}:${t.intent}:${t.description}`);
+      }
+      turnSummary.action_results = dispatchState.actionResults;
+      if (envelopeIsFinal) turnSummary.is_final = true;
+      console.info('[dddk webagent] turn summary (after-the-fact)', turnSummary);
+
+      pushAgentStep(session, {
+        toolCall: { name: AGENT_TURN_TOOL, arguments: agentTurnCall.arguments },
+        toolCallId: agentTurnCall.id,
+        result: dispatchState.actionErrorThisTurn === 0
+          ? { ok: true, data: envelopeData }
+          : { ok: false, reason: 'unknown', message: JSON.stringify(envelopeData) },
+      });
+      agent.persistSessionInternal();
+
+      if (dispatchState.actionErrorThisTurn > 0) {
+        errorCount += 1;
+        if (errorCount >= agent.configRef.maxErrors) {
+          agent.setStatusInternal('failed');
+          return;
+        }
+      } else {
+        errorCount = 0;
+      }
+
+      if (dispatchState.endLoopRequested) {
+        agent.setStatusInternal('idle');
+        yield { kind: 'final' };
+        return;
+      }
+      continue;
+    }
+
+    // Fallback: streaming disabled, or parser bailed before any
+    // action dispatched. Parse the full envelope and run the dispatch
+    // loop sequentially.
     const turn = parseTurnResponse(agentTurnCall.arguments);
     if (!turn) {
       errorCount += 1;
@@ -463,9 +985,6 @@ export async function* executeCotLoop(
       continue;
     }
 
-    // Per-turn debug log. Legacy mode has `todos_remaining`; planned mode
-    // has `turn_planning` + `todo_adjust` + the live master `plan.todos`.
-    // Omit `undefined` placeholders so the log shows only populated fields.
     const turnSummary: Record<string, unknown> = {
       turn: stepIdx + 1,
       url: session.currentPage,
@@ -487,9 +1006,7 @@ export async function* executeCotLoop(
     console.info('[dddk webagent] turn', turnSummary);
     recordTurn(turnSummary, turn);
 
-    // Apply todo_adjust mutations BEFORE dispatching actions — adjustments
-    // describe what the PREVIOUS turn completed / how the plan morphs based
-    // on observed reality.
+    // Apply todo_adjust mutations BEFORE dispatching actions.
     if (turn.todo_adjust && session.plan) {
       if (turn.todo_adjust.remove?.length) {
         for (const id of turn.todo_adjust.remove) {
@@ -510,11 +1027,7 @@ export async function* executeCotLoop(
       agent.persistSessionInternal();
     }
 
-    // In legacy mode `todos_remaining` carries the plan; planned mode has
-    // it absent (master plan lives on session.plan.todos, mutates via
-    // todo_adjust). Normalise away orphan tool calls only in legacy mode
-    // and only when the model emitted NEITHER an explicit task_finish NOR
-    // any narrate — i.e. it left orphan tool calls without a closing signal.
+    // Legacy-mode orphan-tool normalisation.
     if (turn.todos_remaining !== undefined && turn.todos_remaining.length === 0 && turn.actions.length > 0) {
       const hasNarrate = turn.actions.some((a) => isNarrateAction(a));
       if (!turn.is_final && !hasNarrate) {
@@ -526,8 +1039,6 @@ export async function* executeCotLoop(
     }
 
     if (turn.actions.length === 0) {
-      // Empty actions[] = task complete. Record the envelope so history
-      // replays cleanly.
       pushAgentStep(session, {
         toolCall: { name: AGENT_TURN_TOOL, arguments: agentTurnCall.arguments },
         toolCallId: agentTurnCall.id,
@@ -547,273 +1058,46 @@ export async function* executeCotLoop(
       return;
     }
 
-    // Iterate actions in order. Per-action outcomes go into actionResults
-    // so the next LLM turn can read what actually happened.
-    const actionResults: Array<
-      { type: 'narrate'; text: string }
-      | { type: 'tool'; name: string; ok: boolean; reason?: string; data?: unknown }
-      | { type: 'done' }
-    > = [];
-    let actionErrorThisTurn = 0;
-    let pageChanged = false;
-    let endLoopRequested = false;
-    let executedReactionRequiringTool = false;
-
+    // Dispatch each action via the shared helper. Same DispatchState
+    // shape as the streaming path so the finalisation block below is
+    // common.
     for (let ai = 0; ai < turn.actions.length; ai++) {
-      const action = turn.actions[ai]!;
       if (signal.aborted) { agent.setStatusInternal('idle'); return; }
-
-      if (isNarrateAction(action)) {
-        agent.setStatusInternal('executing');
-        // Auto-border the element this narrate is "about" BEFORE streaming
-        // the text. Bundling framing into the narrate payload prevents the
-        // model from forgetting to chain a separate border action — it's
-        // structurally enforced rather than rule-enforced. Synthesises the
-        // same tool-start / tool-end events the explicit border path emits
-        // so highlight pipelines still observe the framing.
-        const about = (action as { about?: string }).about;
-        if (about && about.trim().length > 0) {
-          const borderAction = agent.actionsRef.get('border');
-          if (borderAction) {
-            const synthId = `cot_about_${stepIdx}_${ai}_${Math.random().toString(36).slice(2, 6)}`;
-            yield {
-              kind: 'tool-start',
-              name: 'border',
-              args: { selector: about },
-              targetSelector: about,
-              toolCallId: synthId,
-            };
-            const borderResult = await executeAction(
-              {
-                actions: agent.actionsRef,
-                indexMap: agent.currentIndexMap,
-                registerPendingResolver: (r) => agent.registerPendingResolverInternal(r),
-                emitAskUser: () => {},
-                emitAskUserChoice: () => {},
-                emitPause: () => {},
-                emitPresentSurface: undefined,
-                session,
-                defaultPauseNote: '',
-              },
-              'border',
-              { selector: about },
-              signal,
-            );
-            yield { kind: 'tool-end', name: 'border', result: borderResult, toolCallId: synthId };
-            actionResults.push({
-              type: 'tool',
-              name: 'border',
-              ok: borderResult.ok,
-              reason: borderResult.ok ? undefined : borderResult.reason,
-              data: borderResult.ok ? borderResult.data : undefined,
-            });
-          }
-        }
-
-        // Throttled typewriter: agent_turn arrives complete, so slice and
-        // pace out. 4ms/char ≈ 250 chars/sec; chunking 2 chars/tick keeps
-        // event-loop overhead low at that rate.
-        const NARRATE_CHUNK_SIZE = 2;
-        const NARRATE_CHUNK_DELAY_MS = 8;
-        for (let i = 0; i < action.narrate.length; i += NARRATE_CHUNK_SIZE) {
-          if (signal.aborted) { agent.setStatusInternal('idle'); return; }
-          yield { kind: 'text-delta', delta: action.narrate.slice(i, i + NARRATE_CHUNK_SIZE) };
-          await sleep(NARRATE_CHUNK_DELAY_MS);
-        }
-        actionResults.push({ type: 'narrate', text: action.narrate });
-
-        // Auto-pause after every narration. Runtime inserts the pause so
-        // the model never has to manage cadence with explicit `pause`
-        // tool calls. Don't skip on the next action being confirm-required
-        // (navigate / destructive): the confirm dialog would cover the
-        // narrate the user is still reading. Pause first, ack narrate
-        // context, THEN show the confirm.
-        //
-        // One skip condition: focus inside the open palette's input.
-        // Palette is the one place where "user typing INTO SDK surface
-        // while agent is running" is explicit, persistent state.
-        let skipPause = false;
-        if (isUserEditingInPalette()) {
-          skipPause = true;
-        }
-        // v0.2.0 ROADMAP 1.5: host can disable the runtime-level
-        // auto-pause entirely. Distinct from putting `'pause'` in
-        // `excludeTools` (which only hides the tool from the LLM).
-        if (agent.configRef.disableAutoPauseAfterNarrate === true) {
-          skipPause = true;
-        }
-
-        if (!skipPause && agent.pauseHandlerRef) {
-          agent.setStatusInternal('waiting');
-          const pauseHint = sdkString(agent.configRef.locale, 'agent.press_space_continue');
-          const resolution = await new Promise<string>((resolve) => {
-            agent.pauseHandlerRef!({ hint: pauseHint, resolve });
-          });
-          if (signal.aborted || resolution === '') {
-            agent.setStatusInternal('idle');
-            return;
-          }
-        }
-        continue;
-      }
-
-      if (isToolAction(action)) {
-        // Synthesise a ToolCall and route through the same confirm-gate +
-        // dispatch path the classic loop uses.
-        const synth: ToolCall = {
-          id: `cot_${stepIdx}_${Math.random().toString(36).slice(2, 8)}`,
-          name: action.tool,
-          arguments: action.args ?? {},
-        };
-        if (TOOLS_REQUIRING_NEXT_REACTION.has(synth.name)) {
-          executedReactionRequiringTool = true;
-        }
-        const matched = agent.actionsRef.get(synth.name);
-
-        const needsConfirm = await agent.needsConfirmationInternal(synth, matched, signal);
-        if (needsConfirm) {
-          const locale = agent.configRef.locale ?? 'en';
-          const message = matched?.confirmationMessage?.(synth.arguments as never)
-            ?? agent.configRef.buildConfirmMessage?.(synth.name, synth.arguments, locale)
-            ?? narrateAction(synth.name, synth.arguments, locale);
-          let resolveConfirm!: (ok: boolean) => void;
-          const approvedPromise = new Promise<boolean>((r) => { resolveConfirm = r; });
-          agent.setStatusInternal('waiting');
-          yield {
-            kind: 'confirm',
-            actionName: synth.name,
-            args: synth.arguments,
-            message,
-            decide: resolveConfirm,
-          };
-          const approved = await Promise.race([
-            approvedPromise,
-            new Promise<boolean>((_, reject) => {
-              const onAbort = (): void => { signal.removeEventListener('abort', onAbort); reject(new Error('aborted')); };
-              signal.addEventListener('abort', onAbort, { once: true });
-            }),
-          ]).catch(() => false);
-          if (!approved) {
-            const result: ActionResult = { ok: false, reason: 'user_declined' };
-            yield { kind: 'tool-end', name: synth.name, result, toolCallId: synth.id };
-            actionResults.push({ type: 'tool', name: synth.name, ok: false, reason: 'user_declined' });
-            continue;
-          }
-        }
-
-        const targetSelector = extractTargetSelector(synth.arguments);
-        yield { kind: 'tool-start', name: synth.name, args: synth.arguments, targetSelector, toolCallId: synth.id };
-
-        let result: ActionResult;
-        if (synth.name === 'navigate') {
-          const path = String(synth.arguments.path ?? '').trim();
-          if (!path) {
-            // Reject loudly so the next turn sees the failure in history
-            // and self-corrects, rather than the bridge silently no-op'ing
-            // and the user staring at a hung confirm.
-            result = { ok: false, reason: 'unknown', message: 'navigate requires a non-empty `path` arg (e.g. "/docs")' };
-            yield { kind: 'tool-end', name: 'navigate', result, toolCallId: synth.id };
-            actionResults.push({ type: 'tool', name: 'navigate', ok: false, reason: 'missing path' });
-            actionErrorThisTurn += 1;
-            continue;
-          }
-          agent.setStatusInternal('navigating');
-          const from = session.currentPage;
-          yield { kind: 'navigating', from, to: path };
-          try {
-            const bridgeResult = agent.navigateBridgeRef?.(path);
-            if (bridgeResult && typeof (bridgeResult as Promise<void>).then === 'function') {
-              await bridgeResult;
-            }
-          } catch (err) {
-            result = { ok: false, reason: 'navigation', message: (err as Error).message };
-            yield { kind: 'tool-end', name: 'navigate', result, toolCallId: synth.id };
-            actionResults.push({ type: 'tool', name: synth.name, ok: false, reason: 'navigation' });
-            actionErrorThisTurn += 1;
-            continue;
-          }
-          await awaitNavSettle(2500);
-          yield { kind: 'navigated', from, to: path };
-          result = { ok: true, data: { path, arrivedAt: path } };
-          // Remaining actions in this envelope were planned against the
-          // OLD DOM and would mis-target. Break the action loop below
-          // and let the next outer iteration re-read DOM + re-plan.
-          pageChanged = true;
-        } else {
-          const wasUserFacing = synth.name === 'ask_user' || synth.name === 'ask_user_choice';
-          agent.setStatusInternal(wasUserFacing ? 'waiting' : 'executing');
-          result = await executeAction(
-            {
-              actions: agent.actionsRef,
-              indexMap: agent.currentIndexMap,
-              registerPendingResolver: (r) => agent.registerPendingResolverInternal(r),
-              emitAskUser: (payload) => {
-                if (agent.askUserHandlerRef) agent.askUserHandlerRef(payload);
-                else payload.resolve('');
-              },
-              emitAskUserChoice: (payload) => {
-                if (agent.askUserChoiceHandlerRef) agent.askUserChoiceHandlerRef(payload);
-                else payload.resolve('');
-              },
-              emitPause: (payload) => {
-                if (agent.pauseHandlerRef) agent.pauseHandlerRef(payload);
-                else if (agent.askUserHandlerRef) {
-                  agent.askUserHandlerRef({ question: payload.hint, resolve: payload.resolve });
-                } else {
-                  payload.resolve('');
-                }
-              },
-              emitPresentSurface: agent.surfaceMounterRef
-                ? (payload) => agent.surfaceMounterRef!(payload)
-                : undefined,
-              session,
-              defaultPauseNote:
-                agent.configRef.defaultPauseNote ?? sdkString(agent.configRef.locale, 'agent.press_space_continue'),
-            },
-            synth.name,
-            synth.arguments,
-            signal,
-          );
-        }
-
-        yield { kind: 'tool-end', name: synth.name, result, toolCallId: synth.id };
-        actionResults.push({
-          type: 'tool',
-          name: synth.name,
-          ok: result.ok,
-          reason: result.ok ? undefined : result.reason,
-          data: result.ok ? result.data : undefined,
-        });
-        if (!result.ok) actionErrorThisTurn += 1;
-      }
+      if (dispatchState.pageChanged) break;
+      yield* dispatchOneAction(
+        agent,
+        signal,
+        stepIdx,
+        ai,
+        turn.actions[ai] as never,
+        dispatchState,
+        { skipNarrateTypewriter: false },
+      );
     }
 
-    // Turn-level is_final closes the loop after actions have run. Drop
-    // is_final if this turn ran a reaction-requiring tool (navigate /
-    // ask_user / ask_user_choice) — the result hasn't been observed yet.
-    if (turn.is_final && !executedReactionRequiringTool) {
-      actionResults.push({ type: 'done' });
-      endLoopRequested = true;
-    } else if (turn.is_final && executedReactionRequiringTool) {
+    if (turn.is_final && !dispatchState.executedReactionRequiringTool) {
+      dispatchState.actionResults.push({ type: 'done' });
+      dispatchState.endLoopRequested = true;
+    } else if (turn.is_final && dispatchState.executedReactionRequiringTool) {
       console.warn('[dddk webagent] dropping is_final=true — turn included a reaction-requiring tool; the run is not actually finished yet');
     }
 
     const envelopeData = {
       memory: turn.memory,
       todos_remaining: turn.todos_remaining,
-      action_results: actionResults,
-      page_changed: pageChanged,
+      action_results: dispatchState.actionResults,
+      page_changed: dispatchState.pageChanged,
     };
     pushAgentStep(session, {
       toolCall: { name: AGENT_TURN_TOOL, arguments: agentTurnCall.arguments },
       toolCallId: agentTurnCall.id,
-      result: actionErrorThisTurn === 0
+      result: dispatchState.actionErrorThisTurn === 0
         ? { ok: true, data: envelopeData }
         : { ok: false, reason: 'unknown', message: JSON.stringify(envelopeData) },
     });
     agent.persistSessionInternal();
 
-    if (actionErrorThisTurn > 0) {
+    if (dispatchState.actionErrorThisTurn > 0) {
       errorCount += 1;
       if (errorCount >= agent.configRef.maxErrors) {
         agent.setStatusInternal('failed');
@@ -823,7 +1107,7 @@ export async function* executeCotLoop(
       errorCount = 0;
     }
 
-    if (endLoopRequested) {
+    if (dispatchState.endLoopRequested) {
       agent.setStatusInternal('idle');
       yield { kind: 'final' };
       return;

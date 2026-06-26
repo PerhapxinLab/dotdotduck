@@ -195,7 +195,16 @@ export async function* callLlmStream(
   agent: WebAgent,
   signal: AbortSignal,
 ): AsyncIterable<
-  { kind: 'text-delta'; delta: string } | { kind: 'tool-call'; call: ToolCall }
+  | { kind: 'text-delta'; delta: string }
+  | { kind: 'tool-call'; call: ToolCall }
+  /**
+   * v0.2.0 streaming-envelope: forwards each fragment of a tool call's
+   * arguments AS the provider streams them. cotLoop consumes these to
+   * feed `StreamingEnvelopeParser`, so narrate text appears in the
+   * subtitle bar as the LLM types it instead of after parse completes.
+   * Only OpenAI-compatible providers emit this today.
+   */
+  | { kind: 'tool-args-delta'; id: string; name: string; deltaText: string; accumulatedText: string }
 > {
   if (!agent.sessionRef) return;
 
@@ -250,6 +259,20 @@ export async function* callLlmStream(
             if (firstDeltaAt === undefined) firstDeltaAt = Date.now();
             yield { kind: 'text-delta', delta: newDelta };
           }
+        }
+        // v0.2.0 — forward per-fragment tool-args deltas so the cot
+        // loop can feed StreamingEnvelopeParser. We count this toward
+        // TTFT too: the user perceives "agent started" the moment narrate
+        // text begins streaming, even though no plain text-delta arrived.
+        if (chunk.toolArgsDelta) {
+          if (firstDeltaAt === undefined) firstDeltaAt = Date.now();
+          yield {
+            kind: 'tool-args-delta',
+            id: chunk.toolArgsDelta.id,
+            name: chunk.toolArgsDelta.name,
+            deltaText: chunk.toolArgsDelta.deltaText,
+            accumulatedText: chunk.toolArgsDelta.accumulatedText,
+          };
         }
         if (chunk.toolCalls) {
           for (const tc of chunk.toolCalls) {

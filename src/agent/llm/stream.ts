@@ -26,6 +26,27 @@ export interface StreamChunk {
   /** Reason for stop — present on the final chunk only. */
   finishReason?: CompleteResult['finishReason'];
   /**
+   * Incremental tool-call argument fragment. v0.2.0 — used by the
+   * streaming-envelope path so the cot loop can feed each piece into
+   * the envelope parser AS the LLM types it, instead of waiting for
+   * the full JSON to settle.
+   *
+   * `deltaText` is just the new chars added in this chunk.
+   * `accumulatedText` is the full args buffer so far (so consumers
+   * with no parser state can still inspect the snapshot).
+   *
+   * Only OpenAIProvider (and adapters that wrap it — Agnes / DeepSeek
+   * via OpenAI-compatible) currently emit this. Other providers may
+   * not, which is fine — the cot loop falls back to the JSON-parsed
+   * path when no streaming-envelope events arrive.
+   */
+  toolArgsDelta?: {
+    id: string;
+    name: string;
+    deltaText: string;
+    accumulatedText: string;
+  };
+  /**
    * Set on the terminal chunk when streaming aborted with an error. The
    * `await handle` form will reject with the same error; iterators receive
    * the chunk so callers iterating without awaiting can still observe it.
@@ -47,7 +68,14 @@ interface BuildStreamOptions {
    * SSE, decodes Gemini chunks, whatever). Each yield is a string delta;
    * pass `null` to signal completion with optional final result.
    */
-  produce(): AsyncIterable<{ delta?: string; toolCall?: ToolCall; finishReason?: CompleteResult['finishReason']; usage?: CompleteResult['usage'] }>;
+  produce(): AsyncIterable<{
+    delta?: string;
+    toolCall?: ToolCall;
+    /** v0.2.0 streaming-envelope: per-fragment tool-args delta. */
+    toolArgsDelta?: { id: string; name: string; deltaText: string; accumulatedText: string };
+    finishReason?: CompleteResult['finishReason'];
+    usage?: CompleteResult['usage'];
+  }>;
 }
 
 /**
@@ -100,6 +128,9 @@ export function buildStream(opts: BuildStreamOptions): StreamHandle {
           text,
           toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
           done: false,
+          // Pass through unmodified — consumer (cot loop) feeds this
+          // into the envelope parser when enableStreamingEnvelope is on.
+          ...(evt.toolArgsDelta ? { toolArgsDelta: evt.toolArgsDelta } : {}),
         };
         if (waiters.length > 0) {
           const w = waiters.shift()!;

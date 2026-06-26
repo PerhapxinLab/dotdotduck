@@ -187,7 +187,14 @@ async function* streamOpenAI(args: {
   body: Record<string, unknown>;
   signal?: AbortSignal;
   apiKey: string;
-}): AsyncIterable<{ delta?: string; toolCall?: ToolCall; finishReason?: CompleteResult['finishReason']; usage?: CompleteResult['usage'] }> {
+}): AsyncIterable<{
+  delta?: string;
+  toolCall?: ToolCall;
+  // v0.2.0 streaming-envelope fragment.
+  toolArgsDelta?: { id: string; name: string; deltaText: string; accumulatedText: string };
+  finishReason?: CompleteResult['finishReason'];
+  usage?: CompleteResult['usage'];
+}> {
   const response = await fetch(args.url, {
     method: 'POST',
     headers: args.headers,
@@ -206,7 +213,7 @@ async function* streamOpenAI(args: {
   // Track in-progress tool calls by streaming index. OpenAI emits each
   // tool_call as a sequence of fragments — first one carries `id` and
   // `function.name`, subsequent ones carry `function.arguments` deltas.
-  const inflight = new Map<number, { id: string; name: string; argsBuf: string }>();
+  const inflight = new Map<number, { id: string; name: string; argsBuf: string; flushedAccum: boolean }>();
   // Track which tool calls have been yielded already so we don't re-yield
   // every fragment; we emit a single toolCall event when arguments parse
   // cleanly (typically on the closing `}` or at finish_reason=tool_calls).
@@ -272,13 +279,46 @@ async function* streamOpenAI(args: {
             const idx = frag.index ?? 0;
             let entry = inflight.get(idx);
             if (!entry) {
-              entry = { id: frag.id ?? `call_${idx}_${Date.now()}`, name: frag.function?.name ?? '', argsBuf: '' };
+              entry = { id: frag.id ?? `call_${idx}_${Date.now()}`, name: frag.function?.name ?? '', argsBuf: '', flushedAccum: false };
               inflight.set(idx, entry);
             } else {
               if (frag.id) entry.id = frag.id;
               if (frag.function?.name) entry.name = frag.function.name;
             }
-            if (frag.function?.arguments) entry.argsBuf += frag.function.arguments;
+            const fragArgs = frag.function?.arguments;
+            if (fragArgs) entry.argsBuf += fragArgs;
+
+            // v0.2.0 streaming-envelope: yield deltas as soon as the
+            // tool name is known. OpenAI's SSE order is provider-
+            // dependent — sometimes name arrives BEFORE first args,
+            // sometimes the SAME chunk delivers `{"`-style args while
+            // the name is still being sent in a later chunk. We can't
+            // yield without `name` (downstream filters on it), so on
+            // the FIRST chunk after name is known we flush the entire
+            // accumulated buffer in one shot (covers args-before-name
+            // ordering). Subsequent chunks yield each new fragment.
+            if (entry.name && !entry.flushedAccum) {
+              if (entry.argsBuf) {
+                yield {
+                  toolArgsDelta: {
+                    id: entry.id,
+                    name: entry.name,
+                    deltaText: entry.argsBuf,
+                    accumulatedText: entry.argsBuf,
+                  },
+                };
+              }
+              entry.flushedAccum = true;
+            } else if (entry.name && fragArgs) {
+              yield {
+                toolArgsDelta: {
+                  id: entry.id,
+                  name: entry.name,
+                  deltaText: fragArgs,
+                  accumulatedText: entry.argsBuf,
+                },
+              };
+            }
 
             // Try parsing accumulated JSON. If it parses, the tool call is
             // complete enough to dispatch — yield exactly once per index.

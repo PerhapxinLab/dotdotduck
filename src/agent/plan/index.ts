@@ -26,6 +26,7 @@
  */
 
 import { resolveLLM, type LLMSource } from '../llm/router';
+import type { CompleteResult } from '../llm/types';
 import { stripCodeFence } from '../../utils/llm-parse';
 import type { DotDotDuck } from '../../orchestrator';
 import { buildPlanSystemPrompt } from './prompt';
@@ -101,7 +102,18 @@ export class Plan {
    * Wire this into `webagent.planner` so the webagent runs a planning
    * pass before the turn loop.
    */
-  async makeTodos(input: PlanInput): Promise<TaskPlan> {
+  async makeTodos(input: PlanInput & {
+    /**
+     * v0.2.0 streaming hook: invoked synchronously for each new character
+     * of the `task_summary` field AS the LLM types it. Lets the host
+     * stream the announcement into a subtitle bar instead of getting one
+     * monolithic post-parse blast. Optional — when omitted, the planning
+     * call still streams under the hood (so the LLM proxy doesn't buffer
+     * via Cloudflare AI-Gateway cache) but the host sees the same final
+     * `TaskPlan` it always did.
+     */
+    onSummaryDelta?: (delta: string) => void;
+  }): Promise<TaskPlan> {
     const llm = resolveLLM(this.config.llm, 'plan');
     const system = this.config.systemPrompt ?? buildPlanSystemPrompt({
       locale: input.locale,
@@ -122,19 +134,46 @@ export class Plan {
 
     const timeoutCtrl = new AbortController();
     const timer = setTimeout(() => timeoutCtrl.abort('plan timeout'), PLAN_TIMEOUT_MS);
-    let raw: string;
+    let raw = '';
     try {
-      const result = await llm.complete({
+      const completeOpts = {
         messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: userParts.join('\n\n') },
+          { role: 'system' as const, content: system },
+          { role: 'user' as const, content: userParts.join('\n\n') },
         ],
-        thinking: 'low',
+        thinking: 'low' as const,
         jsonMode: true,
         temperature: 0.2,
         signal: timeoutCtrl.signal,
-      });
-      raw = result.content;
+      };
+      // Prefer streaming so Cloudflare AI-Gateway doesn't buffer the
+      // whole response under cf-aig-cache-ttl. Streamer scans the
+      // incremental JSON for `task_summary` chars and surfaces them
+      // synchronously to the host via `onSummaryDelta`.
+      const streamable = llm as { streamComplete?: (o: typeof completeOpts) => AsyncIterable<{ delta?: string; text: string }> & Promise<CompleteResult> };
+      if (typeof streamable.streamComplete === 'function') {
+        let fragCount = 0;
+        const streamer = new TaskSummaryStreamer((delta) => {
+          // Log every char of task_summary as it streams in so the
+          // user can see real-time arrival in console — not just
+          // the post-parse "[dddk webagent] planning result" blast.
+          console.info('[dddk stream] plan summary_delta', { char: delta });
+          input.onSummaryDelta?.(delta);
+        });
+        const handle = streamable.streamComplete(completeOpts);
+        for await (const chunk of handle) {
+          if (chunk.delta) {
+            fragCount += 1;
+            streamer.feed(chunk.delta);
+          }
+          raw = chunk.text;
+        }
+        streamer.finish();
+        console.info(`[dddk stream] plan stream ended after ${fragCount} fragments`);
+      } else {
+        const result = await llm.complete(completeOpts);
+        raw = result.content;
+      }
     } finally {
       clearTimeout(timer);
     }
@@ -183,6 +222,104 @@ export class Plan {
     } catch (err) {
       console.warn('[dddk plan] persist failed', err);
     }
+  }
+}
+
+/**
+ * Tiny streaming JSON scanner — finds `"task_summary":"..."` in an
+ * incrementally-arriving stream of chars, calls `onDelta` for each
+ * newly-revealed character of the summary's value. Robust to:
+ *   - JSON key arriving before / split across chunks
+ *   - Backslash-escaped quotes inside the value
+ *   - Schema preamble before task_summary (e.g. todos first)
+ *
+ * Once the closing quote is found we stop scanning — todos / other
+ * fields are irrelevant for the announcement UI.
+ *
+ * Pure char walker — no JSON.parse, so partial JSON never throws.
+ */
+class TaskSummaryStreamer {
+  private buf = '';
+  private pos = 0;
+  private state: 'before' | 'inside' | 'done' = 'before';
+  private prevEscape = false;
+  private readonly onDelta: ((delta: string) => void) | undefined;
+
+  constructor(onDelta?: (delta: string) => void) {
+    this.onDelta = onDelta;
+  }
+
+  feed(chunk: string): void {
+    if (this.state === 'done' || !this.onDelta) {
+      // Still let scanning consume buf so finish() doesn't double-process,
+      // but skip the emit cost when there's no listener.
+      this.buf += chunk;
+      return;
+    }
+    this.buf += chunk;
+    this.scan();
+  }
+
+  finish(): void {
+    if (this.state === 'inside') this.scan();
+  }
+
+  private scan(): void {
+    if (this.state === 'before') {
+      const m = this.buf.slice(this.pos).match(/"task_summary"\s*:\s*"/);
+      if (!m) {
+        // Trim consumed prefix to keep buf bounded — leave a safety
+        // window for the key sequence to straddle chunk boundaries.
+        const trimAt = Math.max(0, this.buf.length - 32);
+        if (trimAt > this.pos) {
+          this.buf = this.buf.slice(trimAt);
+          this.pos = 0;
+        }
+        return;
+      }
+      this.pos += m.index! + m[0].length;
+      this.state = 'inside';
+    }
+    if (this.state === 'inside') {
+      let emitFrom = this.pos;
+      while (this.pos < this.buf.length) {
+        const ch = this.buf.charAt(this.pos);
+        if (this.prevEscape) {
+          this.prevEscape = false;
+          this.pos += 1;
+          continue;
+        }
+        if (ch === '\\') {
+          this.prevEscape = true;
+          this.pos += 1;
+          continue;
+        }
+        if (ch === '"') {
+          // Flush any chars we haven't emitted, then close.
+          if (this.onDelta && this.pos > emitFrom) {
+            this.onDelta(this.unescapeJson(this.buf.slice(emitFrom, this.pos)));
+          }
+          this.state = 'done';
+          return;
+        }
+        this.pos += 1;
+      }
+      // Reached end of buf without a closing quote — emit what we have
+      // (minus the last char if it's a lone backslash mid-escape).
+      const emitTo = this.prevEscape ? this.pos - 1 : this.pos;
+      if (this.onDelta && emitTo > emitFrom) {
+        this.onDelta(this.unescapeJson(this.buf.slice(emitFrom, emitTo)));
+      }
+    }
+  }
+
+  private unescapeJson(s: string): string {
+    return s
+      .replace(/\\n/g, '\n')
+      .replace(/\\t/g, '\t')
+      .replace(/\\r/g, '\r')
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, '\\');
   }
 }
 

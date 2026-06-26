@@ -56,6 +56,15 @@ export interface PlanInput {
   selection?: SelectionContext;
   /** Free-form host context (recent history, current page, etc). */
   hostContext?: string;
+  /**
+   * v0.2.0 streaming hook — called synchronously for each new chunk of
+   * `task_summary` chars as the LLM types it. When the host wires this
+   * through, the planning announce can appear live in the subtitle bar
+   * instead of one post-parse blast. Optional; omitting it keeps the
+   * call non-visibly-streaming (the LLM body still uses `stream: true`
+   * so the proxy doesn't buffer via cache-ttl, just no UI surfacing).
+   */
+  onSummaryDelta?: (delta: string) => void;
 }
 
 /** An in-memory markdown document. Not used by the webagent — exposed for
