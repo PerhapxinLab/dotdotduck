@@ -9,6 +9,8 @@
   住在頁面裡、直接操作 DOM 的 AI 互動 SDK — 不是黏在右下角的聊天機器人。
 </p>
 
+https://github.com/user-attachments/assets/18d797df-4952-421a-a2b3-16aef1ebcb34
+
 <p align="center">
   <a href="https://www.npmjs.com/package/@perhapxin/dddk"><img src="https://img.shields.io/npm/v/@perhapxin/dddk.svg?style=flat-square" alt="npm" /></a>
   <a href="https://www.npmjs.com/package/@perhapxin/dddk"><img src="https://img.shields.io/npm/dm/@perhapxin/dddk.svg?style=flat-square" alt="downloads" /></a>
@@ -17,8 +19,6 @@
 </p>
 
 <p align="center"><a href="./README.md">English →</a></p>
-
-https://github.com/user-attachments/assets/18d797df-4952-421a-a2b3-16aef1ebcb34
 
 ---
 
