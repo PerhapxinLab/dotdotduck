@@ -18,7 +18,7 @@
 
 <p align="center"><a href="./README.zh-TW.md">繁體中文 →</a></p>
 
-https://github.com/PerhapxinLab/dotdotduck/raw/main/media/dddk-demo.mp4
+https://github.com/user-attachments/assets/18d797df-4952-421a-a2b3-16aef1ebcb34
 
 ---
 
