@@ -3,11 +3,11 @@
   &nbsp;dotdotduck
 </h1>
 
-<p align="center"><strong>Press Cmd/Ctrl+K to do anything in your product.</strong></p>
+<p align="center"><strong>Turn your existing site into an AI-native site.</strong></p>
 
 <p align="center">
-  Command palette + voice + long-press selection + inline AI + DOM-grounded agent in one SDK.
-  The opposite of a chatbot widget — your product's verbs sit where users already work, not behind a sidebar.
+  One SDK drops an entire AI layer into your product — palette, voice, inline writing, long-press selection, and a DOM-grounded agent that actually operates the page.
+  The verbs sit behind the keystrokes and gestures users already know, not behind a sidebar chatbot.
 </p>
 
 <p align="center">
@@ -18,6 +18,12 @@
 </p>
 
 <p align="center"><a href="./README.zh-TW.md">繁體中文 →</a></p>
+
+<p align="center">
+  <video src="./media/dddk-demo.mp4" poster="./media/dddk-demo-poster.jpg" width="720" controls muted playsinline></video>
+  <br />
+  <sub><a href="./media/dddk-demo.mp4">▶︎ Watch the 1-minute demo</a> · <a href="https://dddk.perhapxin.com">Or play it on the live site</a></sub>
+</p>
 
 ---
 
@@ -229,6 +235,23 @@ Several physical entry points to send context into dddk. No new vocabulary to le
 7. **Yes / no / multi-choice = free RL labels.** Every Space-accept and double-Space-reject is a clean, intentional signal — what the user actually wanted vs didn't, said by the user, recorded with the original prompt. No more inferring from clickstream noise. The training set for whatever you fine-tune or evaluate next is already collected.
 
 8. **Voice doesn't stop at the browser.** The same `Voice` + `utility` LLM shape powers IoT panels, kiosk terminals, service machines, and accessibility-first surfaces for elderly users or anyone who'd rather not type. One mental model across every device that has a microphone.
+
+## Roadmap — v0.2.0 in progress
+
+The 0.2.x line is the architectural rework of the webagent core. Most of it is on `main` already (the live demo runs it); a few pieces are still landing.
+
+**Track 1 · nano cost validation — done.** `gpt-5.4-nano` runs the full monolithic webagent loop with the same task-success rate as `gpt-5.4-mini` at roughly an order of magnitude lower cost. That's the new default for `webagent` + `plan` roles on [dddk.perhapxin.com](https://dddk.perhapxin.com).
+
+**Track 2 · mode-based architecture — mid-implementation.**
+
+- ✅ **Streaming envelope parser** — scanner-based incremental JSON parser. Each action dispatches the moment its tool-args `{ }` balances, instead of waiting for the outer envelope to close. Narrate text streams character-by-character into the subtitle bar as the model writes it. The first click can fire before the second action's opening `{` has even arrived from the LLM. Opt in via `enableStreamingEnvelope: true` on `DotDotDuck` config.
+- 🚧 **Mode-based webagent** — `chat` mode (no DOM, plain protocol, runs on nano) vs `operate` mode (DOM dump + CoT envelope, mini/full). The LLM self-escalates via an `enter_mode` tool when the question turns from Q&A into needing real page operation. Host can `registerMode('default', {...})` to fully override the SDK's bundled mode.
+- 🚧 **Live registry** — `dddk.webagent.registerTool / registerContextProvider / registerMode` callable any time. In-flight turn finishes on the snapshot; next turn sees the new registration.
+- 🚧 **InlineAgent scoping** — `attachTo(selector, config)` for per-region action sets. A textarea inside the docs comments shouldn't see the same actions as a code block in the editor; innermost-wins, callback fallback for the cases selectors can't express.
+- 🚧 **`onLoopEnd` hook** — agent-loop closure UI: `silent` / `text` / `feedback` (Space accepts · double-tap rejects · Esc nulls — emits `agent_feedback`) / `ask_user` (closing question with options). The reel doesn't end silently any more; even the zero-config host gets a graceful "Done ✓" close.
+- 🚧 **Two new analytics events** — `agent_mode_changed` and `agent_tool_failed`, to fill the visibility gap (currently `agent_tool_end` only fires on success, and mode escalations have no signal at all).
+
+Full plan: [`ROADMAP-v0.2.0.md`](./ROADMAP-v0.2.0.md). v0.1.x bug fixes continue to ship on the `v0.1.x` branch.
 
 ## Status — early stage, read before evaluating
 

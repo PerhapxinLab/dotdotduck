@@ -3,11 +3,11 @@
   &nbsp;dotdotduck
 </h1>
 
-<p align="center"><strong>按 Cmd/Ctrl+K，產品裡的所有事情都做得到</strong></p>
+<p align="center"><strong>把你現有的網站，變成 AI 原生的網站</strong></p>
 
 <p align="center">
-  命令面板、語音、長按選取、輸入框 inline AI、DOM-grounded agent 全部包在同一個 SDK 裡。
-  跟 chatbot widget 的相反 — 把產品的「動詞」放在使用者本來就在動手的地方，而不是塞進側邊欄。
+  一個 SDK 把整層 AI 直接塞進你的產品 — 命令面板、語音、輸入框 inline AI、長按選取、會直接操作頁面的 DOM-grounded agent。
+  把「動詞」放在使用者本來就會按的鍵盤跟手勢後面，而不是另一個側邊聊天視窗裡。
 </p>
 
 <p align="center">
@@ -18,6 +18,12 @@
 </p>
 
 <p align="center"><a href="./README.md">English →</a></p>
+
+<p align="center">
+  <video src="./media/dddk-demo.mp4" poster="./media/dddk-demo-poster.jpg" width="720" controls muted playsinline></video>
+  <br />
+  <sub><a href="./media/dddk-demo.mp4">▶︎ 看 1 分鐘 demo 影片</a> · <a href="https://dddk.perhapxin.com">或到官網實機跑跑看</a></sub>
+</p>
 
 ---
 
@@ -229,6 +235,23 @@
 7. **Yes / no / 多選 = 免費的 RL 標籤**。每一個 Space-接受、雙擊-拒絕都是一筆乾淨、刻意的訊號 — 使用者真的想要什麼 vs 不想要什麼，本人說的、跟原始 prompt 一起記下來。不用再從 clickstream 雜訊反推。下一次要 fine-tune 或 eval 用的訓練集，順手就收完了。
 
 8. **語音不只用在瀏覽器**。同一套 `Voice` + `utility` LLM 角色撐得起 IoT 面板、kiosk 終端、服務機台、銀髮 / 不想打字使用者的無障礙介面。所有有麥克風的裝置共用一個心智模型。
+
+## Roadmap — v0.2.0 開發中
+
+0.2.x 主軸是 webagent 核心的架構重寫。大部分已經在 `main` 上（live demo 跑的就是它），剩幾塊還在收。
+
+**Track 1 · nano 成本驗證 — 完成。** `gpt-5.4-nano` 跑完整單檔 webagent loop，任務成功率跟 `gpt-5.4-mini` 同等，成本大約低一個量級。[dddk.perhapxin.com](https://dddk.perhapxin.com) 的 `webagent` + `plan` 兩個角色已換 nano 作預設。
+
+**Track 2 · mode-based 架構 — 實作中。**
+
+- ✅ **Streaming envelope parser** — scanner-based 漸進式 JSON parser。每個 action 在自己的 tool-args `{ }` 一閉合的當下就 dispatch，不用等外層 envelope 結束。Narrate 文字會隨 token 一個字一個字串到 subtitle bar。第一個 click 可以在 LLM 第二個 action 的 `{` 都還沒到的時候就觸發。在 `DotDotDuck` config 加 `enableStreamingEnvelope: true` 就用得到。
+- 🚧 **Mode-based webagent** — `chat` mode（不帶 DOM、走 plain protocol、跑 nano）跟 `operate` mode（帶 DOM dump + CoT envelope、跑 mini/full）。LLM 自己用 `enter_mode` tool 在「Q&A」跟「真的要操作頁面」之間升降級。Host 可以 `registerMode('default', {...})` 完全覆寫 SDK 預設 mode。
+- 🚧 **Live registry** — `dddk.webagent.registerTool / registerContextProvider / registerMode` 任何時候都可以呼叫。in-flight turn 用 snapshot 跑完，下個 turn 才看到新註冊。
+- 🚧 **InlineAgent scoping** — `attachTo(selector, config)` 給每個區域自己的 action set。文件評論區的 textarea 跟編輯器裡的 code block 不該共用同一組 action；innermost-wins，selector 表達不出來的 case 用 callback fallback。
+- 🚧 **`onLoopEnd` hook** — agent loop 收尾 UI：`silent` / `text` / `feedback`（Space 接受 · 雙擊拒絕 · Esc 算 null — 全部會發 `agent_feedback` event）/ `ask_user`（收尾用的多選問題）。reel 不再「啪一聲就消失」，連 zero-config host 都會看到溫和的「完成 ✓」收尾。
+- 🚧 **新增兩個 analytics event** — `agent_mode_changed` 跟 `agent_tool_failed`，補可觀測性的洞（現在的 `agent_tool_end` 只在成功時 fire，mode 切換則完全沒訊號）。
+
+完整 plan 在 [`ROADMAP-v0.2.0.md`](./ROADMAP-v0.2.0.md)。v0.1.x 的 bug fix 會繼續在 `v0.1.x` branch 出。
 
 ## 狀態 — 早期階段，評估前先看
 
