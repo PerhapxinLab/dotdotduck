@@ -18,23 +18,7 @@
 
 <p align="center"><a href="./README.md">English →</a></p>
 
-<!--
-  要啟用 README 內嵌播放器：
-  1. 開一個新 issue：https://github.com/PerhapxinLab/dotdotduck/issues/new
-  2. 把 media/dddk-demo.mp4 拖進留言框，等上傳完成（約 30 秒）
-  3. GitHub 會自動貼上一個 https://github.com/user-attachments/assets/<uuid> 形式的網址
-  4. 複製那個網址，**不要送出 issue**，直接關掉分頁
-  5. 把下面這個 <p align="center"> 區塊整個換成那一行裸網址：
-       https://github.com/user-attachments/assets/<uuid>
-     （單獨一行、不要包標籤，GitHub 會自動 render 成播放器）
--->
-<p align="center">
-  <a href="https://github.com/PerhapxinLab/dotdotduck/raw/main/media/dddk-demo.mp4">
-    <img src="./media/dddk-demo-poster.jpg" alt="dotdotduck — 1 分鐘 demo" width="720" />
-  </a>
-  <br />
-  <sub><a href="https://github.com/PerhapxinLab/dotdotduck/raw/main/media/dddk-demo.mp4">▶︎ 看 1 分鐘 demo 影片</a> · <a href="https://dddk.perhapxin.com">或到官網實機跑跑看</a></sub>
-</p>
+https://github.com/PerhapxinLab/dotdotduck/raw/main/media/dddk-demo.mp4
 
 ---
 
