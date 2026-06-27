@@ -3,11 +3,10 @@
   &nbsp;dotdotduck
 </h1>
 
-<p align="center"><strong>把你現有的網站，變成 AI 原生的網站</strong></p>
+<p align="center"><strong>把你現有的網站變成 AI 原生網站</strong></p>
 
 <p align="center">
-  一個 SDK 把整層 AI 直接塞進你的產品 — 命令面板、語音、輸入框 inline AI、長按選取、會直接操作頁面的 DOM-grounded agent。
-  把「動詞」放在使用者本來就會按的鍵盤跟手勢後面，而不是另一個側邊聊天視窗裡。
+  住在頁面裡、直接操作 DOM 的 AI 互動 SDK — 不是黏在右下角的聊天機器人。
 </p>
 
 <p align="center">
@@ -19,10 +18,22 @@
 
 <p align="center"><a href="./README.md">English →</a></p>
 
+<!--
+  要啟用 README 內嵌播放器：
+  1. 開一個新 issue：https://github.com/PerhapxinLab/dotdotduck/issues/new
+  2. 把 media/dddk-demo.mp4 拖進留言框，等上傳完成（約 30 秒）
+  3. GitHub 會自動貼上一個 https://github.com/user-attachments/assets/<uuid> 形式的網址
+  4. 複製那個網址，**不要送出 issue**，直接關掉分頁
+  5. 把下面這個 <p align="center"> 區塊整個換成那一行裸網址：
+       https://github.com/user-attachments/assets/<uuid>
+     （單獨一行、不要包標籤，GitHub 會自動 render 成播放器）
+-->
 <p align="center">
-  <video src="./media/dddk-demo.mp4" poster="./media/dddk-demo-poster.jpg" width="720" controls muted playsinline></video>
+  <a href="https://github.com/PerhapxinLab/dotdotduck/raw/main/media/dddk-demo.mp4">
+    <img src="./media/dddk-demo-poster.jpg" alt="dotdotduck — 1 分鐘 demo" width="720" />
+  </a>
   <br />
-  <sub><a href="./media/dddk-demo.mp4">▶︎ 看 1 分鐘 demo 影片</a> · <a href="https://dddk.perhapxin.com">或到官網實機跑跑看</a></sub>
+  <sub><a href="https://github.com/PerhapxinLab/dotdotduck/raw/main/media/dddk-demo.mp4">▶︎ 看 1 分鐘 demo 影片</a> · <a href="https://dddk.perhapxin.com">或到官網實機跑跑看</a></sub>
 </p>
 
 ---

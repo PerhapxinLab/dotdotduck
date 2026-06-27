@@ -6,8 +6,7 @@
 <p align="center"><strong>Turn your existing site into an AI-native site.</strong></p>
 
 <p align="center">
-  One SDK drops an entire AI layer into your product — palette, voice, inline writing, long-press selection, and a DOM-grounded agent that actually operates the page.
-  The verbs sit behind the keystrokes and gestures users already know, not behind a sidebar chatbot.
+  An embedded AI SDK that lives inside your page and operates the DOM — not a chatbot bolted to the corner.
 </p>
 
 <p align="center">
@@ -19,10 +18,22 @@
 
 <p align="center"><a href="./README.zh-TW.md">繁體中文 →</a></p>
 
+<!--
+  TO ENABLE INLINE PLAYER:
+  1. Open any issue at https://github.com/PerhapxinLab/dotdotduck/issues/new
+  2. Drag media/dddk-demo.mp4 into the comment textarea, wait for upload (~30s)
+  3. GitHub will paste a URL like https://github.com/user-attachments/assets/<uuid>
+  4. Copy that URL, close the issue tab WITHOUT submitting
+  5. Replace the <p align="center"> block below with:
+       https://github.com/user-attachments/assets/<uuid>
+     (just the bare URL on its own line — GitHub auto-renders it as a video player)
+-->
 <p align="center">
-  <video src="./media/dddk-demo.mp4" poster="./media/dddk-demo-poster.jpg" width="720" controls muted playsinline></video>
+  <a href="https://github.com/PerhapxinLab/dotdotduck/raw/main/media/dddk-demo.mp4">
+    <img src="./media/dddk-demo-poster.jpg" alt="dotdotduck — 1-minute demo" width="720" />
+  </a>
   <br />
-  <sub><a href="./media/dddk-demo.mp4">▶︎ Watch the 1-minute demo</a> · <a href="https://dddk.perhapxin.com">Or play it on the live site</a></sub>
+  <sub><a href="https://github.com/PerhapxinLab/dotdotduck/raw/main/media/dddk-demo.mp4">▶︎ Watch the 1-minute demo</a> · <a href="https://dddk.perhapxin.com">Or play it on the live site</a></sub>
 </p>
 
 ---
