@@ -210,6 +210,7 @@ export class DotDotDuck {
       // ships zero defaults. Hosts who want the screenshot button wire it up
       // explicitly via DotDotDuckConfig.camera.
       camera: this._config.camera === false ? undefined : this._config.camera,
+      submitButton: this._config.submitButton,
       categories: this._config.paletteCategories,
       allCategoriesLabel: this._config.paletteAllCategoriesLabel,
       onActivate: (info) => {

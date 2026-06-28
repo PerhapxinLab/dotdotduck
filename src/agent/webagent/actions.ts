@@ -11,7 +11,7 @@
 
 import type { ActionDefinition, ActionResult } from './types';
 import * as overlay from './overlay';
-import { moveCursorAndTap } from './cursor';
+import { moveCursorAndTap, moveCursorTo, setCursorMode } from './cursor';
 
 const objSchema = (props: Record<string, unknown>, required: string[] = []) => ({
   type: 'object',
@@ -78,7 +78,22 @@ const scrollTo: ActionDefinition<{ selector: string }> = {
   handler: async ({ selector }, ctx) => {
     const found = resolve(ctx, selector);
     if (!found.ok) return found.result;
+    // Cursor switches to scroll-mode glyph while we travel; the
+    // scrollIntoView promise doesn't exist, so wait a beat for the
+    // smooth scroll to settle before gliding the cursor to its
+    // destination. Restore pointer mode after.
+    if (ctx.uiHints?.cursorTrail) {
+      try { setCursorMode('scroll'); } catch { /* nicety */ }
+    }
     found.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (ctx.uiHints?.cursorTrail) {
+      // ~360ms covers a typical smooth scroll on modern browsers.
+      await new Promise((r) => setTimeout(r, 360));
+      try {
+        await moveCursorTo(found.el);
+      } catch { /* nicety */ }
+      try { setCursorMode('pointer'); } catch { /* nicety */ }
+    }
     return { ok: true };
   },
 };
@@ -285,6 +300,12 @@ const borderAction: ActionDefinition<
     const el = ctx.resolveTarget(selector);
     if (!el) return { ok: false, reason: 'not_found' };
     overlay.clearOverlays();
+    // Glide the synthetic cursor onto the target before drawing the
+    // frame — keeps the "agent points at the thing" beat consistent
+    // with how `click` already telegraphs intent.
+    if (ctx.uiHints?.cursorTrail) {
+      try { await moveCursorTo(el); } catch { /* nicety */ }
+    }
     const id = overlay.border(el, color, label);
     return id ? { ok: true, data: id } : { ok: false, reason: 'not_found' };
   },
@@ -308,6 +329,9 @@ const highlightAction: ActionDefinition<
     const el = ctx.resolveTarget(selector);
     if (!el) return { ok: false, reason: 'not_found' };
     overlay.clearOverlays();
+    if (ctx.uiHints?.cursorTrail) {
+      try { await moveCursorTo(el); } catch { /* nicety */ }
+    }
     const id = overlay.highlight(el, color, label);
     return id ? { ok: true, data: id } : { ok: false, reason: 'not_found' };
   },
