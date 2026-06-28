@@ -9,16 +9,16 @@
   住在頁面裡、直接操作 DOM 的 AI 互動 SDK — 不是黏在右下角的聊天機器人。
 </p>
 
-https://github.com/user-attachments/assets/18d797df-4952-421a-a2b3-16aef1ebcb34
-
 <p align="center">
   <a href="https://www.npmjs.com/package/@perhapxin/dddk"><img src="https://img.shields.io/npm/v/@perhapxin/dddk.svg?style=flat-square" alt="npm" /></a>
   <a href="https://www.npmjs.com/package/@perhapxin/dddk"><img src="https://img.shields.io/npm/dm/@perhapxin/dddk.svg?style=flat-square" alt="downloads" /></a>
   <a href="https://github.com/PerhapxinLab/dotdotduck/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue?style=flat-square" alt="license" /></a>
-  <a href="https://dddk.perhapxin.com/docs/v0.1.3/dddk/overview"><img src="https://img.shields.io/badge/docs-online-blue?style=flat-square" alt="docs" /></a>
+  <a href="https://dddk.perhapxin.com/docs/v0.2.0/dddk/overview"><img src="https://img.shields.io/badge/docs-online-blue?style=flat-square" alt="docs" /></a>
 </p>
 
 <p align="center"><a href="./README.md">English →</a></p>
+
+https://github.com/user-attachments/assets/18d797df-4952-421a-a2b3-16aef1ebcb34
 
 ---
 
@@ -31,13 +31,12 @@ https://github.com/user-attachments/assets/18d797df-4952-421a-a2b3-16aef1ebcb34
 </td>
 <td width="45%" valign="top">
 
-- **Ctrl/⌘+K 打開**。註冊的指令跟 Ask AI 並排在同一張清單 — 切主題、切語言、開帳單、找客戶，全部用同一個入口處理。
-- **內嵌掛載或彈窗，同一份 item**。`dddk.palette.mountInline(host)` 把 palette 常駐嵌進 sidebar / drawer / 對話框（無背景遮罩、不會點外面關閉）。Ctrl/⌘+K 依然有效 — 會把完整 modal 疊在 inline 上方，關掉時再復原。host 寫一份 item 就同時得到兩個 surface。
-- **多行 row + 縮圖**。Item 支援 `lines: string[]`（多行 metadata 直欄）跟 `image`（縮圖 URL）— 書封 + 標題 + 簡介 + 作者多行排版、商品照、客戶頭像，免寫 custom renderer。
-- **可選送出按鈕**。`submitButton: true` 在 input 右側放一顆圓形 send 鈕，按它（或 Enter）會把當前 query 送給 host 註冊的 fallback item。
-- **前綴路由** — `/command`、`@entity`、`order:`、`#tag` — 給使用者一個方便的入口，不管當下卡在哪都能找得到答案。
-- **多層客製**疊在一起：CSS 變數換主題、Skill SDK（多數 host 只需要 Script / Prompt；進階再用 Action / Surface / Panel）寫劇本、或直接把現有的 host 功能接成 palette item。
-- **零內建指令** — palette 裡顯示什麼完全由你決定。SDK 提供基礎建設，詞彙交給你。
+- **Ctrl/⌘+K 打開**。註冊的指令跟 Ask AI 並排在同一張清單 — 切主題、切語言、找客戶，全部用同一個入口。
+- **內嵌掛載或彈窗，同一份 item**。`palette.mountInline(host)` 把 palette 常駐嵌進 sidebar / drawer / 對話框。Ctrl/⌘+K 會把 modal 疊在上面，關掉時還原 inline。
+- **多行 row + 縮圖**。Item 支援 `lines: string[]`（多行 metadata）跟 `image`（縮圖 URL）。書封、商品照、客戶頭像免寫 custom renderer。
+- **前綴路由** — `/command`、`@entity`、`order:`、`#tag`。一個入口讓使用者不管當下卡在哪都找得到答案。
+- **多層客製** — CSS 變數換主題、Skill SDK（Script / Prompt / Action / Surface / Panel）寫劇本、或把現有功能直接掛成 palette item。
+- **零內建指令**。Palette 顯示什麼完全由你決定。SDK 提供基礎建設，詞彙交給你。
 
 </td>
 </tr>
@@ -54,12 +53,12 @@ https://github.com/user-attachments/assets/18d797df-4952-421a-a2b3-16aef1ebcb34
 </td>
 <td width="45%" valign="top">
 
-- **DOM-grounded 自主迴圈**。讀目前可見的頁面，一次選一個 tool，跑之前先把步驟唸到字幕條上給使用者看。
-- **加入制的 action bundle**。預設只裝 `coreActions`（5 個：narrate · navigate · click · border · scroll_to）— 每個 host 都會用到的核心。要 `formActions`（fill_input · select_option · clear_input · press_key · hold_key · double_click · long_press · drag）、`flowActions`（wait · pause · ask_user · ask_user_choice）或 `extraActions`（highlight · track_intent · escalate_to_human）就傳進 `customActions` opt-in。預設小 = prompt 便宜、目錄誠實。當然也可以加自己的，LLM 自己選用哪一個。
-- **每個動作都有滑鼠**。`cursorTrail: true` 打開後，每個動作執行**之前**會有合成游標滑到目標 — click / fill_input / border / highlight / scroll_to（游標切成滑鼠滾輪圖示沿著捲動路徑走）/ narrate 帶 `about`（自動透過合成的 `border` call 拿到）。內含執行前停頓 + 抵達脈動 + reduced-motion fallback。
-- **每一步都靠 Space 把關**。單擊接受 · 雙擊拒絕 · Esc 取消。使用者在事情發生**之前**就看得到它要做什麼。
-- **不確定時主動問**。`ask_user_choice` 對應 2-4 個選項，`ask_user` 接收自由文字。不會偷偷做決定，也不會憑空猜。
-- **自帶 key**。LLM 可走 OpenAI、Google AI Studio、或 server 端的 `ProxyProvider`；per-role routing 把便宜的模型留給後處理、把旗艦留給 agent 迴圈。STT 預設用瀏覽器內建的 Web Speech 零設定，要換 Whisper 或任何廠商就一行 `transcribe(audio)` callback。
+- **DOM-grounded 自主迴圈**。讀目前可見頁面，一次選一個 tool，跑之前先把步驟唸到字幕條給使用者看。
+- **加入制的 action bundle**。預設只裝 `coreActions`（5 個：narrate · navigate · click · border · scroll_to）。要 `formActions`（input / drag / hold_key / double_click / long_press）、`flowActions`（wait / pause / ask_user）或 `extraActions`（highlight / track_intent / escalate_to_human）就 opt-in。也可以加自己的，LLM 自己選用哪一個。
+- **每個動作都有滑鼠**。`cursorTrail: true` 打開後，動作執行之前合成游標滑到目標 — click / fill_input / border / scroll_to / narrate-with-about。內含執行前停頓、抵達脈動、reduced-motion fallback。
+- **每一步靠 Space 把關**。單擊接受、雙擊拒絕、Esc 取消。使用者在事情發生**之前**就看得到。
+- **不確定時主動問**。`ask_user_choice` 給 2-4 個選項，`ask_user` 接自由文字。不偷偷做決定。
+- **自帶 key**。LLM 走 OpenAI、Google AI Studio、或 server 端的 `ProxyProvider`。Per-role routing 把便宜模型留給後處理、旗艦留給 agent 迴圈。STT 預設用瀏覽器 Web Speech，要換用 `transcribe(audio)` callback。
 
 </td>
 </tr>
@@ -295,15 +294,15 @@ dotdotduck 仍在積極開發中。能跑，但會有粗糙的邊角。先講幾
 
 ## 文件
 
-- **v0.1.3 有什麼新東西** → [release notes](https://dddk.perhapxin.com/docs/v0.1.3/dddk/release-notes) · [migration guide](https://dddk.perhapxin.com/docs/v0.1.3/dddk/migrating)
+- **v0.2.0 有什麼新東西** → [release notes](https://dddk.perhapxin.com/docs/v0.2.0/dddk/release-notes) · [migration guide](https://dddk.perhapxin.com/docs/v0.2.0/dddk/migrating)
 
-- **完整文件** → [dddk.perhapxin.com/docs](https://dddk.perhapxin.com/docs/v0.1.3/dddk/overview)
-- **Agent**（DOM-grounded 迴圈 + InlineAgent + sitemap + Memory）→ [/dddk/agent](https://dddk.perhapxin.com/docs/v0.1.3/dddk/agent/overview)
-- **LLM** provider + router + adapter registry → [/dddk/llm](https://dddk.perhapxin.com/docs/v0.1.3/dddk/llm/providers)
-- **Skills** 系統 + evals → [/dddk/skills](https://dddk.perhapxin.com/docs/v0.1.3/dddk/skills/overview)
-- **Modules**（voice / Dwell / inline / immersive translate / proactive / analytics）→ [/dddk/modules](https://dddk.perhapxin.com/docs/v0.1.3/dddk/modules/overview)
-- **Toolbox**（search + recommend）→ [/dddk/toolbox](https://dddk.perhapxin.com/docs/v0.1.3/dddk/toolbox/overview)
-- **Theming** → [/dddk/theming](https://dddk.perhapxin.com/docs/v0.1.3/dddk/theming)
+- **完整文件** → [dddk.perhapxin.com/docs](https://dddk.perhapxin.com/docs/v0.2.0/dddk/overview)
+- **Agent**（DOM-grounded 迴圈 + InlineAgent + sitemap + Memory）→ [/dddk/agent](https://dddk.perhapxin.com/docs/v0.2.0/dddk/agent/overview)
+- **LLM** provider + router + adapter registry → [/dddk/llm](https://dddk.perhapxin.com/docs/v0.2.0/dddk/llm/providers)
+- **Skills** 系統 + evals → [/dddk/skills](https://dddk.perhapxin.com/docs/v0.2.0/dddk/skills/overview)
+- **Modules**（voice / Dwell / inline / immersive translate / proactive / analytics）→ [/dddk/modules](https://dddk.perhapxin.com/docs/v0.2.0/dddk/modules/overview)
+- **Toolbox**（search + recommend）→ [/dddk/toolbox](https://dddk.perhapxin.com/docs/v0.2.0/dddk/toolbox/overview)
+- **Theming** → [/dddk/theming](https://dddk.perhapxin.com/docs/v0.2.0/dddk/theming)
 
 ## 安裝
 
@@ -338,7 +337,7 @@ const dddk = new DotDotDuck({
 dddk.mount();
 ```
 
-按 `Ctrl/⌘+K`、打 `/introduce`、看它跑。完整的[安裝指南](https://dddk.perhapxin.com/docs/v0.1.3/dddk/quickstart-frameworks)有 React / Vue / Svelte / Solid 的整合說明。
+按 `Ctrl/⌘+K`、打 `/introduce`、看它跑。完整的[安裝指南](https://dddk.perhapxin.com/docs/v0.2.0/dddk/quickstart-frameworks)有 React / Vue / Svelte / Solid 的整合說明。
 
 ## 主題
 

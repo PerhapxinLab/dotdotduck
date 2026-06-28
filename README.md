@@ -9,16 +9,16 @@
   An embedded AI SDK that lives inside your page and operates the DOM — not a chatbot bolted to the corner.
 </p>
 
-https://github.com/user-attachments/assets/18d797df-4952-421a-a2b3-16aef1ebcb34
-
 <p align="center">
   <a href="https://www.npmjs.com/package/@perhapxin/dddk"><img src="https://img.shields.io/npm/v/@perhapxin/dddk.svg?style=flat-square" alt="npm" /></a>
   <a href="https://www.npmjs.com/package/@perhapxin/dddk"><img src="https://img.shields.io/npm/dm/@perhapxin/dddk.svg?style=flat-square" alt="downloads" /></a>
   <a href="https://github.com/PerhapxinLab/dotdotduck/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue?style=flat-square" alt="license" /></a>
-  <a href="https://dddk.perhapxin.com/docs/v0.1.3/dddk/overview"><img src="https://img.shields.io/badge/docs-online-blue?style=flat-square" alt="docs" /></a>
+  <a href="https://dddk.perhapxin.com/docs/v0.2.0/dddk/overview"><img src="https://img.shields.io/badge/docs-online-blue?style=flat-square" alt="docs" /></a>
 </p>
 
 <p align="center"><a href="./README.zh-TW.md">繁體中文 →</a></p>
+
+https://github.com/user-attachments/assets/18d797df-4952-421a-a2b3-16aef1ebcb34
 
 ---
 
@@ -31,13 +31,12 @@ https://github.com/user-attachments/assets/18d797df-4952-421a-a2b3-16aef1ebcb34
 </td>
 <td width="45%" valign="top">
 
-- **Ctrl/⌘+K opens it.** Your registered commands sit alongside Ask AI in the same list — switch theme, change language, open billing, find a customer, all addressable from one place.
-- **Inline mount or modal — same items.** `dddk.palette.mountInline(host)` persistently embeds the palette inside your sidebar / drawer / dialog (no backdrop, no outside-click dismiss). Ctrl/⌘+K still works while inline — it raises the full modal on top, then restores the inline surface on close. Hosts write ONE set of items.
-- **Rich rows.** Items support `lines: string[]` (multi-line metadata column) and `image` (thumbnail URL) — book covers + title + blurb + author lines, product shots, customer avatars. No custom renderer needed.
-- **Optional submit button.** `submitButton: true` puts a circular send button at the right edge of the input — clicking it (or Enter) submits the typed query to whichever fallback item the host registered.
-- **Prefix routing** — `/command`, `@entity`, `order:`, `#tag` — gives the user one convenient entry point that solves whatever they're stuck on, no matter where they are in the product.
-- **Layered customisation** — CSS-variable theming, Skill SDK (Script / Prompt for most hosts; Action / Surface / Panel for advanced cases), or wire your existing host features straight in as palette items.
-- **Zero built-in commands** — what shows up in the palette is entirely yours to decide. The SDK ships infrastructure, you ship the vocabulary.
+- **Ctrl/⌘+K opens it.** Your commands sit alongside Ask AI in one list — switch theme, change language, find a customer, all from one place.
+- **Inline mount or modal — same items.** `palette.mountInline(host)` embeds the palette persistently inside a sidebar / drawer / dialog. Ctrl/⌘+K still raises the full modal on top; close restores the inline.
+- **Rich rows.** Items support `lines: string[]` (multi-line metadata) and `image` (thumbnail URL). Book covers, product shots, customer avatars without a custom renderer.
+- **Prefix routing** — `/command`, `@entity`, `order:`, `#tag`. One convenient entry point for everything the user is stuck on.
+- **Layered customisation** — CSS-variable theming, Skill SDK (Script / Prompt / Action / Surface / Panel), or wire existing host features in as palette items.
+- **Zero built-in commands.** What shows up is entirely yours. The SDK ships infrastructure; you ship the vocabulary.
 
 </td>
 </tr>
@@ -55,11 +54,11 @@ https://github.com/user-attachments/assets/18d797df-4952-421a-a2b3-16aef1ebcb34
 <td width="45%" valign="top">
 
 - **DOM-grounded autonomous loop.** Reads the visible page, picks one tool at a time, narrates each step in the subtitle bar before it runs.
-- **Opt-in action bundles.** Default install is `coreActions` (5: narrate · navigate · click · border · scroll_to) — the actions every host needs. Pass `formActions` (fill_input · select_option · clear_input · press_key · hold_key · double_click · long_press · drag), `flowActions` (wait · pause · ask_user · ask_user_choice), or `extraActions` (highlight · track_intent · escalate_to_human) into `customActions` to opt in. Smaller default = cheaper prompts, honest catalog. Add your own; the LLM picks them.
-- **Cursor on every action.** Opt in with `cursorTrail: true` and a synthetic cursor glides onto each target *before* it fires — click / fill_input / border / highlight / scroll_to (cursor swaps to a mouse-wheel glyph and travels along the scroll path) / narrate-with-about (free via the synthesized `border` call). Pre-action pause + arrival pulse + reduced-motion fallback included.
+- **Opt-in action bundles.** Default install is `coreActions` (5: narrate · navigate · click · border · scroll_to). Opt in to `formActions` (input / drag / hold_key / double_click / long_press), `flowActions` (wait / pause / ask_user), or `extraActions` (highlight / track_intent / escalate_to_human). Add your own; the LLM picks them.
+- **Cursor on every action.** With `cursorTrail: true`, a synthetic cursor glides onto each target before it fires — click / fill_input / border / scroll_to / narrate-with-about. Pre-action pause, arrival pulse, reduced-motion fallback.
 - **Space-gated every step.** Single tap accept · double-tap reject · Esc cancel. Users see what's about to happen *before* it happens.
-- **Asks back when ambiguous.** `ask_user_choice` for 2-4 options, `ask_user` for free text. No silent decisions, no guessing.
-- **Bring your own keys.** LLM via OpenAI, Google AI Studio, or a server-side `ProxyProvider`; per-role routing keeps cheap models on cleanup and the flagship on the agent loop. STT defaults to the browser's Web Speech for zero-setup; swap to Whisper or any vendor via one `transcribe(audio)` callback.
+- **Asks back when ambiguous.** `ask_user_choice` for 2-4 options, `ask_user` for free text. No silent decisions.
+- **Bring your own keys.** LLM via OpenAI, Google AI Studio, or a server-side `ProxyProvider`. Per-role routing keeps cheap models on cleanup and the flagship on the agent loop. STT defaults to the browser's Web Speech; swap via `transcribe(audio)`.
 
 </td>
 </tr>
@@ -295,14 +294,14 @@ None of this is baked into `@perhapxin/dddk`. The package itself ships LLM provi
 
 ## Documentation
 
-- **What's new in v0.1.3** → [release notes](https://dddk.perhapxin.com/docs/v0.1.3/dddk/release-notes) · [migration guide](https://dddk.perhapxin.com/docs/v0.1.3/dddk/migrating)
-- **Full docs** → [dddk.perhapxin.com/docs](https://dddk.perhapxin.com/docs/v0.1.3/dddk/overview)
-- **Agent** (DOM-grounded loop + InlineAgent + sitemap + Memory) → [/dddk/agent](https://dddk.perhapxin.com/docs/v0.1.3/dddk/agent/overview)
-- **LLM** providers + router + adapter registry → [/dddk/llm](https://dddk.perhapxin.com/docs/v0.1.3/dddk/llm/providers)
-- **Skills** system + evals → [/dddk/skills](https://dddk.perhapxin.com/docs/v0.1.3/dddk/skills/overview)
-- **Modules** (voice / Dwell / inline / immersive translate / proactive / analytics) → [/dddk/modules](https://dddk.perhapxin.com/docs/v0.1.3/dddk/modules/overview)
-- **Toolbox** (search + recommend) → [/dddk/toolbox](https://dddk.perhapxin.com/docs/v0.1.3/dddk/toolbox/overview)
-- **Theming** → [/dddk/theming](https://dddk.perhapxin.com/docs/v0.1.3/dddk/theming)
+- **What's new in v0.2.0** → [release notes](https://dddk.perhapxin.com/docs/v0.2.0/dddk/release-notes) · [migration guide](https://dddk.perhapxin.com/docs/v0.2.0/dddk/migrating)
+- **Full docs** → [dddk.perhapxin.com/docs](https://dddk.perhapxin.com/docs/v0.2.0/dddk/overview)
+- **Agent** (DOM-grounded loop + InlineAgent + sitemap + Memory) → [/dddk/agent](https://dddk.perhapxin.com/docs/v0.2.0/dddk/agent/overview)
+- **LLM** providers + router + adapter registry → [/dddk/llm](https://dddk.perhapxin.com/docs/v0.2.0/dddk/llm/providers)
+- **Skills** system + evals → [/dddk/skills](https://dddk.perhapxin.com/docs/v0.2.0/dddk/skills/overview)
+- **Modules** (voice / Dwell / inline / immersive translate / proactive / analytics) → [/dddk/modules](https://dddk.perhapxin.com/docs/v0.2.0/dddk/modules/overview)
+- **Toolbox** (search + recommend) → [/dddk/toolbox](https://dddk.perhapxin.com/docs/v0.2.0/dddk/toolbox/overview)
+- **Theming** → [/dddk/theming](https://dddk.perhapxin.com/docs/v0.2.0/dddk/theming)
 
 ## Install
 
@@ -337,7 +336,7 @@ const dddk = new DotDotDuck({
 dddk.mount();
 ```
 
-Press `Ctrl/⌘+K`, type `/introduce`, watch it run. The full [quickstart guide](https://dddk.perhapxin.com/docs/v0.1.3/dddk/quickstart-frameworks) covers React / Vue / Svelte / Solid wiring.
+Press `Ctrl/⌘+K`, type `/introduce`, watch it run. The full [quickstart guide](https://dddk.perhapxin.com/docs/v0.2.0/dddk/quickstart-frameworks) covers React / Vue / Svelte / Solid wiring.
 
 ## Theming
 

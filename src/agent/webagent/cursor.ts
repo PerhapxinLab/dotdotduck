@@ -154,9 +154,8 @@ export async function moveCursorAndTap(targetEl: Element): Promise<void> {
   if (typeof document === 'undefined' || !document.body) return;
 
   const wrap = ensureCursor();
-  const rect = targetEl.getBoundingClientRect();
-  const destX = rect.left + Math.min(rect.width - 6, Math.max(6, rect.width / 2));
-  const destY = rect.top + Math.min(rect.height - 6, Math.max(6, rect.height / 2));
+  await ensureInView(targetEl);
+  const { destX, destY } = cursorAnchor(targetEl);
 
   const reduced = reducedMotion();
   const glideMs = reduced ? 0 : 360;
@@ -184,6 +183,60 @@ export async function moveCursorAndTap(targetEl: Element): Promise<void> {
   wrap.style.transform = `translate(${destX}px, ${destY}px) scale(1)`;
   await sleep(reduced ? 0 : 90);
   wrap.classList.remove('tapping');
+}
+
+/**
+ * Pick a visually grounded anchor on `targetEl` for the cursor:
+ *
+ * - Small clickable things (buttons, link rows, icons) → center, the
+ *   intuitive "tap the middle" point.
+ * - Tall or wide blocks (tables, sections, articles) → an inset
+ *   near the top-left so the cursor reads as "pointing AT the block
+ *   from its corner" rather than floating somewhere inside it. Geometric
+ *   center of a 600px-tall section is "the middle of rows 4-5" which
+ *   feels disconnected from any actual content.
+ */
+function cursorAnchor(targetEl: Element): { destX: number; destY: number } {
+  const rect = targetEl.getBoundingClientRect();
+  const BIG = 220;
+  const isBig = rect.height > BIG || rect.width > BIG;
+  if (isBig) {
+    // Top-left inset. Clamp so the cursor stays visibly inside the
+    // element, with a small breath from the actual edge.
+    const inset = 24;
+    const x = rect.left + Math.min(rect.width - 6, inset);
+    const y = rect.top  + Math.min(rect.height - 6, inset);
+    return { destX: x, destY: y };
+  }
+  // Center for normal-sized targets — buttons, link rows, glyphs.
+  const destX = rect.left + Math.min(rect.width - 6, Math.max(6, rect.width / 2));
+  const destY = rect.top  + Math.min(rect.height - 6, Math.max(6, rect.height / 2));
+  return { destX, destY };
+}
+
+/**
+ * If the target is meaningfully off-screen, smooth-scroll it into
+ * view BEFORE moving the cursor. Without this the cursor "lands"
+ * at a viewport coordinate that no longer corresponds to where the
+ * user sees the element after a layout shift.
+ */
+async function ensureInView(targetEl: Element): Promise<void> {
+  if (typeof window === 'undefined') return;
+  try {
+    const rect = targetEl.getBoundingClientRect();
+    const vh = window.innerHeight;
+    const vw = window.innerWidth;
+    // Offscreen vertically (top above viewport or bottom below + a
+    // 40px buffer) OR offscreen horizontally → scroll center.
+    const offY = rect.bottom < 40 || rect.top > vh - 40;
+    const offX = rect.right  < 40 || rect.left > vw - 40;
+    if (offY || offX) {
+      (targetEl as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+      // Wait for the smooth-scroll to settle. ~360ms covers typical
+      // browser smooth-scroll timing.
+      await sleep(reducedMotion() ? 0 : 380);
+    }
+  } catch { /* nicety; positioning will fall back to whatever rect we get */ }
 }
 
 /**
