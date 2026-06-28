@@ -370,23 +370,22 @@ export async function* executePlanningPhase(
     const deltaQueue: string[] = [];
     let waiter: (() => void) | null = null;
     let plannerDone = false;
-    // v0.2.0 — feed the planner a snapshot of the current page DOM so
-    // it can reason about routes / sections that EXIST IN THE PAGE
-    // but weren't listed in the briefed sitemap. Off by setting
-    // `plannerSeesDom: false`. Capped by `plannerDomMaxLength`
-    // (default 8000) so the strategic one-shot stays cheap.
+    // The planner always reads the current page DOM. It needs to know
+    // (a) what page the user is currently on and (b) what nav links
+    // are reachable from here, otherwise it would be planning blind.
+    // `plannerDomMaxLength` (default 8000) caps the snapshot so the
+    // strategic one-shot stays cheap — the per-turn DOM budget
+    // (domMaxLength, default 40000) is independent.
     let pageContextForPlanner: string | undefined;
-    if (agent.configRef.plannerSeesDom !== false && typeof document !== 'undefined') {
+    if (typeof document !== 'undefined') {
       try {
         const { readDOM } = await import('../dom-reader');
         const cap = agent.configRef.plannerDomMaxLength ?? 8000;
         const snap = readDOM({ filter: agent.configRef.domFilter, maxLength: cap });
         if (snap.text) {
-          pageContextForPlanner =
-            `# Current page DOM (the agent's eyes — use this to plan navigation, not just the briefed sitemap)\n\n` +
-            snap.text;
+          pageContextForPlanner = `# Current page DOM\n\n` + snap.text;
         }
-      } catch { /* planner falls back to sitemap-only */ }
+      } catch { /* planner falls back to host route descriptions only */ }
     }
     const plannerPromise = agent.configRef.planner({
       task: taskText,
