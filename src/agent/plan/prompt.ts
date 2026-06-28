@@ -40,7 +40,7 @@ export function buildPlanSystemPrompt(ctx: PlanPromptContext): string {
 - todos: ordered array. Each item: { intent, description, expected_turn }. intent ∈ navigate | narrate | click | fill | ask | finish. Last item's intent is "finish".
 - One todo = one turn. Don't combine navigate and narrate — the DOM only refreshes after navigate.
 
-The user message carries the user's task, the current page DOM, and any selection. Pick the route whose description best matches the user's topic; navigate there if you're not already on it, then narrate.
+The user message carries the user's task, the current page DOM, and any selection. The current DOM is your first source — if it already contains what the user needs (a paragraph, a contact, a link, an answer), narrate from it, no navigate. Only navigate when the answer is NOT on the current page and a different route's description matches the topic better.
 
 Reply in exactly the language the user wrote their task in. The page DOM and brand voice may be in other languages — they do not set the output language. Match the user's task language, not the page's language.`
   );
