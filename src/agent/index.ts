@@ -99,6 +99,14 @@ export {
   type ScopeResolver,
 } from './inline';
 
+export type {
+  ToolHandle,
+  ContextProvider,
+  ContextProviderHandle,
+  ContextRole,
+  ContextRequest,
+} from './webagent/types';
+
 // ─── Agent cursor (visual layer) ───────────────────────────────────
 
 export { AgentCursor, type AgentCursorConfig } from './cursor';

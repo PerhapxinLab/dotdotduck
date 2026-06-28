@@ -109,6 +109,55 @@ export interface SelectionContext {
   elements?: string[];
 }
 
+// ─── Live registry — runtime tool + context provider registration ──
+// v0.2.0 · Wave 2·C. Hosts wire tools / context providers any time;
+// the in-flight step finishes on its frozen action snapshot, the
+// next step / turn sees the new entry. `remove()` is idempotent.
+
+export interface ToolHandle {
+  /** Unregister this tool. After this returns, the next agent step
+   *  no longer sees the action. Idempotent — calling twice is fine. */
+  remove(): void;
+}
+
+/**
+ * Names the context provider supplies — they map to the slots the
+ * runtime asks for when building a per-turn context. SDK ships
+ * defaults for each (v0.2.0 · Wave 2·D); hosts can replace any
+ * single slot without re-implementing the others.
+ */
+export type ContextRole =
+  | 'url'           // current path + query + hash
+  | 'page_summary'  // <title> + meta description
+  | 'dom'           // compressed DOM dump
+  | 'screenshot'    // viewport image data URL
+  | 'history'       // recent navigations
+  | 'selection';    // current window.getSelection() context
+
+export interface ContextRequest {
+  /** The agent's signal for the current turn (so providers can bail
+   *  cheaply when the host cancels). */
+  signal: AbortSignal;
+  /** Most recent user task / sub-task the agent is operating on. */
+  task?: string;
+}
+
+/**
+ * Pluggable producer for one slot of per-turn context. Returns a
+ * string the runtime can splice into the prompt, or `null` to skip
+ * the slot entirely (e.g. DOM dump bails on a cross-origin
+ * iframe). Async — providers commonly snapshot from the live DOM
+ * or call back to the host.
+ */
+export type ContextProvider = (req: ContextRequest) => string | null | Promise<string | null>;
+
+export interface ContextProviderHandle {
+  /** Unregister this context provider. Restores whatever was set
+   *  previously for this role (SDK default if no prior override).
+   *  Idempotent. */
+  remove(): void;
+}
+
 // ─── Session model — append-only turn log ───────────────────────────
 
 export interface AgentSession {

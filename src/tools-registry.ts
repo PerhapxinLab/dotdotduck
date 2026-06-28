@@ -139,11 +139,14 @@ export class ToolsRegistry {
   }
 
   unregister(id: string): boolean {
-    return this.tools.delete(id);
-    // Note: WebAgent doesn't currently support runtime UN-register —
-    // the action map keeps stale entries until the next agent rebuild.
-    // Host should call this at boot before first use, OR live with the
-    // tool persisting until reload.
+    const removed = this.tools.delete(id);
+    // v0.2.0 · Wave 2·C: WebAgent now supports runtime un-register
+    // via `unregisterAction`. Mirror the delete into the live agent
+    // so the next step actually loses the tool.
+    if (removed && this.liveAgent) {
+      try { this.liveAgent.unregisterAction(id); } catch { /* swallow */ }
+    }
+    return removed;
   }
 
   list(): ToolSpec[] {

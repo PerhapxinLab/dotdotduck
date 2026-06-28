@@ -17,6 +17,10 @@ import type {
   RunOptions,
   SelectionContext,
   AgentStatus,
+  ToolHandle,
+  ContextProvider,
+  ContextProviderHandle,
+  ContextRole,
 } from './types';
 import type { ToolDefinition, ToolCall } from '../llm/types';
 import {
@@ -174,10 +178,82 @@ export class WebAgent {
     }
   }
 
+  /**
+   * Context provider registry — one slot per `ContextRole`. SDK
+   * ships defaults (wired in v0.2.0 · Wave 2·D); hosts can replace
+   * a single slot without re-implementing the others. v0.2.0 · Wave 2·C.
+   */
+  /** @internal */ contextProviders: Map<ContextRole, ContextProvider> = new Map();
+
   // ─── public API ─────────────────────────────────────────────────
 
-  registerAction(action: ActionDefinition): void {
+  /**
+   * Register a tool. Returns a `ToolHandle` so the host can later
+   * `handle.remove()` to unregister — useful when a feature module
+   * is unmounted and its tool should disappear with it.
+   *
+   * Backward compat: the return value was `void` in v0.1; the
+   * `ToolHandle` shape is additive so existing callers ignoring the
+   * return keep working unchanged.
+   *
+   * Live semantics: the in-flight step finishes on its frozen action
+   * snapshot, the next step / turn sees the new entry. There is no
+   * "this turn must not see the new tool" guarantee — the action
+   * map is read at each step boundary.
+   */
+  registerAction(action: ActionDefinition): ToolHandle {
     this.actions.set(action.name, action);
+    return {
+      remove: () => { this.actions.delete(action.name); },
+    };
+  }
+
+  /** Alias for `registerAction` — symmetric with `registerContextProvider`
+   *  + matches the "tool" wording the host-facing docs use. */
+  registerTool(tool: ActionDefinition): ToolHandle {
+    return this.registerAction(tool);
+  }
+
+  /**
+   * Explicit unregister by name. Returns `true` when an action was
+   * actually removed. Hosts who don't keep the `ToolHandle` around
+   * can call this instead. v0.2.0 · Wave 2·C.
+   */
+  unregisterAction(name: string): boolean {
+    return this.actions.delete(name);
+  }
+
+  /**
+   * Replace the producer for one context slot (`url`, `page_summary`,
+   * `dom`, `screenshot`, `history`, `selection`). Returns a
+   * `ContextProviderHandle` that restores the previous binding on
+   * `remove()`. SDK defaults are installed lazily in v0.2.0 · Wave 2·D;
+   * registering here before defaults are wired still works — the
+   * registered provider replaces the SDK default at lookup time.
+   */
+  registerContextProvider(role: ContextRole, provider: ContextProvider): ContextProviderHandle {
+    const previous = this.contextProviders.get(role);
+    this.contextProviders.set(role, provider);
+    let removed = false;
+    return {
+      remove: () => {
+        if (removed) return;
+        removed = true;
+        // Restore the prior binding (likely the SDK default) so
+        // un-mounting a host feature doesn't strand a stale provider.
+        if (previous) this.contextProviders.set(role, previous);
+        else this.contextProviders.delete(role);
+      },
+    };
+  }
+
+  /**
+   * Drop a registered provider for `role`. Returns `true` when one
+   * was removed. After removal, the SDK default (when present)
+   * applies at lookup time. v0.2.0 · Wave 2·C.
+   */
+  unregisterContextProvider(role: ContextRole): boolean {
+    return this.contextProviders.delete(role);
   }
 
   /** Update the locale used for confirmation copy + system-prompt output
