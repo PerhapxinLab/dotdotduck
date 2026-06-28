@@ -100,4 +100,14 @@ export default defineConfig([
     dts: true,
     external: ['zod'],
   },
+  // Mini dashboard — vanilla-SVG mount-anywhere charts over an
+  // EventStore. Separate entry so the SVG layer is tree-shakeable
+  // for hosts that only want the export side of the analytics layer.
+  {
+    entry: ['src/analytics/dashboard/index.ts'],
+    outDir: 'dist/analytics/dashboard',
+    format: ['esm', 'cjs'],
+    dts: true,
+    external: ['zod'],
+  },
 ]);

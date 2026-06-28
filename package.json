@@ -49,6 +49,10 @@
       "types": "./dist/analytics/index.d.ts",
       "import": "./dist/analytics/index.js"
     },
+    "./analytics/dashboard": {
+      "types": "./dist/analytics/dashboard/index.d.ts",
+      "import": "./dist/analytics/dashboard/index.js"
+    },
     "./modules/proactive": {
       "types": "./dist/modules/proactive/index.d.ts",
       "import": "./dist/modules/proactive/index.js"
@@ -83,6 +87,7 @@
     "@types/dom-speech-recognition": "^0.0.6",
     "@types/react": "^19.0.0",
     "fake-indexeddb": "^6.2.5",
+    "happy-dom": "^20.10.6",
     "react": "^19.0.0",
     "tsup": "^8.3.0",
     "typescript": "^5.6.0"
