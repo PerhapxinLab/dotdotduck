@@ -48,20 +48,69 @@ export async function buildMessages(agent: WebAgent): Promise<LLMMessage[]> {
     filter: agent.configRef.domFilter,
     maxLength: agent.configRef.domMaxLength,
   });
-  const pageContext = domResult.text;
+  // Wave 2·D·2 — consult the registered DOM provider for the prompt
+  // text portion. The runtime KEEPS using readDOM for the indexMap
+  // (selector resolution at action-dispatch needs that map); only
+  // the LLM-visible string is swappable. Hosts who registered a
+  // custom `dom` provider get their text in the prompt; default
+  // installs `defaultDomProvider` which just re-wraps readDOM, so
+  // un-overridden behaviour is byte-identical to v0.1.
+  const domProvider = agent.contextProviders.get('dom');
+  const ctxReq = { signal: agent.abortSignalRef ?? new AbortController().signal };
+  let domText = domResult.text;
+  if (domProvider) {
+    try {
+      const override = await domProvider(ctxReq);
+      if (typeof override === 'string') domText = override;
+    } catch { /* fall back to readDOM text */ }
+  }
+  // Append optional slots from the provider registry. Each is
+  // additive — when the provider returns a non-empty string we
+  // tack it on after the DOM text. Default providers return null
+  // when their source isn't available (no selection, no history,
+  // SSR contexts) so absent data doesn't pollute the prompt.
+  const extraSlots: string[] = [];
+  for (const role of ['url', 'page_summary', 'history', 'selection'] as const) {
+    const fn = agent.contextProviders.get(role);
+    if (!fn) continue;
+    try {
+      const out = await fn(ctxReq);
+      if (typeof out === 'string' && out.length > 0) extraSlots.push(out);
+    } catch { /* skip slot */ }
+  }
+  const pageContext = extraSlots.length > 0
+    ? domText + '\n\n' + extraSlots.join('\n\n')
+    : domText;
   agent.currentIndexMap = domResult.indexMap;
 
-  // Optional screenshot — silently no-ops on disable / missing peer dep /
-  // capture error. Loop continues text-only.
+  // Screenshot slot — runs through the provider registry too.
+  // Default `defaultScreenshotProvider` calls `captureScreenshots`,
+  // matching the existing behaviour. Hosts overriding the slot get
+  // their custom rasterizer; the legacy `agent.configRef.screenshot`
+  // config gates whether we ask the provider at all (so hosts who
+  // opted out keep paying zero cost).
   let screenshotImages: string[] = [];
   if (agent.configRef.screenshot) {
-    const sCfg: ScreenshotConfig = agent.configRef.screenshot === true
-      ? { mode: 'viewport' }
-      : agent.configRef.screenshot;
-    try {
-      screenshotImages = await captureScreenshots(sCfg);
-    } catch {
-      screenshotImages = [];
+    const ssProvider = agent.contextProviders.get('screenshot');
+    if (ssProvider) {
+      try {
+        const dataUrl = await ssProvider(ctxReq);
+        if (typeof dataUrl === 'string' && dataUrl.length > 0) {
+          screenshotImages = [dataUrl];
+        }
+      } catch { screenshotImages = []; }
+    } else {
+      // Defensive — constructor installs the default, but if a host
+      // explicitly unregistered the slot we fall back to the raw
+      // captureScreenshots path so the prompt still gets an image.
+      const sCfg: ScreenshotConfig = agent.configRef.screenshot === true
+        ? { mode: 'viewport' }
+        : agent.configRef.screenshot;
+      try {
+        screenshotImages = await captureScreenshots(sCfg);
+      } catch {
+        screenshotImages = [];
+      }
     }
   }
 

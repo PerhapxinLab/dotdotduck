@@ -61,6 +61,29 @@ export interface TaskRunOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * One emit from `streamAsk` — incremental text delta, optional
+ * tool-call markers, and a `done` flag on the terminal chunk.
+ * v0.2.0 · Wave 2·B.
+ */
+export interface TaskAgentStreamChunk {
+  /** Newly added text since the previous chunk. Empty between
+   *  rounds (when a tool call is mid-execution). */
+  delta: string;
+  /** Snapshot of accumulated assistant text so far. */
+  text: string;
+  /** True only on the terminal chunk. After this the iterator
+   *  ends; hosts driving a typewriter UI flush their buffer here. */
+  done: boolean;
+  /** Emitted right before a tool handler is invoked. `text` won't
+   *  grow until the tool returns and the next LLM round produces
+   *  more text. Hosts use this to surface "looking up…" indicators. */
+  toolCallStart?: { name: string };
+  /** Emitted after a tool handler resolves. `ok` reflects whether
+   *  the handler returned an `{ ok: true }`-shape result OR threw. */
+  toolCallEnd?: { name: string; ok: boolean };
+}
+
 /** Minimum the TaskAgent needs from a DotDotDuck handle. Avoids a
  *  circular import on the orchestrator type. */
 export interface TaskAgentDddkHandle {

@@ -35,11 +35,14 @@ import type { ToolCall } from '../llm/types';
 import type {
   TaskAgentConfig,
   TaskAgentDddkHandle,
+  TaskAgentStreamChunk,
   TaskRunOptions,
   TaskTool,
 } from './types';
+import type { LLMProvider } from '../llm/types';
+import type { StreamingProvider, StreamChunk } from '../llm/stream';
 
-export type { TaskAgentConfig, TaskRunOptions, TaskTool } from './types';
+export type { TaskAgentConfig, TaskRunOptions, TaskTool, TaskAgentStreamChunk } from './types';
 
 const DEFAULT_MAX_TOOL_ROUNDS = 4;
 const DEFAULT_LLM_TIMEOUT_MS = 30_000;
@@ -174,10 +177,34 @@ export class TaskAgent {
         parameters: t.parameters,
       }));
 
-      const messages: ChatMessage[] = [
-        { role: 'system', content: this.cfg.systemPrompt },
-        { role: 'user',   content: task },
-      ];
+      // Serialize prior session turns into chat messages so the LLM
+      // sees the conversation history. The just-pushed user turn for
+      // THIS call is the last one we serialize. This is what makes
+      // shared-session continuity actually work — both same-type
+      // (TaskAgent ↔ TaskAgent) and cross-type (TaskAgent reading a
+      // WebAgent-authored session). Cross-type is lossy: WebAgent's
+      // CoT `agent_step` turns are skipped here because TaskAgent
+      // doesn't need to replay each tool dispatch — only the
+      // user-facing conversation matters for the next reply.
+      const messages: ChatMessage[] = [{ role: 'system', content: this.cfg.systemPrompt }];
+      for (const turn of this.session.turns) {
+        if (turn.kind === 'user') {
+          messages.push({ role: 'user', content: turn.text });
+        } else if (turn.kind === 'agent_final') {
+          // FinalTurn doesn't carry a typed text field in the existing
+          // shape; we use whatever this TaskAgent stamped onto it.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const text = (turn as any).text as string | undefined;
+          if (text) messages.push({ role: 'assistant', content: text });
+        }
+        // agent_step (WebAgent CoT) intentionally skipped — see comment above.
+      }
+      // No user turn yet? Defensive — `pushUserTurn` above ensures
+      // there's always at least one, but `messages` should never be
+      // a system prompt alone.
+      if (messages.length === 1) {
+        messages.push({ role: 'user', content: task });
+      }
 
       let finalText = '';
       for (let round = 0; round < maxRounds; round++) {
@@ -226,16 +253,11 @@ export class TaskAgent {
         // calls more tools or composes the final text.
       }
 
-      // Append the assistant turn — store as text. We don't have a
-      // `pushAssistantTurn` helper that matches WebAgent's typed
-      // `AgentFinalTurn` exactly, so we append a minimal final turn
-      // shape. Storing the text lets the next ask() see the prior
-      // reply when the LLM walks `messages` next call.
-      this.session.turns.push({
-        kind: 'final',
-        ts: Date.now(),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any);
+      // Append the assistant turn — store the reply text alongside
+      // the standard `kind: 'final'` shape so the NEXT ask() picks
+      // up the conversation correctly when serializing turns.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      this.session.turns.push({ kind: 'agent_final', ts: Date.now(), text: finalText } as any);
       this.session.updatedAt = Date.now();
 
       return finalText;
@@ -245,6 +267,159 @@ export class TaskAgent {
       // host calls setSession again — nothing else needs cleanup
       // here, the session reference is intentional.
       void this.sessionInjected;
+    }
+  }
+
+  /**
+   * Streaming variant of `ask`. Yields `TaskAgentStreamChunk`s as
+   * the LLM types. Tool-call rounds emit empty `delta` chunks with
+   * `toolCallStart` / `toolCallEnd` markers so the host can drive
+   * a typewriter UI + "looking up…" indicator with a single loop.
+   *
+   * Falls back to non-streaming `complete` when the provider doesn't
+   * implement `streamComplete` — the final reply lands in one chunk
+   * instead of incrementally. Callers get the same iterator shape
+   * either way.
+   */
+  async *streamAsk(task: string, opts: TaskRunOptions = {}): AsyncIterable<TaskAgentStreamChunk> {
+    if (!task || !task.trim()) {
+      yield { delta: '', text: '', done: true };
+      return;
+    }
+    pushUserTurn(this.session, { text: task });
+
+    const maxRounds = opts.maxToolRounds ?? this.cfg.maxToolRounds;
+    const externalSignal = opts.signal;
+    const ac = new AbortController();
+    const cleanups: Array<() => void> = [];
+    if (externalSignal) {
+      const onAbort = () => ac.abort();
+      externalSignal.addEventListener('abort', onAbort);
+      cleanups.push(() => externalSignal.removeEventListener('abort', onAbort));
+    }
+    const timeoutId = setTimeout(() => ac.abort(), this.cfg.llmTimeoutMs);
+    cleanups.push(() => clearTimeout(timeoutId));
+
+    try {
+      const llm = resolveLLM(this.cfg.llm, 'task') as LLMProvider;
+      const streamer = llm as unknown as StreamingProvider;
+      const canStream = typeof streamer.streamComplete === 'function';
+
+      const toolDefs = this.tools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters,
+      }));
+
+      // Same serialization as `ask` — share-session continuity works
+      // for streaming too.
+      const messages: ChatMessage[] = [{ role: 'system', content: this.cfg.systemPrompt }];
+      for (const turn of this.session.turns) {
+        if (turn.kind === 'user') {
+          messages.push({ role: 'user', content: turn.text });
+        } else if (turn.kind === 'agent_final') {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const text = (turn as any).text as string | undefined;
+          if (text) messages.push({ role: 'assistant', content: text });
+        }
+      }
+      if (messages.length === 1) {
+        messages.push({ role: 'user', content: task });
+      }
+
+      let finalText = '';
+
+      for (let round = 0; round < maxRounds; round++) {
+        if (ac.signal.aborted) break;
+
+        let assistantText = '';
+        let toolCalls: import('../llm/types').ToolCall[] = [];
+
+        if (canStream && streamer.streamComplete) {
+          const handle = streamer.streamComplete({
+            messages,
+            tools: toolDefs.length > 0 ? toolDefs : undefined,
+            temperature: 0,
+            signal: ac.signal,
+          });
+          let prevText = '';
+          for await (const chunk of handle as AsyncIterable<StreamChunk>) {
+            if (ac.signal.aborted) break;
+            if (chunk.text !== undefined && chunk.text.length > prevText.length) {
+              const delta = chunk.text.slice(prevText.length);
+              prevText = chunk.text;
+              if (delta) yield { delta, text: finalText + chunk.text, done: false };
+            }
+            if (chunk.toolCalls && chunk.toolCalls.length > 0) {
+              toolCalls = chunk.toolCalls;
+            }
+            if (chunk.done) {
+              assistantText = chunk.text ?? prevText;
+              break;
+            }
+          }
+        } else {
+          // Non-streaming fallback — one big chunk per round.
+          const r = await llm.complete({
+            messages,
+            tools: toolDefs.length > 0 ? toolDefs : undefined,
+            temperature: 0,
+            signal: ac.signal,
+          });
+          assistantText = r.content ?? '';
+          toolCalls = r.toolCalls ?? [];
+          if (assistantText) {
+            yield { delta: assistantText, text: finalText + assistantText, done: false };
+          }
+        }
+
+        if (toolCalls.length === 0) {
+          finalText += assistantText;
+          break;
+        }
+
+        // Tool round — append the assistant's tool-call turn, run
+        // each tool, append results, loop.
+        messages.push({ role: 'assistant', content: assistantText, toolCalls });
+        finalText += assistantText;
+
+        for (const call of toolCalls) {
+          if (ac.signal.aborted) break;
+          yield { delta: '', text: finalText, done: false, toolCallStart: { name: call.name } };
+          const def = this.tools.find((t) => t.name === call.name);
+          let toolOk = false;
+          if (!def) {
+            messages.push({
+              role: 'tool',
+              toolCallId: call.id,
+              content: JSON.stringify({ ok: false, reason: 'unknown_tool', name: call.name }),
+            });
+          } else {
+            const toolResult = await runToolSafe(
+              def,
+              call.arguments as Record<string, unknown> | undefined,
+              ac.signal,
+              this.session,
+            );
+            toolOk = !!toolResult && (typeof toolResult !== 'object'
+              || (toolResult as { ok?: boolean }).ok !== false);
+            messages.push({
+              role: 'tool',
+              toolCallId: call.id,
+              content: JSON.stringify(toolResult ?? { ok: true }),
+            });
+          }
+          yield { delta: '', text: finalText, done: false, toolCallEnd: { name: call.name, ok: toolOk } };
+        }
+      }
+
+      // Persist + emit terminal chunk.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      this.session.turns.push({ kind: 'agent_final', ts: Date.now(), text: finalText } as any);
+      this.session.updatedAt = Date.now();
+      yield { delta: '', text: finalText, done: true };
+    } finally {
+      for (const fn of cleanups) fn();
     }
   }
 }
