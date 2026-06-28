@@ -330,33 +330,7 @@ dddk.mount();
 
 ## 授權
 
-<table>
-<tr>
-<th width="50%" align="left">AGPL-3.0-or-later — 免費</th>
-<th width="50%" align="left">商業 — 付費</th>
-</tr>
-<tr>
-<td valign="top">
-
-✓ 開源專案
-<br />✓ 內部工具
-<br />✓ 個人專案
-<br />✓ 任何跟 AGPL 相容的場景
-<br /><br />
-拿去用、改、ship — 把你的修改也按 AGPL 釋出就好。
-
-</td>
-<td valign="top">
-
-✓ 閉源產品
-<br />✓ 商業 SaaS
-<br />✓ 任何沒辦法滿足 AGPL network-copyleft 條款的場景
-<br /><br />
-完整條款看 [LICENSE](./LICENSE)，或透過 repo 聯絡維護者。
-
-</td>
-</tr>
-</table>
+AGPL-3.0-or-later。完整條款看 [LICENSE](./LICENSE)。
 
 ---
 

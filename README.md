@@ -329,33 +329,7 @@ Dark mode is automatic: `[data-theme="dark"]` anywhere up the tree, OR `@media (
 
 ## License
 
-<table>
-<tr>
-<th width="50%" align="left">AGPL-3.0-or-later — free</th>
-<th width="50%" align="left">Commercial — paid</th>
-</tr>
-<tr>
-<td valign="top">
-
-✓ Open-source projects
-<br />✓ Internal tools
-<br />✓ Personal projects
-<br />✓ Anything AGPL-compatible
-<br /><br />
-Use it, modify it, ship it — publish your modifications under AGPL.
-
-</td>
-<td valign="top">
-
-✓ Closed-source products
-<br />✓ Commercial SaaS
-<br />✓ Anything that can't satisfy AGPL's network-copyleft clause
-<br /><br />
-See [LICENSE](./LICENSE) for the full text or reach the maintainer through the repo.
-
-</td>
-</tr>
-</table>
+AGPL-3.0-or-later. See [LICENSE](./LICENSE) for the full text.
 
 ---
 
