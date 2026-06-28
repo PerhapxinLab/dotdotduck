@@ -166,6 +166,8 @@ export interface DotDotDuckConfig {
    *   - object: enable with this config (see {@link CameraOptions})
    */
   camera?: import('../triggers/command-palette').CameraOptions | false;
+  /** Show a circular submit/send button at the right edge of the palette input. */
+  submitButton?: boolean;
 
   /**
    * Optional chip row rendered below the palette input. Each `PaletteItem`

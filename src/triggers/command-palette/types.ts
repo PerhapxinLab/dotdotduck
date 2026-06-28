@@ -42,7 +42,25 @@ export interface PaletteItem {
   id: string;
   name: string;
   description?: string;
+  /**
+   * Extra stacked lines rendered BELOW the name (a multi-line row), letting the
+   * host decide how many lines appear on the right of each item — e.g. a book
+   * row: name on line 1, blurb on line 2, "author · publisher · $price" on
+   * line 3. When set, the row uses a vertical text column instead of the
+   * inline `name — description` layout. Each entry is one line (plain text,
+   * escaped). `description` is ignored for layout when `lines` is present.
+   * Style via `[data-dddk-ui="palette-item-line"]` (and `...-line-0/1/...`).
+   */
+  lines?: string[];
   icon?: string;
+  /**
+   * Thumbnail image URL for the row (e.g. a book cover, product shot, avatar).
+   * When set, it is rendered as an `<img>` in the icon slot instead of the glyph
+   * `icon`, so hosts can build rich rows (cover + title + meta) without a custom
+   * renderer. The URL is attribute-escaped; the host controls it (same trust
+   * boundary as `icon`). Style via `[data-dddk-ui="palette-item-image"]`.
+   */
+  image?: string;
   keywords?: string[];
   section?: string;
   shortcut?: string;
@@ -356,6 +374,13 @@ export interface CommandPaletteOptions {
    * file/blob via `onCapture`.
    */
   camera?: CameraOptions;
+  /**
+   * Show a circular submit/send button at the right edge of the input. Clicking
+   * it (or pressing Enter) submits the current query — firing the registered
+   * fallback item (e.g. "Ask AI") with the typed text, or activating the focused
+   * row. Default `undefined` (no button).
+   */
+  submitButton?: boolean;
   /**
    * Optional chip-row rendered below the input. When provided, the
    * palette inserts an "All" chip and then one chip per entry; clicking

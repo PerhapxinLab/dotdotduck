@@ -87,6 +87,15 @@ export class CommandPalette {
   private items: PaletteItem[];
   private subMenuStack: PaletteItem[][] = [];
   private placeholder: string;
+  /** True while the palette is embedded inline in a host (vs the Ctrl/⌘+K modal). */
+  private inlineMounted = false;
+  /** Saved inline surface refs while a modal (Ctrl/⌘+K) is opened on top of it. */
+  private suspendedInline: {
+    root: HTMLDivElement | null; input: HTMLInputElement | null; list: HTMLUListElement | null;
+    detailHost: HTMLDivElement | null; chipBarHost: HTMLDivElement | null;
+    categoryBarHost: HTMLDivElement | null; resultHost: HTMLDivElement | null;
+    listSplit: HTMLDivElement | null; listeners: Array<() => void>;
+  } | null = null;
   /** Locale for the bundled chrome strings. Read at construction; can
    *  be flipped at runtime via `setLocale()` — the next render picks
    *  up the new strings (footer hints + placeholder). */
@@ -110,6 +119,7 @@ export class CommandPalette {
   private allCategoriesLabel = 'All';
   private activeCategoryId: string | null = null;
   private camera?: CameraOptions;
+  private submitButton?: boolean;
   private onActivate?: CommandPaletteOptions['onActivate'];
   // PaletteContext fields — populated on open / camera capture.
   private contextSelectionText = '';
@@ -165,6 +175,7 @@ export class CommandPalette {
     this.pieceCatalog = opts.pieceCatalog;
     this.contextPromotesFallback = opts.contextPromotesFallback ?? true;
     this.camera = opts.camera;
+    this.submitButton = opts.submitButton;
     this.onActivate = opts.onActivate;
     this.categories = opts.categories ?? [];
     this.allCategoriesLabel = opts.allCategoriesLabel ?? 'All';
@@ -227,7 +238,10 @@ export class CommandPalette {
   }
 
   toggle(initialSelection?: string): void {
-    if (this.isOpen()) this.close();
+    // A modal that is open (and not sitting over an inline mount) → close it.
+    // Otherwise open the modal. When inline-mounted, opening suspends the inline
+    // surface and shows the full modal on top; closing restores the inline.
+    if (this.isOpen() && !this.inlineMounted) this.close();
     else this.open(initialSelection);
   }
 
@@ -243,7 +257,21 @@ export class CommandPalette {
   }
 
   open(initialSelection?: string, opts?: { focusInput?: boolean }): void {
-    if (this.isOpen()) return;
+    if (this.inlineMounted) {
+      // Suspend the inline surface and render the full modal on top of it. The
+      // inline DOM stays in the host (hidden behind the backdrop) and is restored
+      // by close(). This is what lets Ctrl/⌘+K open the modal from a page that
+      // already shows the palette inline.
+      this.suspendedInline = {
+        root: this.root, input: this.input, list: this.list,
+        detailHost: this.detailHost, chipBarHost: this.chipBarHost,
+        categoryBarHost: this.categoryBarHost, resultHost: this.resultHost,
+        listSplit: this.listSplit, listeners: this.listeners,
+      };
+      this.listeners = [];
+      this.inlineMounted = false;
+      if (this.suspendedInline.root) this.suspendedInline.root.style.display = 'none';
+    } else if (this.isOpen()) return;
     ensurePaletteStyles();
     // Every open is a fresh root-state palette — discard any sub-menu the
     // user left behind on a previous open.
@@ -267,10 +295,50 @@ export class CommandPalette {
   }
 
   close(): void {
+    // Inline-mounted palette is PERSISTENT — a handler calling handle.close()
+    // (e.g. after navigating or starting the agent) must NOT tear the embedded
+    // palette out of the page. Reset it to its root state instead. Actual
+    // teardown only happens via the cleanup fn returned by mountInline().
+    if (this.inlineMounted) {
+      if (this.resultMode) this.clearResult();
+      this.clearInputContext();
+      this.subMenuStack = [];
+      this.items = this.rootItems.slice();
+      if (this.input) this.input.value = '';
+      this.clearContext();
+      this.refilter();
+      this.refreshFooter();
+      return;
+    }
     if (!this.root) return;
     this.listeners.forEach((fn) => fn());
     this.listeners = [];
     this.root.remove();
+    // If this modal was covering an inline mount, restore the inline surface
+    // instead of tearing the palette down entirely.
+    if (this.suspendedInline) {
+      const s = this.suspendedInline;
+      this.suspendedInline = null;
+      this.root = s.root;
+      this.input = s.input;
+      this.list = s.list;
+      this.detailHost = s.detailHost;
+      this.chipBarHost = s.chipBarHost;
+      this.categoryBarHost = s.categoryBarHost;
+      this.resultHost = s.resultHost;
+      this.listSplit = s.listSplit;
+      this.listeners = s.listeners;
+      this.inlineMounted = true;
+      if (this.root) this.root.style.display = '';
+      this.clearContext();
+      this.inputContext = null;
+      // Keep the inline input's own placeholder (host-configured) — only clear text.
+      if (this.input) this.input.value = '';
+      this.items = this.rootItems.slice();
+      this.subMenuStack = [];
+      this.refilter();
+      return;
+    }
     this.root = null;
     this.input = null;
     this.list = null;
@@ -279,6 +347,33 @@ export class CommandPalette {
     // Drop any sub-tool input override so the next open starts at the
     // default search placeholder, not whatever the last tool installed.
     this.inputContext = null;
+  }
+
+  /**
+   * Mount the palette INLINE inside a host element, persistently visible —
+   * no backdrop, no outside-click dismissal. It shares the exact same items,
+   * filtering, keyboard navigation and row rendering as the Ctrl/⌘+K modal,
+   * so the host writes ONE set of palette items and gets both surfaces.
+   * While inline-mounted, `open()` / `toggle()` (e.g. Ctrl+K) just focus the
+   * embedded input instead of spawning the modal.
+   *
+   * Returns a teardown function — call it when the host element unmounts
+   * (e.g. SPA route change) to detach the palette and its listeners.
+   */
+  mountInline(host: HTMLElement, opts?: { placeholder?: string; focus?: boolean }): () => void {
+    if (this.isOpen()) this.close();
+    ensurePaletteStyles();
+    this.items = this.rootItems.slice();
+    this.subMenuStack = [];
+    this.inlineMounted = true;
+    this.render(host);
+    if (opts?.placeholder && this.input) this.input.placeholder = opts.placeholder;
+    this.refilter();
+    if (opts?.focus) requestAnimationFrame(() => this.input?.focus());
+    return () => {
+      this.inlineMounted = false;
+      this.close();
+    };
   }
 
   // ─── palette context (selection text + image attachments) ──────
@@ -518,9 +613,10 @@ export class CommandPalette {
 
   // ─── render ─────────────────────────────────────────────────────
 
-  private render(): void {
+  private render(inlineHost?: HTMLElement): void {
+    const inline = !!inlineHost;
     const root = document.createElement('div');
-    root.setAttribute(UI_ATTR, 'palette-backdrop');
+    root.setAttribute(UI_ATTR, inline ? 'palette-inline' : 'palette-backdrop');
 
     const panel = document.createElement('div');
     panel.setAttribute(UI_ATTR, 'palette');
@@ -552,6 +648,9 @@ export class CommandPalette {
     if (this.camera) {
       const cameraBtn = this.buildCameraButton();
       inputRow.appendChild(cameraBtn);
+    }
+    if (this.submitButton) {
+      inputRow.appendChild(this.buildSubmitButton());
     }
 
     const listEl = document.createElement('ul');
@@ -640,8 +739,12 @@ export class CommandPalette {
       e.preventDefault();
       this.close();
     };
-    root.addEventListener('mousedown', onBackdropDown);
-    this.listeners.push(() => root.removeEventListener('mousedown', onBackdropDown));
+    // Inline mode: the palette lives embedded in a host container and stays
+    // visible, so it must NOT close on outside clicks or trap document keys.
+    if (!inline) {
+      root.addEventListener('mousedown', onBackdropDown);
+      this.listeners.push(() => root.removeEventListener('mousedown', onBackdropDown));
+    }
 
     // ── Focus trap ─────────────────────────────────────────────
     // Catch keyboard nav at document level too, so arrow keys never bubble
@@ -663,8 +766,10 @@ export class CommandPalette {
         }
       }
     };
-    document.addEventListener('keydown', onDocKey, true);
-    this.listeners.push(() => document.removeEventListener('keydown', onDocKey, true));
+    if (!inline) {
+      document.addEventListener('keydown', onDocKey, true);
+      this.listeners.push(() => document.removeEventListener('keydown', onDocKey, true));
+    }
 
     const onPanelMouseDown = (e: MouseEvent) => {
       const t = e.target;
@@ -681,7 +786,8 @@ export class CommandPalette {
     panel.addEventListener('mousedown', onPanelMouseDown);
     this.listeners.push(() => panel.removeEventListener('mousedown', onPanelMouseDown));
 
-    document.body.appendChild(root);
+    if (inline) inlineHost!.appendChild(root);
+    else document.body.appendChild(root);
 
     this.root = root;
     this.input = inputEl;
@@ -808,6 +914,52 @@ export class CommandPalette {
   }
 
   // ─── camera icon ────────────────────────────────────────────────
+
+  /** Circular submit/send button at the right edge of the input row. */
+  private buildSubmitButton(): HTMLButtonElement {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute(UI_ATTR, 'palette-submit');
+    btn.title = sdkString(this.locale, 'palette.footer.select');
+    btn.setAttribute('aria-label', btn.title);
+    btn.innerHTML = `
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 19V5M5 12l7-7 7 7"/>
+      </svg>
+    `;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.submitInput();
+      this.input?.focus();
+    });
+    return btn;
+  }
+
+  /**
+   * Submit the current query — same effect as pressing Enter. Routes to the
+   * active input-context's onSubmit, else fires the single registered fallback
+   * (e.g. Ask AI) with the typed text, else activates the focused row.
+   */
+  private submitInput(): void {
+    if (this.inputContext) {
+      const value = this.input?.value ?? '';
+      if (value.trim().length === 0) return;
+      this.inputContext.onSubmit(value, this.buildHandle());
+      if (this.inputContext?.clearOnSubmit !== false && this.input) this.input.value = '';
+      return;
+    }
+    const raw = this.input?.value.trim() ?? '';
+    if (!raw) { this.input?.focus(); return; }
+    const fallbacks = this.rootItems.filter((i) => i.fallback);
+    if (fallbacks.length >= 1 && fallbacks[0]!.handler) {
+      this.currentArg = raw;
+      this.heatRank?.visit(fallbacks[0]!.id);
+      fallbacks[0]!.handler(this.buildHandle(), raw);
+      return;
+    }
+    this.activate(this.cursor);
+  }
 
   private buildCameraButton(): HTMLButtonElement {
     const cfg = this.camera!;
@@ -1156,16 +1308,37 @@ export class CommandPalette {
       // without an SDK API change. Host controls the icon string, so this
       // is not an injection vector — it's the same trust boundary as
       // `agentTool.description` etc.
-      const iconHtml = item.icon
-        ? (item.icon.trimStart().startsWith('<svg')
-            ? item.icon
-            : escapeHtml(item.icon))
-        : '';
+      // Image thumbnail takes precedence over the glyph/SVG icon. Renders an
+      // <img> in the icon slot so hosts can build rich rows (book cover etc.).
+      // src is attribute-escaped; host controls the URL (same trust boundary as
+      // `icon`). Falls back to glyph icon, then nothing.
+      const iconHtml = item.image
+        ? `<img data-dddk-ui="palette-item-image" src="${escapeHtml(item.image)}" alt="" loading="lazy" />`
+        : item.icon
+          ? (item.icon.trimStart().startsWith('<svg')
+              ? item.icon
+              : escapeHtml(item.icon))
+          : '';
+      // NOTE: `data-dddk-ui` is matched with EXACT `[attr="..."]` selectors, so it
+      // must hold a SINGLE token (not space-separated like a className) — otherwise
+      // neither the base nor the modifier rule matches and the thumbnail renders at
+      // its natural (huge) size. The image variant is fully self-contained in CSS.
+      const iconClass = item.image ? 'palette-item-icon-img' : 'palette-item-icon';
+      // Text block: when the host supplies `lines`, stack them vertically as a
+      // multi-line row (name on top, then one element per line). Otherwise use
+      // the default inline `name — description` layout.
+      const hasLines = Array.isArray(item.lines) && item.lines.length > 0;
+      const textHtml = hasLines
+        ? `<span data-dddk-ui="palette-item-textcol">
+             ${showName ? `<span data-dddk-ui="palette-item-name">${highlightMatch(item.name, hl)}</span>` : ''}
+             ${item.lines!.map((ln, li2) => `<span data-dddk-ui="palette-item-line" data-line="${li2}">${highlightMatch(ln, hl)}</span>`).join('')}
+           </span>`
+        : `${showName ? `<span data-dddk-ui="palette-item-name">${highlightMatch(item.name, hl)}</span>` : ''}
+           ${item.description ? `<span data-dddk-ui="palette-item-dash">—</span><span data-dddk-ui="palette-item-desc">${highlightMatch(item.description, hl)}</span>` : ''}`;
       li.innerHTML = `
-        ${iconHtml ? `<span data-dddk-ui="palette-item-icon">${iconHtml}</span>` : ''}
+        ${iconHtml ? `<span data-dddk-ui="${iconClass}">${iconHtml}</span>` : ''}
         ${prefixLabel ? `<span data-dddk-ui="palette-item-prefix">${highlightMatch(prefixLabel, hl)}</span>` : ''}
-        ${showName ? `<span data-dddk-ui="palette-item-name">${highlightMatch(item.name, hl)}</span>` : ''}
-        ${item.description ? `<span data-dddk-ui="palette-item-dash">—</span><span data-dddk-ui="palette-item-desc">${highlightMatch(item.description, hl)}</span>` : ''}
+        ${textHtml}
         ${item.shortcut ? `<span data-dddk-ui="palette-item-shortcut">${escapeHtml(item.shortcut)}</span>` : ''}
       `;
       li.addEventListener('mouseenter', () => this.setCursor(idx));

@@ -15,6 +15,15 @@ export function ensurePaletteStyles(): void {
       padding-top: 10vh;
       animation: dddk-fade 140ms ease-out;
     }
+    /* Inline mount: palette embedded in a host (no overlay/backdrop). The box
+       fills the host width and drops the elevation/animation of the modal. */
+    [${UI_ATTR}="palette-inline"] { position: static; display: block; width: 100%; }
+    [${UI_ATTR}="palette-inline"] [${UI_ATTR}="palette"] {
+      width: 100%; max-width: none;
+      max-height: var(--dddk-palette-inline-max-height, 460px);
+      box-shadow: var(--dddk-palette-inline-shadow, none);
+      animation: none;
+    }
     [${UI_ATTR}="palette"] {
       width: var(--dddk-palette-width, 760px); max-width: 92vw;
       max-height: var(--dddk-palette-max-height, 78vh);
@@ -24,6 +33,13 @@ export function ensurePaletteStyles(): void {
       border: 1px solid var(--dddk-border, rgba(0, 0, 0, 0.06));
       box-shadow: var(--dddk-shadow-lg, 0 28px 72px -16px rgba(0, 0, 0, 0.38), 0 4px 18px rgba(0, 0, 0, 0.08));
       font-family: var(--dddk-font, system-ui, -apple-system, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif);
+      /* Self-containment: these properties INHERIT from the host page. The modal
+         renders against a neutral backdrop so it never noticed, but inline mounts
+         live inside arbitrary host CSS (e.g. a centered hero). Reset them on the
+         root so the palette looks identical wherever it is embedded. */
+      text-align: left; letter-spacing: normal; line-height: normal;
+      text-transform: none; font-style: normal; white-space: normal;
+      word-spacing: normal; text-indent: 0; direction: ltr;
       display: flex; flex-direction: column; overflow: hidden;
       animation: dddk-palette-rise 200ms cubic-bezier(0.2, 0, 0, 1);
     }
@@ -77,6 +93,8 @@ export function ensurePaletteStyles(): void {
       background: transparent; color: inherit; width: 100%;
       flex: 1; min-width: 0;
       letter-spacing: 0.002em;
+      /* Long placeholders truncate with an ellipsis instead of being clipped flush. */
+      text-overflow: ellipsis;
     }
     [${UI_ATTR}="palette-input"]::placeholder {
       color: var(--dddk-text-muted, #94a3b8);
@@ -95,6 +113,31 @@ export function ensurePaletteStyles(): void {
     [${UI_ATTR}="palette-camera"]:hover {
       background: var(--dddk-accent-soft, rgba(139,115,85,0.1));
       color: var(--dddk-text, #18181b);
+    }
+    /* Submit / send button — circular accent button at the right edge of input. */
+    [${UI_ATTR}="palette-submit"] {
+      flex-shrink: 0; margin-right: 10px;
+      width: var(--dddk-palette-submit-size, 36px); height: var(--dddk-palette-submit-size, 36px);
+      border: 0; border-radius: 999px; cursor: pointer;
+      background: var(--dddk-palette-submit-bg, var(--dddk-accent, #a94064));
+      color: var(--dddk-palette-submit-color, #fff);
+      display: inline-flex; align-items: center; justify-content: center;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    [${UI_ATTR}="palette-submit"]:hover { opacity: 0.9; }
+    [${UI_ATTR}="palette-submit"]:active { transform: scale(0.93); }
+    /* Multi-line row: vertical text column (name on top, then one el per line). */
+    [${UI_ATTR}="palette-item-textcol"] {
+      display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto;
+    }
+    [${UI_ATTR}="palette-item-line"] {
+      font-size: var(--dddk-palette-line-font-size, 13px);
+      line-height: 1.35; min-width: 0;
+      color: var(--dddk-palette-line-color, var(--dddk-text-muted, #6b6b6b));
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    [${UI_ATTR}="palette-item"][data-active="true"] [${UI_ATTR}="palette-item-line"] {
+      color: var(--dddk-palette-line-color-active, var(--dddk-palette-desc-color-active, inherit));
     }
     [${UI_ATTR}="palette-context"] {
       display: flex; flex-wrap: wrap; gap: 6px;
@@ -293,12 +336,11 @@ export function ensurePaletteStyles(): void {
       text-transform: var(--dddk-palette-section-text-transform, none);
       letter-spacing: var(--dddk-palette-section-letter-spacing, 0);
       font-weight: var(--dddk-palette-section-font-weight, 500);
-      /* Sticky so the header stays pinned to the top as rows scroll under it.
-         Solid bg (same as palette body) is required, otherwise scrolling rows
-         show through. z-index keeps the header above the content layer.
-         top: -1px hides any sub-pixel gap that would let row content peek
-         above the header during inertial scroll. */
-      position: sticky;
+      /* Section headers default to sticky (pinned while rows scroll under them),
+         but hosts can set --dddk-palette-section-position: static to make the
+         header scroll away WITH its rows. When sticky, a solid bg is required so
+         scrolling rows don't show through; top:-1px hides sub-pixel gaps. */
+      position: var(--dddk-palette-section-position, sticky);
       top: -1px;
       z-index: 1;
       background: var(--dddk-palette-section-bg, var(--dddk-bg-elevated, #fff));
@@ -341,6 +383,17 @@ export function ensurePaletteStyles(): void {
     }
     [${UI_ATTR}="palette-item"][data-active="true"] [${UI_ATTR}="palette-item-icon"] {
       color: var(--dddk-palette-icon-color-active, var(--dddk-text-on-accent, #fff));
+    }
+    /* Image thumbnail row (item.image): cover-fit, slightly larger than glyph slot. */
+    [${UI_ATTR}="palette-item-icon-img"] {
+      width: var(--dddk-palette-image-w, 26px);
+      height: var(--dddk-palette-image-h, 34px);
+      flex-shrink: 0;
+    }
+    [${UI_ATTR}="palette-item-icon-img"] img {
+      width: 100%; height: 100%; object-fit: cover; display: block;
+      border-radius: var(--dddk-palette-image-radius, 3px);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.18);
     }
     [${UI_ATTR}="palette-item-name"] {
       flex-shrink: 0;
