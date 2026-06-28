@@ -1099,6 +1099,7 @@ export class CommandPalette {
       this.filtered = this.items.filter((i) => {
         if (i.fallback) return false;
         if (i.searchOnly) return false;
+        if (i.searchAction) return false;
         if (i.section === 'Tips') return true;
         if (!i.prefix) return true;
         return !listPrefixMatches(i.prefix).some((p) => tipPrefixes.has(p.toLowerCase()));
@@ -1118,6 +1119,7 @@ export class CommandPalette {
       this.filtered = this.items
         .filter((i) => !i.fallback)
         .filter((i) => !i.searchOnly)
+        .filter((i) => !i.searchAction)
         .filter((i) => i.section !== 'Tips')
         .filter((i) => listPrefixMatches(i.prefix).some((p) => p.toLowerCase().startsWith(partial)))
         .slice(0, 50);
@@ -1135,8 +1137,21 @@ export class CommandPalette {
       // does NOT look like any registered prefix.
       const candidates = this.items
         .filter((i) => !i.fallback)
+        .filter((i) => !i.searchAction)
         .filter((i) => i.section !== 'Tips');
       this.filtered = fuzzyTopN(candidates, q, 50);
+
+      // Search-action rows: pinned to the TOP the moment anything is typed,
+      // regardless of fuzzy match, with the live query substituted for `{q}`.
+      const echoQ = raw.trim();
+      const searchActions = this.items
+        .filter((i) => i.searchAction)
+        .map((s) => ({
+          ...s,
+          name: (s.name ?? '').replace(/\{q\}/g, echoQ),
+          description: (s.description ?? '').replace(/\{q\}/g, echoQ),
+        }));
+      if (searchActions.length) this.filtered = [...searchActions, ...this.filtered];
 
       // (Body-text page search is no longer auto-fired here. The host can
       // gate it behind a prefix tip like `#` whose `browse()` calls into
@@ -1264,6 +1279,28 @@ export class CommandPalette {
     // (Tips rows are now part of `this.filtered` in empty-state — see
     // `refilter()` + `buildTipItems()`. The section header gets emitted by
     // the normal lastSection logic below since they all have `section: 'Tips'`.)
+
+    // Group items by section header to avoid duplicate headers when
+    // HeatRank / context-promotion scatters same-section items across
+    // the filtered array. The lastSection toggle below only collapses
+    // ADJACENT same-section rows; with HeatRank, the [Go to, Settings,
+    // ..., Go to, ...] order would emit "前往" twice. Reorder items so
+    // each section's rows are contiguous; section order follows the
+    // FIRST appearance of each section in the original filtered order
+    // (preserves "the most relevant first" intent).
+    const firstIdxBySection = new Map<string, number>();
+    this.filtered.forEach((it, i) => {
+      const s = it.section ?? 'Commands';
+      if (!firstIdxBySection.has(s)) firstIdxBySection.set(s, i);
+    });
+    this.filtered.sort((a, b) => {
+      const sa = a.section ?? 'Commands';
+      const sb = b.section ?? 'Commands';
+      if (sa === sb) return 0;
+      const ia = firstIdxBySection.get(sa)!;
+      const ib = firstIdxBySection.get(sb)!;
+      return ia - ib;
+    });
 
     let lastSection = '';
     this.filtered.forEach((item, idx) => {
