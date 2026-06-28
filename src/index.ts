@@ -395,6 +395,38 @@ export type {
   TransportOptions,
 } from './ingest';
 
+// ─── analytics (self-hosted store + export + SQL schema) ──────────
+export {
+  EventStore,
+  defaultMapper,
+  fieldMapper,
+  filterEvents,
+  eventToRow,
+  rowToEvent,
+  dddkEventsDDL,
+  DDDK_EVENTS_COLUMNS,
+  DDDK_EVENTS_DDL_SQLITE,
+  DDDK_EVENTS_DDL_POSTGRES,
+  DDDK_EVENTS_DDL_MYSQL,
+  toCSV,
+  toNDJSON,
+  toSQL,
+} from './analytics';
+export type {
+  Cap,
+  CapInfo,
+  EventStoreOpts,
+  EventQuery,
+  OnFullPolicy,
+  NotifyHostHandler,
+  SqlSchemaMapper,
+  DddkEventRow,
+  SqlDialect,
+  ToCSVOptions,
+  ToNDJSONOptions,
+  ToSQLOptions,
+} from './analytics';
+
 // ─── shared types ──────────────────────────────────────────────────
 
 export type {

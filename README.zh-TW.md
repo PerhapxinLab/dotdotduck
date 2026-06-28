@@ -245,6 +245,7 @@ https://github.com/user-attachments/assets/18d797df-4952-421a-a2b3-16aef1ebcb34
 - ✅ **InlineAgent scoping** — `inlineAgent.attachScope(selector, config)` 給每個區域自己的 action set。文件評論區的 textarea 跟編輯器裡的 code block 不該共用同一組 action；以 selection 落點 element 為起點往上 walk、innermost-wins，selector 表達不出來的 case 用 `setScopeResolver(callback)` fallback。scope 可以獨立 override `actions` / `llm` / `systemPrompt` / `layout` / `tools`，或用 `appendActions` / `appendSystemPrompt` 疊在 root 之上。
 - 🚧 **`onLoopEnd` hook** — agent loop 收尾 UI：`silent` / `text` / `feedback`（Space 接受 · 雙擊拒絕 · Esc 算 null — 全部會發 `agent_feedback` event）/ `ask_user`（收尾用的多選問題）。reel 不再「啪一聲就消失」，連 zero-config host 都會看到溫和的「完成 ✓」收尾。
 - 🚧 **新增兩個 analytics event** — `agent_mode_changed` 跟 `agent_tool_failed`，補可觀測性的洞（現在的 `agent_tool_end` 只在成功時 fire，mode 切換則完全沒訊號）。
+- ✅ **自架分析層**（`@perhapxin/dddk/analytics`） — 每個 `BaseEvent` 都可以落地到瀏覽器本地的 IndexedDB `EventStore`，可查詢、有上限保護（預設 50k 事件 / 30 天，host 可調 `Infinity` 並決定政策：`'ring'` / `'drop-new'` / `{ notifyHost }`）。內建 `toCSV` / `toNDJSON` / `toSQL` 三種匯出，搭配 function-based `SqlSchemaMapper` 重塑成 host 自己的 DB schema；canonical `dddk_events` DDL 出貨 SQLite / Postgres / MySQL 三種方言。
 
 完整 plan 在 [`ROADMAP-v0.2.0.md`](./ROADMAP-v0.2.0.md)。v0.1.x 的 bug fix 會繼續在 `v0.1.x` branch 出。
 

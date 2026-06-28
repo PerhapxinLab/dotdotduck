@@ -29,11 +29,30 @@
       "types": "./dist/skills/index.d.ts",
       "import": "./dist/skills/index.js"
     },
-    "./toolbox":           { "types": "./dist/toolbox/index.d.ts",           "import": "./dist/toolbox/index.js" },
-    "./toolbox/search":    { "types": "./dist/toolbox/search/index.d.ts",    "import": "./dist/toolbox/search/index.js" },
-    "./toolbox/recommend": { "types": "./dist/toolbox/recommend/index.d.ts", "import": "./dist/toolbox/recommend/index.js" },
-    "./modules/analytics": { "types": "./dist/modules/analytics/index.d.ts", "import": "./dist/modules/analytics/index.js" },
-    "./modules/proactive": { "types": "./dist/modules/proactive/index.d.ts", "import": "./dist/modules/proactive/index.js" },
+    "./toolbox": {
+      "types": "./dist/toolbox/index.d.ts",
+      "import": "./dist/toolbox/index.js"
+    },
+    "./toolbox/search": {
+      "types": "./dist/toolbox/search/index.d.ts",
+      "import": "./dist/toolbox/search/index.js"
+    },
+    "./toolbox/recommend": {
+      "types": "./dist/toolbox/recommend/index.d.ts",
+      "import": "./dist/toolbox/recommend/index.js"
+    },
+    "./modules/analytics": {
+      "types": "./dist/modules/analytics/index.d.ts",
+      "import": "./dist/modules/analytics/index.js"
+    },
+    "./analytics": {
+      "types": "./dist/analytics/index.d.ts",
+      "import": "./dist/analytics/index.js"
+    },
+    "./modules/proactive": {
+      "types": "./dist/modules/proactive/index.d.ts",
+      "import": "./dist/modules/proactive/index.js"
+    },
     "./styles.css": "./dist/styles.css",
     "./styles/tokens.css": "./dist/styles/tokens.css",
     "./styles/index.css": "./dist/styles/index.css"
@@ -56,11 +75,14 @@
     "react": "^18.0.0 || ^19.0.0"
   },
   "peerDependenciesMeta": {
-    "react": { "optional": true }
+    "react": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/dom-speech-recognition": "^0.0.6",
     "@types/react": "^19.0.0",
+    "fake-indexeddb": "^6.2.5",
     "react": "^19.0.0",
     "tsup": "^8.3.0",
     "typescript": "^5.6.0"

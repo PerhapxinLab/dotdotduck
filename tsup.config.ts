@@ -91,4 +91,13 @@ export default defineConfig([
     dts: true,
     external: ['zod'],
   },
+  // Self-hosted analytics layer (EventStore + canonical SQL schema +
+  // exporters + mappers). Published at `@perhapxin/dddk/analytics`.
+  {
+    entry: ['src/analytics/index.ts'],
+    outDir: 'dist/analytics',
+    format: ['esm', 'cjs'],
+    dts: true,
+    external: ['zod'],
+  },
 ]);
