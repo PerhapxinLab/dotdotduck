@@ -55,7 +55,7 @@ https://github.com/user-attachments/assets/18d797df-4952-421a-a2b3-16aef1ebcb34
 <td width="45%" valign="top">
 
 - **DOM-grounded 自主迴圈**。讀目前可見的頁面，一次選一個 tool，跑之前先把步驟唸到字幕條上給使用者看。
-- **加入制的 action bundle**。預設只裝 `coreActions`（4 個：navigate · click · border · scroll_to）— 每個 host 都會用到的核心。要 `formActions`（fill_input · select_option · clear_input · press_key）、`flowActions`（wait · pause · ask_user · ask_user_choice）或 `extraActions`（highlight · track_intent · escalate_to_human）就傳進 `customActions` opt-in。預設小 = prompt 便宜、目錄誠實。當然也可以加自己的，LLM 自己選用哪一個。
+- **加入制的 action bundle**。預設只裝 `coreActions`（5 個：narrate · navigate · click · border · scroll_to）— 每個 host 都會用到的核心。要 `formActions`（fill_input · select_option · clear_input · press_key · hold_key · double_click · long_press · drag）、`flowActions`（wait · pause · ask_user · ask_user_choice）或 `extraActions`（highlight · track_intent · escalate_to_human）就傳進 `customActions` opt-in。預設小 = prompt 便宜、目錄誠實。當然也可以加自己的，LLM 自己選用哪一個。
 - **每個動作都有滑鼠**。`cursorTrail: true` 打開後，每個動作執行**之前**會有合成游標滑到目標 — click / fill_input / border / highlight / scroll_to（游標切成滑鼠滾輪圖示沿著捲動路徑走）/ narrate 帶 `about`（自動透過合成的 `border` call 拿到）。內含執行前停頓 + 抵達脈動 + reduced-motion fallback。
 - **每一步都靠 Space 把關**。單擊接受 · 雙擊拒絕 · Esc 取消。使用者在事情發生**之前**就看得到它要做什麼。
 - **不確定時主動問**。`ask_user_choice` 對應 2-4 個選項，`ask_user` 接收自由文字。不會偷偷做決定，也不會憑空猜。

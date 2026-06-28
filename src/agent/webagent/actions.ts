@@ -244,14 +244,36 @@ const KEY_CODE_MAP: Record<string, string> = {
   Space: 'Space',
 };
 
-const pressKey: ActionDefinition<{ key: string; selector?: string }> = {
+type ModifierKey = 'ctrl' | 'shift' | 'alt' | 'meta';
+const ALL_MODIFIERS: readonly ModifierKey[] = ['ctrl', 'shift', 'alt', 'meta'];
+
+function buildKeyEventInit(key: string, modifiers?: string[]): KeyboardEventInit {
+  const code = KEY_CODE_MAP[key] ?? (key.length === 1 ? `Key${key.toUpperCase()}` : key);
+  const mods = new Set((modifiers ?? []).map((m) => m.toLowerCase()));
+  return {
+    key,
+    code,
+    bubbles: true,
+    cancelable: true,
+    ctrlKey: mods.has('ctrl'),
+    shiftKey: mods.has('shift'),
+    altKey: mods.has('alt'),
+    metaKey: mods.has('meta'),
+  };
+}
+
+const pressKey: ActionDefinition<{ key: string; selector?: string; modifiers?: string[] }> = {
   name: 'press_key',
-  description: 'Dispatch a keyboard event (keydown + keyup) on an element. Use for Enter (commit forms / palette selections), Escape, Tab, ArrowUp/Down, etc. `key` is the W3C key name ("Enter", "Escape", "ArrowDown", "a", " "). `selector` is optional — omitted = the currently focused element (`document.activeElement`).',
+  description: 'Dispatch a keyboard event (keydown + keyup) on an element, optionally with modifier keys. Use for Enter (commit forms / palette selections), Escape, Tab, ArrowUp/Down, or chords like Ctrl+S / Cmd+K / Shift+Tab. `key` is the W3C key name ("Enter", "Escape", "ArrowDown", "a", " "). `modifiers` is an array of "ctrl" | "shift" | "alt" | "meta" — empty / omitted = no modifiers. `selector` is optional — omitted = the currently focused element (`document.activeElement`).',
   parameters: objSchema(
-    { key: { type: 'string' }, selector: { type: 'string' } },
+    {
+      key: { type: 'string' },
+      selector: { type: 'string' },
+      modifiers: { type: 'array', items: { type: 'string', enum: ALL_MODIFIERS as unknown as string[] } },
+    },
     ['key'],
   ),
-  handler: async ({ key, selector }, ctx) => {
+  handler: async ({ key, selector, modifiers }, ctx) => {
     if (typeof document === 'undefined') return { ok: false, reason: 'unknown', message: 'no DOM' };
     let target: HTMLElement | null;
     if (selector) {
@@ -262,10 +284,137 @@ const pressKey: ActionDefinition<{ key: string; selector?: string }> = {
       target = (document.activeElement as HTMLElement | null) ?? document.body;
     }
     if (!target) return { ok: false, reason: 'not_found' };
-    const code = KEY_CODE_MAP[key] ?? (key.length === 1 ? `Key${key.toUpperCase()}` : key);
-    const init: KeyboardEventInit = { key, code, bubbles: true, cancelable: true };
+    const init = buildKeyEventInit(key, modifiers);
     target.dispatchEvent(new KeyboardEvent('keydown', init));
     target.dispatchEvent(new KeyboardEvent('keyup', init));
+    return { ok: true };
+  },
+};
+
+const holdKey: ActionDefinition<{ key: string; ms: number; selector?: string; modifiers?: string[] }> = {
+  name: 'hold_key',
+  description: 'Hold a key down for `ms` milliseconds (keydown → wait → keyup). Use for hold-to-zoom, hold-Ctrl-to-multi-select, push-to-talk gestures. Caps at 5000ms. Same `key` / `selector` / `modifiers` semantics as press_key.',
+  parameters: objSchema(
+    {
+      key: { type: 'string' },
+      ms: { type: 'number', maximum: 5000 },
+      selector: { type: 'string' },
+      modifiers: { type: 'array', items: { type: 'string', enum: ALL_MODIFIERS as unknown as string[] } },
+    },
+    ['key', 'ms'],
+  ),
+  handler: async ({ key, ms, selector, modifiers }, ctx) => {
+    if (typeof document === 'undefined') return { ok: false, reason: 'unknown', message: 'no DOM' };
+    let target: HTMLElement | null;
+    if (selector) {
+      const found = resolve(ctx, selector);
+      if (!found.ok) return found.result;
+      target = found.el;
+    } else {
+      target = (document.activeElement as HTMLElement | null) ?? document.body;
+    }
+    if (!target) return { ok: false, reason: 'not_found' };
+    const init = buildKeyEventInit(key, modifiers);
+    target.dispatchEvent(new KeyboardEvent('keydown', { ...init, repeat: false }));
+    const duration = Math.min(Math.max(ms, 0), 5000);
+    await new Promise<void>((r) => setTimeout(r, duration));
+    target.dispatchEvent(new KeyboardEvent('keyup', init));
+    return { ok: true };
+  },
+};
+
+const doubleClick: ActionDefinition<{ selector: string }> = {
+  name: 'double_click',
+  description: 'Double-click an element. Fires `dblclick` (NOT two `click` events) so handlers bound to `ondblclick` actually run — e.g. open detail, expand row, enter rename mode. Cursor glide pre-flight happens if cursorTrail is on.',
+  parameters: objSchema({ selector: { type: 'string' } }, ['selector']),
+  handler: async ({ selector }, ctx) => {
+    const found = resolve(ctx, selector);
+    if (!found.ok) return found.result;
+    if (!isInteractive(found.el)) return { ok: false, reason: 'not_interactive' };
+    if (ctx.uiHints?.cursorTrail) {
+      try { await moveCursorAndTap(found.el); } catch { /* nicety */ }
+    }
+    const rect = found.el.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const opts: MouseEventInit = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0, detail: 2 };
+    found.el.dispatchEvent(new MouseEvent('mousedown', opts));
+    found.el.dispatchEvent(new MouseEvent('mouseup', opts));
+    found.el.dispatchEvent(new MouseEvent('click', opts));
+    found.el.dispatchEvent(new MouseEvent('mousedown', opts));
+    found.el.dispatchEvent(new MouseEvent('mouseup', opts));
+    found.el.dispatchEvent(new MouseEvent('click', opts));
+    found.el.dispatchEvent(new MouseEvent('dblclick', opts));
+    return { ok: true };
+  },
+};
+
+const longPress: ActionDefinition<{ selector: string; ms?: number }> = {
+  name: 'long_press',
+  description: 'Press and HOLD an element for `ms` milliseconds (default 600). Fires `mousedown` + `touchstart` → wait → `mouseup` + `touchend`. Use for context menus, draggable handles, mobile long-press menus. Caps at 5000ms.',
+  parameters: objSchema(
+    { selector: { type: 'string' }, ms: { type: 'number', maximum: 5000 } },
+    ['selector'],
+  ),
+  handler: async ({ selector, ms = 600 }, ctx) => {
+    const found = resolve(ctx, selector);
+    if (!found.ok) return found.result;
+    if (ctx.uiHints?.cursorTrail) {
+      try { await moveCursorAndTap(found.el); } catch { /* nicety */ }
+    }
+    const rect = found.el.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const opts: MouseEventInit = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0 };
+    const touchInit = { bubbles: true, cancelable: true };
+    found.el.dispatchEvent(new MouseEvent('mousedown', opts));
+    try { found.el.dispatchEvent(new Event('touchstart', touchInit)); } catch { /* touch unsupported */ }
+    const duration = Math.min(Math.max(ms, 0), 5000);
+    await new Promise<void>((r) => setTimeout(r, duration));
+    found.el.dispatchEvent(new MouseEvent('mouseup', opts));
+    try { found.el.dispatchEvent(new Event('touchend', touchInit)); } catch { /* touch unsupported */ }
+    return { ok: true };
+  },
+};
+
+const drag: ActionDefinition<{ from: string; to: string; steps?: number }> = {
+  name: 'drag',
+  description: 'Drag from one element to another. mousedown on `from` → `steps` interpolated mousemove events along the path (default 10) → mouseup on `to`. Also fires `dragstart` / `dragover` / `drop` / `dragend` for HTML5 drag-and-drop. Use for sortable lists, kanban cards, slider handles.',
+  parameters: objSchema(
+    { from: { type: 'string' }, to: { type: 'string' }, steps: { type: 'number', minimum: 2, maximum: 50 } },
+    ['from', 'to'],
+  ),
+  handler: async ({ from, to, steps = 10 }, ctx) => {
+    const fromFound = resolve(ctx, from);
+    if (!fromFound.ok) return fromFound.result;
+    const toFound = resolve(ctx, to);
+    if (!toFound.ok) return toFound.result;
+    if (ctx.uiHints?.cursorTrail) {
+      try { await moveCursorAndTap(fromFound.el); } catch { /* nicety */ }
+    }
+    const r1 = fromFound.el.getBoundingClientRect();
+    const r2 = toFound.el.getBoundingClientRect();
+    const sx = r1.left + r1.width / 2, sy = r1.top + r1.height / 2;
+    const ex = r2.left + r2.width / 2, ey = r2.top + r2.height / 2;
+    const mk = (x: number, y: number, target: Element): MouseEventInit & { dataTransfer?: DataTransfer } => ({
+      bubbles: true, cancelable: true, view: window,
+      clientX: x, clientY: y, screenX: x, screenY: y, button: 0,
+    });
+    fromFound.el.dispatchEvent(new MouseEvent('mousedown', mk(sx, sy, fromFound.el)));
+    try { fromFound.el.dispatchEvent(new DragEvent('dragstart', mk(sx, sy, fromFound.el))); } catch { /* old browsers */ }
+    const n = Math.min(Math.max(steps, 2), 50);
+    for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      const x = sx + (ex - sx) * t;
+      const y = sy + (ey - sy) * t;
+      const el = document.elementFromPoint(x, y) ?? fromFound.el;
+      el.dispatchEvent(new MouseEvent('mousemove', mk(x, y, el)));
+      try { el.dispatchEvent(new DragEvent('dragover', mk(x, y, el))); } catch { /* old browsers */ }
+      await new Promise<void>((r) => setTimeout(r, 16));
+    }
+    try { toFound.el.dispatchEvent(new DragEvent('drop', mk(ex, ey, toFound.el))); } catch { /* old browsers */ }
+    toFound.el.dispatchEvent(new MouseEvent('mouseup', mk(ex, ey, toFound.el)));
+    try { fromFound.el.dispatchEvent(new DragEvent('dragend', mk(ex, ey, fromFound.el))); } catch { /* old browsers */ }
     return { ok: true };
   },
 };
@@ -455,6 +604,56 @@ export const trackIntent: ActionDefinition<{ kind: string; payload?: Record<stri
 // for the agent's typical product-driving flows. Re-introduce when a
 // real host needs popup-driven OAuth round-tripping.
 
+// ─── narrate primitive ─────────────────────────────────────────────
+//
+// `narrate` is the most-used agent action in CoT mode — it's how the
+// agent "speaks" between page operations. Pre-v0.2 it lived ONLY
+// inside the CoT envelope (a {narrate, about?} object the runtime
+// intercepts before any tool handler is dispatched), so it never
+// appeared in the action registry. That confused hosts inspecting
+// `agent.actionsRef.keys()`: where's narrate?
+//
+// This stub registers `narrate` AS a tool so:
+//   - It shows up in the registry / prompt catalog under both
+//     protocols (CoT + plain).
+//   - Plain-protocol callers (e.g. a future WebAgent-without-CoT,
+//     or a TaskAgent borrowing the catalog) can call it and have
+//     the text routed to the subtitle bar like the runtime does.
+//
+// The CoT runtime continues to intercept the envelope's `narrate`
+// field BEFORE handler dispatch, so this handler is only reached on
+// plain-protocol direct calls. In CoT mode the runtime's interception
+// path is the source of truth — descriptions stay aligned in both.
+const narrateAction: ActionDefinition<{ text: string; about?: string }> = {
+  name: 'narrate',
+  description: 'Speak to the user in the subtitle bar — describe what you see, what you found, what you\'re about to do. ALWAYS use the user\'s language. If `about` is set, ALSO point at that element on the page (synthesizes a `border` call). The page narration loop revolves around this action: most steps look like `narrate({text: "Here\'s the install snippet", about: "<id of the pre block>"})`.',
+  parameters: objSchema(
+    { text: { type: 'string' }, about: { type: 'string' } },
+    ['text'],
+  ),
+  handler: async ({ text, about }, ctx) => {
+    // Plain-protocol fallback path. CoT runtime intercepts the
+    // envelope's `narrate` field before any handler runs.
+    if (typeof document !== 'undefined') {
+      // Best-effort subtitle routing. We don't import the Subtitle
+      // module directly (would force a dep on the orchestrator); the
+      // SDK's dddk handle dispatches subtitle via the lifecycle's
+      // `agent_text` event, which the orchestrator already wires.
+    }
+    if (about) {
+      const el = ctx.resolveTarget(about);
+      if (el) {
+        overlay.clearOverlays();
+        if (ctx.uiHints?.cursorTrail) {
+          try { await moveCursorTo(el); } catch { /* nicety */ }
+        }
+        overlay.border(el);
+      }
+    }
+    return { ok: true, data: text };
+  },
+};
+
 // ─── exports — bundled by purpose (v0.2.0 opt-in pivot) ─────────────
 //
 // Pre-v0.2 model: `builtinActions` (12 actions) was installed by default;
@@ -473,11 +672,20 @@ export const trackIntent: ActionDefinition<{ kind: string; payload?: Record<stri
 //   - Conversational agent (Q&A, pauses, choices) → `+ flowActions`
 
 /**
- * The four actions every webagent host needs. Installed by default.
- * `navigate` (route changes), `click` (interactive elements),
- * `border` (visual pointing), `scroll_to` (paginated content).
+ * The five actions every webagent host needs. Installed by default.
+ *  - `narrate`: speak to the user (CoT envelope native; plain-protocol fallback)
+ *  - `navigate`: route changes
+ *  - `click`: interactive elements
+ *  - `border`: visual pointing (also auto-synthesized by narrate's `about`)
+ *  - `scroll_to`: paginated content
+ *
+ * `border` is bundled with narrate intentionally — narrate-with-about
+ * synthesizes a border call, so the primitive must exist in the
+ * registry for that synthesis to resolve. Hosts who never want to
+ * point at things can still `excludeTools: ['border']`.
  */
 export const coreActions: ActionDefinition[] = [
+  narrateAction,
   navigate,
   click,
   borderAction,
@@ -485,15 +693,27 @@ export const coreActions: ActionDefinition[] = [
 ] as ActionDefinition[];
 
 /**
- * Form / input manipulation. Opt in when the agent needs to type or
- * pick from selects. Off by default to keep the prompt slim on read-
- * only marketing / docs surfaces.
+ * Form / input + richer pointer interactions. Opt in when the agent
+ * needs to type, pick from selects, double-click, long-press, drag,
+ * or hold keys. Off by default to keep the prompt slim on read-only
+ * marketing / docs surfaces.
+ *
+ *  - `fill_input` / `select_option` / `clear_input`: text fields + selects
+ *  - `press_key`: single keypress (Enter / Escape / Tab / Cmd+S chord)
+ *  - `hold_key`: key down for N ms (hold-to-zoom, hold-Ctrl-to-multi-select)
+ *  - `double_click`: open / expand / rename — anything bound to `dblclick`
+ *  - `long_press`: context menus, drag handles, mobile long-press
+ *  - `drag`: from element A to element B (sortable lists, kanban, sliders)
  */
 export const formActions: ActionDefinition[] = [
   fillInput,
   selectOption,
   clearInput,
   pressKey,
+  holdKey,
+  doubleClick,
+  longPress,
+  drag,
 ] as ActionDefinition[];
 
 /**
