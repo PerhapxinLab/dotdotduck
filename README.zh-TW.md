@@ -235,29 +235,44 @@ https://github.com/user-attachments/assets/18d797df-4952-421a-a2b3-16aef1ebcb34
 
 8. **語音不只用在瀏覽器**。同一套 `Voice` + `utility` LLM 角色撐得起 IoT 面板、kiosk 終端、服務機台、銀髮 / 不想打字使用者的無障礙介面。所有有麥克風的裝置共用一個心智模型。
 
-## Roadmap — v0.2.0 開發中
+## v0.2.0 — 已出貨
 
-0.2.x 主軸是 webagent 核心的架構重寫。大部分已經在 `main` 上（live demo 跑的就是它），剩幾塊還在收。
+webagent 核心架構重寫。一個破壞性改動（預設只裝 `coreActions`，不是全部 12 個 builtin action）。完整 release notes：[release-notes.zh-TW.md](./docs/v0.2.0/dddk/release-notes.zh-TW.md)。
 
-**Track 1 · nano 成本驗證 — 完成。** `gpt-5.4-nano` 跑完整單檔 webagent loop，任務成功率跟 `gpt-5.4-mini` 同等，成本大約低一個量級。[dddk.perhapxin.com](https://dddk.perhapxin.com) 的 `webagent` + `plan` 兩個角色已換 nano 作預設。
+**成本驗證 — 完成。** `gpt-5.4-nano` 跑完整單檔 webagent loop，任務成功率跟 `gpt-5.4-mini` 同等，成本約低一個量級。[dddk.perhapxin.com](https://dddk.perhapxin.com) 的 `webagent` + `plan` 兩個角色已換 nano 作預設。
 
-**Track 2 · mode-based 架構 — 實作中。**
+**亮點：**
 
-- ✅ **Streaming envelope parser** — scanner-based 漸進式 JSON parser。每個 action 在自己的 tool-args `{ }` 一閉合的當下就 dispatch，不用等外層 envelope 結束。Narrate 文字會隨 token 一個字一個字串到 subtitle bar。第一個 click 可以在 LLM 第二個 action 的 `{` 都還沒到的時候就觸發。在 `DotDotDuck` config 加 `enableStreamingEnvelope: true` 就用得到。
-- ✅ **TaskAgent** — 第三種 agent class（跟 WebAgent / InlineAgent 平行）。對話 + host 自定 tool calling、不讀 DOM、純 plain protocol（標準 chat + OpenAI tool-calls）。`AgentSession` 共用，多個 TaskAgent（或 v0.3 之後 TaskAgent + WebAgent）注入同一個 session 就能共享對話歷史。**取代原本「mode-based webagent」設計** — 多開一種 agent 比把兩個 protocol 塞進同一個 class 乾淨。
-- ✅ **WebAgent 多 instance + 共享 session** — `dddk.sessions` 命名 session registry + `dddk.agents` 命名 instance registry。把同一個 `AgentSession` 注入到不同 WebAgent（每條 route 一個 persona），route 改變時 `dddk.agents.setActive(name)`，跨頁面對話歷史 + memory 自動延續。
-- ✅ **Live registry** — `webagent.registerTool(def) → ToolHandle` 跟 `webagent.registerContextProvider(role, fn) → ContextProviderHandle`。handle.remove() 退掉註冊；context provider 的 remove() 會恢復 SDK 預設而不是把 slot 清空。in-flight step 用 action-map snapshot 跑完，下一個 step 才看到新註冊。
-- ✅ **Context providers 拆分** — 六個 slot（`url` / `page_summary` / `dom` / `screenshot` / `history` / `selection`），預設 provider 在 WebAgent constructor 自動裝好。Host 用 live registry 換掉任何單一 slot，不用重寫其他五個。
-- ✅ **InlineAgent scoping** — `inlineAgent.attachScope(selector, config)` 給每個區域自己的 action set。文件評論區的 textarea 跟編輯器裡的 code block 不該共用同一組 action；以 selection 落點 element 為起點往上 walk、innermost-wins，selector 表達不出來的 case 用 `setScopeResolver(callback)` fallback。scope 可以獨立 override `actions` / `llm` / `systemPrompt` / `layout` / `tools`，或用 `appendActions` / `appendSystemPrompt` 疊在 root 之上。
-- ✅ **`onLoopEnd` hook** — agent loop 收尾 UI：`silent` / `text` / `feedback`（Space 接受 · 雙擊拒絕 · Esc 算 null — 全部會發 `agent_feedback` event）/ `ask_user`（收尾用的多選問題）。zero-config host 也會看到溫和的「完成 ✓」收尾。
-- ✅ **`agent_tool_failed` intent event** — tool handler 回 `{ ok: false }`（或 throw — `reason: 'unknown'`，message 保留）就 fire。補可觀測性的洞 — 之前 `agent_tool_end` 在 host emitter 有但沒進 intent stream，現在 dashboard 可以畫「哪個 tool 在掉、為什麼掉、掉得多頻繁」。
-- ✅ **加入制 action bundle** — v0.2 前預設 12 個 action 全裝、host 用 `excludeTools` 拔；實測 dddk-frontend 拔了 6/12。v0.2 翻過來：預設只裝 `coreActions`（navigate / click / border / scroll_to）。要 `formActions` / `flowActions` / `extraActions` 就 `customActions` opt-in。`builtinActions` 留下當聯集向後相容。Prompt 更小、目錄更誠實、鼓勵目的導向裝配。
-- ✅ **每個動作都有游標** — 合成游標以前只在 `click`（跟 `preferClickLinkOverNavigate` 開時的 `navigate`）出現。v2 擴展到所有互動 tool：`border` / `highlight` / `fill_input` 動作前游標滑到目標；`scroll_to` 把游標切成滑鼠滾輪圖示、沿著捲動路徑走、落在終點、再切回箭頭；`narrate` 帶 `about` 透過合成的 `border` call 自動繼承。新 runtime API：`moveCursorTo(el)`、`cursorPulse()`、`setCursorMode('pointer' | 'scroll' | 'reading')`。
-- ✅ **Inline palette + 多元 row** — `dddk.palette.mountInline(host, opts?)` 把 palette 常駐嵌進 host 元素（無背景遮罩、不會點外面關閉）。跟 Ctrl/⌘+K modal 共用同一份 item；Ctrl/⌘+K 會把 modal 疊上來，關掉時還原 inline。新增 `PaletteItem.lines: string[]`（多行 metadata 直欄）+ `image: string`（縮圖 URL）+ `submitButton: boolean`（input 右側圓形送出鈕）。
-- ✅ **自架分析層**（`@perhapxin/dddk/analytics`） — 每個 `BaseEvent` 都可以落地到瀏覽器本地的 IndexedDB `EventStore`，可查詢、有上限保護（預設 50k 事件 / 30 天，host 可調 `Infinity` 並決定政策：`'ring'` / `'drop-new'` / `{ notifyHost }`）。內建 `toCSV` / `toNDJSON` / `toSQL` 三種匯出，搭配 function-based `SqlSchemaMapper` 重塑成 host 自己的 DB schema；canonical `dddk_events` DDL 出貨 SQLite / Postgres / MySQL 三種方言。
-- ✅ **內建迷你 dashboard**（`@perhapxin/dddk/analytics/dashboard`） — `renderDashboard(container, store)` 把六張 vanilla SVG 圖（每日事件量、palette 熱門指令、agent 完成率、回饋分布、語音啟動、平均 LLM 延遲）掛到任何 DOM container；自動套用 host 的 `--dddk-*` 主題 token、不依賴任何 charting library、中英雙語 label、可選自動刷新。Host 想加自己的卡片，直接用 `lineChart` / `barChart` / `donut` / `numberTile` 同樣的 primitive 自己組。
+- ✅ **TaskAgent** — 第三種 agent class（跟 WebAgent / InlineAgent 平行）。對話 + host 自定 tool calling、不讀 DOM、純 plain protocol。`ask()` / `streamAsk()`。`AgentSession` 共用，多個 TaskAgent 注入同一個 session 就能共享對話歷史。
+- ✅ **WebAgent 多 instance + 共享 session** — `dddk.sessions` 命名 session registry + `dddk.agents` 命名 instance registry。把同一個 `AgentSession` 注入到不同 WebAgent，route 改變時 `dddk.agents.setActive(name)`。
+- ✅ **加入制 action bundle** — 預設只裝 `coreActions`（5 個：narrate / navigate / click / border / scroll_to）。要 `formActions` / `flowActions` / `extraActions` 就 `customActions` opt-in。`builtinActions` 聯集留下向後相容。（破壞性改動。）
+- ✅ **新動作** — `hold_key`、`double_click`、`long_press`、`drag`，`press_key` 加 `modifiers`。`narrate` 從 CoT-only primitive 升級成 registry 裡的 first-class action。
+- ✅ **每個動作都有游標** — `cursorTrail: true` 涵蓋 click / border / highlight / fill_input / scroll_to / narrate-with-about。`scroll_to` 中間會切成滑鼠滾輪圖示。新 API：`moveCursorTo(el)`、`cursorPulse()`、`setCursorMode('pointer' | 'scroll' | 'reading')`。
+- ✅ **Planner 讀 DOM** — planning 呼叫會把當前頁面快照塞進 `hostContext`，planner 可以看到 sidebar / nav link 即使 sitemap 設定漏列。`plannerDomMaxLength` 控制上限（預設 8000）。
+- ✅ **Navigate 路徑驗證** — `navigate` reject 不在 sitemap 裡的 path，把 valid path list 回 LLM 重試。Loop 不會再追 hallucinate 出來的路徑跑進 404。
+- ✅ **Streaming envelope parser** — scanner-based 漸進式 JSON parser。每個 action 在自己的 tool-args `{ }` 一閉合就 dispatch，不用等外層 envelope 結束。在 `DotDotDuck` config 加 `enableStreamingEnvelope: true`。
+- ✅ **Live registry** — `webagent.registerTool(def) → ToolHandle` 跟 `webagent.registerContextProvider(role, fn) → ContextProviderHandle`。handle.remove() 退掉註冊；context provider 的 remove() 會恢復 SDK 預設而不是清空 slot。
+- ✅ **Context providers 拆分** — 六個 slot（`url` / `page_summary` / `dom` / `screenshot` / `history` / `selection`），預設 provider 在 WebAgent constructor 自動裝好。
+- ✅ **InlineAgent scoping** — `inlineAgent.attachScope(selector, config)` 給每個區域自己的 action set。Innermost-wins；CSS selector 表達不了的 case 用 `setScopeResolver(callback)` fallback。
+- ✅ **`onLoopEnd` hook** — `silent` / `text` / `feedback`（Space 接受 · 雙擊拒絕 · Esc 跳過）/ `ask_user`（收尾多選問題）。
+- ✅ **`agent_tool_failed` intent event** — tool handler 回 `{ ok: false }` 或 throw 就 fire。
+- ✅ **Inline palette + 多元 row** — `dddk.palette.mountInline(host, opts?)` 把 palette 常駐嵌進 host 元素（無 backdrop）。Ctrl/⌘+K 會把 modal 疊上來，關掉時還原 inline。新增 `PaletteItem.lines: string[]` + `image: string` + `submitButton: boolean`。
+- ✅ **自架分析層**（`@perhapxin/dddk/analytics`） — IndexedDB-backed `EventStore` + `toCSV` / `toNDJSON` / `toSQL` 匯出 + function-based `SqlSchemaMapper`。canonical `dddk_events` DDL 出貨 SQLite / Postgres / MySQL。
+- ✅ **內建迷你 dashboard**（`@perhapxin/dddk/analytics/dashboard`） — `renderDashboard(container, store)` 掛六張 vanilla SVG 圖。EN / zh-TW labels，可選自動刷新。
+- ✅ **Session lifecycle 強化** — 硬重整（F5 / Ctrl+R / Ctrl+Shift+R）永遠清 session，不管 `sessionContinuityMs`；預設 `sessionContinuityMs` 從 `5 * 60 * 1000` 改成 `0`（每次 ask 都是獨立 session 除非 host opt-in）。
+- ✅ **字幕條點擊 / 觸控 = Space** — 點字幕條 = 按 Space；雙擊 = 雙按 Space。滑鼠 / 觸控 / pen 都吃。
 
-完整 plan 在 [`ROADMAP-v0.2.0.md`](./ROADMAP-v0.2.0.md)。v0.1.x 的 bug fix 會繼續在 `v0.1.x` branch 出。
+## v0.3 roadmap
+
+從 v0.2 延後的項目：
+
+- **跨類型 session 完整再序列化** — TaskAgent 讀 WebAgent 的 session 已經會了（CoT `agent_step` turn 直接跳過）；反過來 WebAgent 讀 TaskAgent 的 plain-chat turn 並重新包成 CoT envelope 比較費工。
+- **多 agent delegation** — TaskAgent 透過 tool 呼叫 WebAgent（或反過來）。可行但 orchestrator routing 複雜度需要實際 use case 驗證。
+- **buildMessages 全面走 provider registry** — `url` / `page_summary` / `history` / `selection` / `screenshot` 都改走 provider；`dom` 因為 `currentIndexMap` 跟 selector resolution 綁死還是 inline。
+- **TaskAgent tool-args 逐字 streaming** — `streamAsk` 已經 stream text delta + toolCallStart / toolCallEnd marker；tool 參數的逐字 stream 排在 roadmap。
+- **TaskAgent 跨 tab session 共享** — WebAgent 已 crosstab；TaskAgent 目前還沒。
+
+v0.1.x 的 bug fix 會繼續在 `v0.1.x` branch 出。
 
 ## 狀態 — 早期階段，評估前先看
 

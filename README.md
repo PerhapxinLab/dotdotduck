@@ -235,29 +235,44 @@ Several physical entry points to send context into dddk. No new vocabulary to le
 
 8. **Voice doesn't stop at the browser.** The same `Voice` + `utility` LLM shape powers IoT panels, kiosk terminals, service machines, and accessibility-first surfaces for elderly users or anyone who'd rather not type. One mental model across every device that has a microphone.
 
-## Roadmap — v0.2.0 in progress
+## v0.2.0 — what shipped
 
-The 0.2.x line is the architectural rework of the webagent core. Most of it is on `main` already (the live demo runs it); a few pieces are still landing.
+Architectural rework of the webagent core. One breaking change (`coreActions` is the default install, not all 12 builtin actions). Full notes: [release-notes.md](./docs/v0.2.0/dddk/release-notes.md).
 
-**Track 1 · nano cost validation — done.** `gpt-5.4-nano` runs the full monolithic webagent loop with the same task-success rate as `gpt-5.4-mini` at roughly an order of magnitude lower cost. That's the new default for `webagent` + `plan` roles on [dddk.perhapxin.com](https://dddk.perhapxin.com).
+**Cost validation — done.** `gpt-5.4-nano` runs the full monolithic webagent loop with the same task-success rate as `gpt-5.4-mini` at roughly an order of magnitude lower cost. That's the new default for `webagent` + `plan` roles on [dddk.perhapxin.com](https://dddk.perhapxin.com).
 
-**Track 2 · mode-based architecture — mid-implementation.**
+**Highlights:**
 
-- ✅ **Streaming envelope parser** — scanner-based incremental JSON parser. Each action dispatches the moment its tool-args `{ }` balances, instead of waiting for the outer envelope to close. Narrate text streams character-by-character into the subtitle bar as the model writes it. The first click can fire before the second action's opening `{` has even arrived from the LLM. Opt in via `enableStreamingEnvelope: true` on `DotDotDuck` config.
-- ✅ **TaskAgent** — third agent kind alongside WebAgent + InlineAgent. Conversation + host-defined tool calling, no DOM, plain protocol (standard chat + OpenAI tool-calls). Same `AgentSession` shape so multiple TaskAgents (or — in v0.3 — a TaskAgent + WebAgent) share conversation history when wired to the same session. Replaces the original "mode-based webagent" plan — separate agent class beats stuffing two protocols into one.
-- ✅ **WebAgent multi-instance + shared sessions** — `dddk.sessions` named-session registry + `dddk.agents` named-instance registry. Inject the same `AgentSession` into different WebAgents (one persona per route) and `dddk.agents.setActive(name)` on route change — cross-page conversation history + memory carry over even when the active agent flips.
-- ✅ **Live registry** — `webagent.registerTool(def) → ToolHandle` and `webagent.registerContextProvider(role, fn) → ContextProviderHandle`. Handle's `remove()` unregisters; context-provider remove restores the SDK default rather than emptying the slot. In-flight step finishes on its action-map snapshot; next step sees the new entry.
-- ✅ **Context providers split** — six slots (`url`, `page_summary`, `dom`, `screenshot`, `history`, `selection`) with default providers SDK-installed in the WebAgent constructor. Hosts replace any single slot via the live registry without re-implementing the others.
-- ✅ **InlineAgent scoping** — `inlineAgent.attachScope(selector, config)` for per-region action sets. A textarea inside the docs comments shouldn't see the same actions as a code block in the editor; innermost-wins on the selection's anchor element, callback fallback via `setScopeResolver` for the cases selectors can't express. Each scope can override `actions` / `llm` / `systemPrompt` / `layout` / `tools` independently or extend the root via `appendActions` / `appendSystemPrompt`.
-- ✅ **`onLoopEnd` hook** — agent-loop closure UI: `silent` / `text` / `feedback` (Space accepts · double-tap rejects · Esc nulls — emits `agent_feedback`) / `ask_user` (closing question with options). Zero-config hosts get a graceful "Done ✓" close.
-- ✅ **`agent_tool_failed` intent event** — emitted whenever a tool handler returns `{ ok: false }` (or throws — `reason: 'unknown'`, message preserved). Fills the visibility gap where the lifecycle's `agent_tool_end` fired on the host emitter but never landed in the intent stream. Dashboards can chart which tool is failing, why, how often.
-- ✅ **Opt-in action bundles** — pre-v0.2 hosts got all 12 builtin actions installed by default and trimmed with `excludeTools`; empirically dddk-frontend disabled 6 of 12. v0.2 flips: default install = `coreActions` only (navigate / click / border / scroll_to). Opt into `formActions`, `flowActions`, `extraActions` via `customActions`. `builtinActions` kept as union for back-compat. Smaller prompt, honest catalog, encourages purpose-fit instead of "install everything then prune".
-- ✅ **Cursor on every action** — the synthetic cursor used to only show for `click` (and `navigate` when `preferClickLinkOverNavigate` was on). v0.2 extends it to every interactive tool: `border` / `highlight` / `fill_input` glide cursor onto target before acting; `scroll_to` swaps the cursor glyph to a mouse-wheel icon, travels along the scroll, lands on the destination, reverts; `narrate` with `about` inherits it for free via the synthesized `border` call. New runtime API: `moveCursorTo(el)`, `cursorPulse()`, `setCursorMode('pointer' | 'scroll' | 'reading')`.
-- ✅ **Inline palette + rich rows** — `dddk.palette.mountInline(host, opts?)` persistently embeds the palette inside a host element (no backdrop, no outside-click dismiss). Same items as the Ctrl/⌘+K modal; Ctrl/⌘+K raises the modal on top, close restores the inline. New `PaletteItem.lines: string[]` (multi-line metadata column) + `image: string` (thumbnail URL) + `submitButton: boolean` (circular send button at input's right edge).
-- ✅ **Self-hosted analytics layer** (`@perhapxin/dddk/analytics`) — every emitted `BaseEvent` can land in a local IndexedDB-backed `EventStore` on the visitor's browser, queryable + cap-controlled (default 50k events / 30 days, hosts can lift to `Infinity` and pick a policy: `'ring'` / `'drop-new'` / `{ notifyHost }`). Bundled `toCSV` / `toNDJSON` / `toSQL` exporters reshape rows through a function-based `SqlSchemaMapper` so hosts can land events in any SQL store; the canonical `dddk_events` DDL ships for SQLite / Postgres / MySQL.
-- ✅ **Mini dashboard** (`@perhapxin/dddk/analytics/dashboard`) — `renderDashboard(container, store)` mounts six vanilla-SVG charts (event volume, top palette items, agent completion rate, feedback distribution, voice usage, average LLM latency) into any DOM container; inherits `--dddk-*` theme tokens, no charting library dep, EN / zh-TW labels, optional auto-refresh. Hosts add their own custom tiles with the same `lineChart` / `barChart` / `donut` / `numberTile` primitives.
+- ✅ **TaskAgent** — third agent kind alongside WebAgent + InlineAgent. Conversation + host-defined tool calling, no DOM, plain protocol. `ask()` / `streamAsk()`. Same `AgentSession` shape so multiple TaskAgents share conversation history when wired to the same session.
+- ✅ **WebAgent multi-instance + shared sessions** — `dddk.sessions` named-session registry + `dddk.agents` named-instance registry. Inject the same `AgentSession` into different WebAgents (one persona per route) and `dddk.agents.setActive(name)` on route change.
+- ✅ **Opt-in action bundles** — default install is `coreActions` (5: narrate / navigate / click / border / scroll_to). Pass `formActions` / `flowActions` / `extraActions` to opt in. `builtinActions` kept as union for back-compat. (Breaking change.)
+- ✅ **New actions** — `hold_key`, `double_click`, `long_press`, `drag`, `press_key` extended with `modifiers`. `narrate` promoted from CoT-only primitive to first-class action in the registry.
+- ✅ **Cursor on every action** — `cursorTrail: true` now covers click / border / highlight / fill_input / scroll_to / narrate-with-about. `scroll_to` swaps cursor glyph to a mouse-wheel icon mid-scroll. New API: `moveCursorTo(el)`, `cursorPulse()`, `setCursorMode('pointer' | 'scroll' | 'reading')`.
+- ✅ **Planner sees the DOM** — every planning call now receives a current-page snapshot in `hostContext`, so the planner can spot routes / links visible on the page even when the briefed sitemap missed them. Cap via `plannerDomMaxLength` (default 8000).
+- ✅ **Navigate path validation** — `navigate` rejects paths not in the sitemap and returns the valid path list to the LLM for retry. Stops the loop from chasing hallucinated paths into 404s.
+- ✅ **Streaming envelope parser** — scanner-based incremental JSON parser. Each action dispatches the moment its tool-args `{ }` balances, instead of waiting for the outer envelope to close. Opt in via `enableStreamingEnvelope: true`.
+- ✅ **Live registry** — `webagent.registerTool(def) → ToolHandle` and `webagent.registerContextProvider(role, fn) → ContextProviderHandle`. Handle's `remove()` unregisters; context-provider remove restores the SDK default rather than emptying the slot.
+- ✅ **Context providers split** — six slots (`url`, `page_summary`, `dom`, `screenshot`, `history`, `selection`) with default providers SDK-installed in the WebAgent constructor.
+- ✅ **InlineAgent scoping** — `inlineAgent.attachScope(selector, config)` for per-region action sets. Innermost-wins on the selection's anchor element; callback fallback via `setScopeResolver`.
+- ✅ **`onLoopEnd` hook** — agent-loop closure UI: `silent` / `text` / `feedback` (Space accepts · double-tap rejects · Esc nulls) / `ask_user` (closing question with options).
+- ✅ **`agent_tool_failed` intent event** — emitted whenever a tool handler returns `{ ok: false }` or throws.
+- ✅ **Inline palette + rich rows** — `dddk.palette.mountInline(host, opts?)` persistently embeds the palette inside a host element (no backdrop). Ctrl/⌘+K raises the modal on top, close restores the inline. New `PaletteItem.lines: string[]` + `image: string` + `submitButton: boolean`.
+- ✅ **Self-hosted analytics layer** (`@perhapxin/dddk/analytics`) — IndexedDB-backed `EventStore` + `toCSV` / `toNDJSON` / `toSQL` exporters + function-based `SqlSchemaMapper`. Canonical `dddk_events` DDL ships for SQLite / Postgres / MySQL.
+- ✅ **Mini dashboard** (`@perhapxin/dddk/analytics/dashboard`) — `renderDashboard(container, store)` mounts six vanilla-SVG charts. EN / zh-TW labels, optional auto-refresh.
+- ✅ **Session-lifecycle hardening** — hard reload (F5 / Ctrl+R / Ctrl+Shift+R) always clears session regardless of `sessionContinuityMs`; default `sessionContinuityMs` flipped from `5 * 60 * 1000` to `0` (each ask is its own session unless host opts in).
+- ✅ **Subtitle click/tap = Space** — single click on the subtitle surface accepts; double-click rejects. Mouse / touch / pen all work.
 
-Full plan: [`ROADMAP-v0.2.0.md`](./ROADMAP-v0.2.0.md). v0.1.x bug fixes continue to ship on the `v0.1.x` branch.
+## v0.3 roadmap
+
+Items consciously deferred from v0.2:
+
+- **Cross-type session sharing with full re-serialization** — TaskAgent reading WebAgent's session already works (CoT `agent_step` turns are silently skipped); the reverse (WebAgent reading TaskAgent's plain-chat turns and re-wrapping them as CoT envelope shape) is more work.
+- **Multi-agent delegation** — a TaskAgent calling a WebAgent (or vice versa) via a tool. Workable; introduces orchestrator-routing complexity that wants real use-case validation first.
+- **buildMessages migration through provider registry** — `url` / `page_summary` / `history` / `selection` / `screenshot` are consulted via providers; `dom` is still inline because `currentIndexMap` for selector resolution is coupled to the call site. Untangling that is mechanical but careful refactor.
+- **TaskAgent tool-args incremental streaming** — `streamAsk` already streams text deltas and toolCallStart / toolCallEnd markers. Streaming the tool arguments AS the LLM types them is on the roadmap.
+- **Cross-tab session share for TaskAgent** — WebAgent already crosstabs; TaskAgent doesn't yet.
+
+v0.1.x bug fixes continue to ship on the `v0.1.x` branch.
 
 ## Status — early stage, read before evaluating
 
