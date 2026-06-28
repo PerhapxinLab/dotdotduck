@@ -39,7 +39,11 @@ Return JSON with fields \`task_summary\` (one short sentence in the user's langu
 Plan only the todos needed to cover the user's ask. When the ask is covered, the plan ends.
 One todo equals one turn. Never fold a navigate and a narrate into the same todo — they happen on different turns because the DOM dump only refreshes after navigate completes.
 A todo description states what the team SAYS or DOES for the user. It is not a meta-checklist of topics to cover.
-The last todo always has intent \`finish\` so the webagent knows the task is over.`);
+The last todo always has intent \`finish\` so the webagent knows the task is over.
+
+# Use the page DOM
+
+If the host context includes a \`# Current page DOM\` section, that is the agent's eyes — what the user actually sees right now. Prefer routes / links / sections you can find IN THE DOM over routes you only know from the briefed sitemap. The briefed sitemap can go stale; the DOM cannot. When the user asks about a topic and a matching link visibly exists on the current page (e.g. "Coming soon" → \`/platform\`, "API reference" → \`/docs/api\`), the FIRST todo is \`navigate\` to that exact path, regardless of whether the briefed sitemap listed it.`);
 
   if (ctx.brand) {
     const lines: string[] = ['# Product context'];

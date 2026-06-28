@@ -335,6 +335,27 @@ export interface WebAgentConfig {
    *  announced to the user via a subtitle bar narrate before the loop
    *  begins. Default false — silent execution. */
   announcePlan?: boolean;
+  /**
+   * Feed a snapshot of the current page DOM into the planner via
+   * `PlanInput.hostContext`. Default `true` — without this, the
+   * planner only sees the briefed `sitemap` / `brand` / `persona`
+   * and can't reason about routes / sections that exist in the
+   * actual DOM but weren't listed. With it on, the planner can
+   * propose navigation to a link it found on the current page.
+   *
+   * Costs ~one DOM read + the tokens in `plannerDomMaxLength`. Turn
+   * off when the planner is short-horizon (single page, no routes
+   * involved) and the host wants minimum planner tokens.
+   */
+  plannerSeesDom?: boolean;
+  /**
+   * Cap the size of the DOM snapshot fed to the planner. Default 8000
+   * chars — enough for a typical page's nav + headings + above-fold
+   * content. The webagent's per-turn DOM uses `domMaxLength` (default
+   * 40000) separately; keeping the planner's view smaller stops the
+   * one-shot strategic call from over-paying for tokens.
+   */
+  plannerDomMaxLength?: number;
   /** Hard cap on tool-call iterations per task. Default 30. */
   maxSteps?: number;
   /** Consecutive LLM-call failures before bailing. Default 3. */
