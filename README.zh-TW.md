@@ -242,7 +242,7 @@ https://github.com/user-attachments/assets/18d797df-4952-421a-a2b3-16aef1ebcb34
 - ✅ **Streaming envelope parser** — scanner-based 漸進式 JSON parser。每個 action 在自己的 tool-args `{ }` 一閉合的當下就 dispatch，不用等外層 envelope 結束。Narrate 文字會隨 token 一個字一個字串到 subtitle bar。第一個 click 可以在 LLM 第二個 action 的 `{` 都還沒到的時候就觸發。在 `DotDotDuck` config 加 `enableStreamingEnvelope: true` 就用得到。
 - 🚧 **Mode-based webagent** — `chat` mode（不帶 DOM、走 plain protocol、跑 nano）跟 `operate` mode（帶 DOM dump + CoT envelope、跑 mini/full）。LLM 自己用 `enter_mode` tool 在「Q&A」跟「真的要操作頁面」之間升降級。Host 可以 `registerMode('default', {...})` 完全覆寫 SDK 預設 mode。
 - 🚧 **Live registry** — `dddk.webagent.registerTool / registerContextProvider / registerMode` 任何時候都可以呼叫。in-flight turn 用 snapshot 跑完，下個 turn 才看到新註冊。
-- 🚧 **InlineAgent scoping** — `attachTo(selector, config)` 給每個區域自己的 action set。文件評論區的 textarea 跟編輯器裡的 code block 不該共用同一組 action；innermost-wins，selector 表達不出來的 case 用 callback fallback。
+- ✅ **InlineAgent scoping** — `inlineAgent.attachScope(selector, config)` 給每個區域自己的 action set。文件評論區的 textarea 跟編輯器裡的 code block 不該共用同一組 action；以 selection 落點 element 為起點往上 walk、innermost-wins，selector 表達不出來的 case 用 `setScopeResolver(callback)` fallback。scope 可以獨立 override `actions` / `llm` / `systemPrompt` / `layout` / `tools`，或用 `appendActions` / `appendSystemPrompt` 疊在 root 之上。
 - 🚧 **`onLoopEnd` hook** — agent loop 收尾 UI：`silent` / `text` / `feedback`（Space 接受 · 雙擊拒絕 · Esc 算 null — 全部會發 `agent_feedback` event）/ `ask_user`（收尾用的多選問題）。reel 不再「啪一聲就消失」，連 zero-config host 都會看到溫和的「完成 ✓」收尾。
 - 🚧 **新增兩個 analytics event** — `agent_mode_changed` 跟 `agent_tool_failed`，補可觀測性的洞（現在的 `agent_tool_end` 只在成功時 fire，mode 切換則完全沒訊號）。
 

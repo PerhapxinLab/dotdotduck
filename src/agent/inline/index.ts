@@ -38,6 +38,15 @@ import {
   REPLACEMENT_START,
 } from './parse';
 import { ensureInlineAgentStyles, UI_ATTR } from './styles';
+import {
+  resolveInlineScope,
+  type InlineScopeConfig,
+  type ScopeHandle,
+  type ScopeResolver,
+  type ScopeEntry,
+} from './scoping';
+
+export type { InlineScopeConfig, ScopeHandle, ScopeResolver } from './scoping';
 
 export interface InlineAgentConfig {
   llm: LLMSource;
@@ -270,6 +279,17 @@ export class InlineAgent {
   /** Prefix-trigger state: tracks whether the focused editable is currently
    *  in "prefix mode" (text starts with the configured prefix). */
   private prefixActive = false;
+  /** Scope registry: per-selector config overrides set via `attachScope`. */
+  private scopes: ScopeEntry[] = [];
+  /** Optional callback fallback for cases selectors can't express. */
+  private scopeResolver?: ScopeResolver;
+  /** Snapshot of the scope that matched the current selection's anchor
+   *  element. `null` means "no scope matched, use root config". Refreshed
+   *  in `handleSelectionChange`, frozen for the lifetime of the menu so
+   *  an in-flight action sees the same scope as the menu that opened it. */
+  private activeScopeConfig: InlineScopeConfig | null = null;
+  /** Monotonic id for scope entries. */
+  private scopeIdCounter = 0;
 
   constructor(config: InlineAgentConfig) {
     this.cfg = {
@@ -474,6 +494,111 @@ export class InlineAgent {
     this.actions = actions;
     this.refreshMenu();
   }
+
+  // ─── Scoping ────────────────────────────────────────────────
+  // Per-selector overrides of the root config. Innermost-wins on the
+  // selection's anchor element; live registry — call `attachScope` /
+  // `setScopeResolver` any time, the next selection sees it.
+
+  /**
+   * Register a per-region override. Any selection whose anchor element
+   * matches `selector` (or has an ancestor that does) will use
+   * `config` instead of the root InlineAgent config. Innermost match
+   * wins when scopes nest.
+   *
+   * Returns a handle whose `remove()` unregisters the scope.
+   *
+   * ```ts
+   * const handle = inline.attachScope('[data-region="docs-comment"]', {
+   *   actions: [translate, friendlyRewrite],
+   *   appendSystemPrompt: 'Tone: friendly, customer-facing.',
+   * });
+   * // …later
+   * handle.remove();
+   * ```
+   */
+  attachScope(selector: string, config: InlineScopeConfig): ScopeHandle {
+    const id = `scope-${++this.scopeIdCounter}`;
+    this.scopes.push({ id, selector, config });
+    return {
+      remove: () => {
+        const idx = this.scopes.findIndex((s) => s.id === id);
+        if (idx >= 0) this.scopes.splice(idx, 1);
+      },
+    };
+  }
+
+  /**
+   * Set a callback fallback for cases CSS selectors can't express. The
+   * resolver runs BEFORE selector matching — if it returns a non-null
+   * config, that wins. Return `null` to fall through to selectors.
+   */
+  setScopeResolver(resolver: ScopeResolver | undefined): void {
+    this.scopeResolver = resolver;
+  }
+
+  /**
+   * Compute the effective config for the current selection. Merges the
+   * matched scope (if any) onto the root config. Called from menu
+   * builders + `runAction` so a single resolved view is reused.
+   */
+  private active(): {
+    actions: InlineAction[];
+    llm: LLMSource;
+    systemPrompt: string | undefined;
+    layout: 'single-column' | 'two-column' | 'toolbar';
+    columnLabels: { col1?: string; col2?: string } | undefined;
+    translateTargets: Array<{ code: string; label: string }>;
+    tools: ActionDefinition[] | undefined;
+  } {
+    const s = this.activeScopeConfig;
+    if (!s) {
+      return {
+        actions: this.actions,
+        llm: this.llm,
+        systemPrompt: this.cfg.systemPrompt,
+        layout: this.cfg.layout,
+        columnLabels: this.cfg.columnLabels,
+        translateTargets: this.cfg.translateTargets,
+        tools: this.cfg.tools,
+      };
+    }
+    // Action merge: `actions` replaces root; `disabledActions` filters
+    // root (only if scope didn't replace); `appendActions` extends.
+    let actions: InlineAction[];
+    if (s.actions) {
+      actions = s.actions.slice();
+    } else if (s.disabledActions?.length) {
+      const drop = new Set(s.disabledActions);
+      actions = this.actions.filter((a) => !drop.has(a.id));
+    } else {
+      actions = this.actions.slice();
+    }
+    if (s.appendActions?.length) {
+      actions = [...actions, ...s.appendActions];
+    }
+    // System prompt merge: `systemPrompt` replaces; `appendSystemPrompt`
+    // adds to whatever the effective base prompt is.
+    let systemPrompt = s.systemPrompt ?? this.cfg.systemPrompt;
+    if (s.appendSystemPrompt) {
+      systemPrompt = systemPrompt
+        ? `${systemPrompt}\n\n${s.appendSystemPrompt}`
+        : s.appendSystemPrompt;
+    }
+    // Tools: explicit empty array = "no tools for this scope"; undefined
+    // = inherit root. (You can't disable root tools with a missing field.)
+    const tools = s.tools !== undefined ? (s.tools.length > 0 ? s.tools : undefined) : this.cfg.tools;
+    return {
+      actions,
+      llm: s.llm ?? this.llm,
+      systemPrompt,
+      layout: s.layout ?? this.cfg.layout,
+      columnLabels: s.columnLabels ?? this.cfg.columnLabels,
+      translateTargets: s.translateTargets ?? this.cfg.translateTargets,
+      tools,
+    };
+  }
+
   /** Toggle module on/off without unmounting. */
   setEnabled(on: boolean): void {
     this.enabled = on;
@@ -501,6 +626,7 @@ export class InlineAgent {
       this.currentEditable = active;
       this.currentSelection = { text, start, end };
       this.currentRect = this.getSelectionRect(active);
+      this.activeScopeConfig = resolveInlineScope(active, this.scopes, this.scopeResolver, text);
       this.showMenu();
       return;
     }
@@ -513,6 +639,7 @@ export class InlineAgent {
       this.currentEditable = active;
       this.currentSelection = { text, start: -1, end: -1 };
       this.currentRect = sel.getRangeAt(0).getBoundingClientRect();
+      this.activeScopeConfig = resolveInlineScope(active, this.scopes, this.scopeResolver, text);
       this.showMenu();
       return;
     }
@@ -552,7 +679,7 @@ export class InlineAgent {
 
     // Toolbar: anchor ABOVE the selection, horizontally centred (AFFiNE /
     // Notion style). Flip below only when there isn't room above.
-    if (this.cfg.layout === 'toolbar') {
+    if (this.active().layout === 'toolbar') {
       const selCenter = rect.left + rect.width / 2 + window.scrollX;
       let tLeft = selCenter - menuW / 2;
       tLeft = Math.max(8, Math.min(tLeft, viewportRight - menuW - 8));
@@ -594,14 +721,15 @@ export class InlineAgent {
   }
 
   private mountMenu(): void {
+    const layout = this.active().layout;
     const menu = document.createElement('div');
     menu.setAttribute(UI_ATTR, 'inline-agent');
-    if (this.cfg.layout === 'two-column') menu.setAttribute('data-layout', 'two-column');
-    else if (this.cfg.layout === 'toolbar') menu.setAttribute('data-layout', 'toolbar');
+    if (layout === 'two-column') menu.setAttribute('data-layout', 'two-column');
+    else if (layout === 'toolbar') menu.setAttribute('data-layout', 'toolbar');
     const list = document.createElement('div');
     list.className = 'ia-list';
     // Toolbar is icon-only and intentionally has no title row.
-    if (this.cfg.layout !== 'toolbar') {
+    if (layout !== 'toolbar') {
       const header = document.createElement('div');
       header.className = 'ia-header';
       header.textContent = this.t('header');
@@ -623,9 +751,10 @@ export class InlineAgent {
     if (!this.menuList) return;
     this.menuList.innerHTML = '';
 
-    if (this.cfg.layout === 'two-column') {
+    const layout = this.active().layout;
+    if (layout === 'two-column') {
       this.renderTwoColumn();
-    } else if (this.cfg.layout === 'toolbar') {
+    } else if (layout === 'toolbar') {
       this.renderToolbar();
     } else {
       this.renderSingleColumn();
@@ -636,7 +765,8 @@ export class InlineAgent {
     if (!this.menuList) return;
     this.menuList.className = 'ia-list ia-toolbar';
     let prevGroup: string | undefined;
-    this.actions.forEach((action, idx) => {
+    const actions = this.active().actions;
+    actions.forEach((action, idx) => {
       // Divider between adjacent buttons whose group differs.
       if (idx > 0 && action.group !== prevGroup) {
         const sep = document.createElement('span');
@@ -767,7 +897,7 @@ export class InlineAgent {
   private renderSingleColumn(): void {
     if (!this.menuList) return;
     this.menuList.className = 'ia-list';
-    this.actions.forEach((action, idx) => {
+    this.active().actions.forEach((action, idx) => {
       this.menuList!.appendChild(this.buildActionRow(action, idx));
     });
   }
@@ -775,29 +905,30 @@ export class InlineAgent {
   private renderTwoColumn(): void {
     if (!this.menuList) return;
     this.menuList.className = 'ia-list ia-two-col';
+    const scope = this.active();
     const col1 = document.createElement('div');
     col1.className = 'ia-col';
     const col2 = document.createElement('div');
     col2.className = 'ia-col';
 
     // Optional column headers (e.g. "Format" / "AI").
-    if (this.cfg.columnLabels?.col1) {
+    if (scope.columnLabels?.col1) {
       const h = document.createElement('div');
       h.className = 'ia-col-label';
-      h.textContent = this.cfg.columnLabels.col1;
+      h.textContent = scope.columnLabels.col1;
       col1.appendChild(h);
     }
-    if (this.cfg.columnLabels?.col2) {
+    if (scope.columnLabels?.col2) {
       const h = document.createElement('div');
       h.className = 'ia-col-label';
-      h.textContent = this.cfg.columnLabels.col2;
+      h.textContent = scope.columnLabels.col2;
       col2.appendChild(h);
     }
 
     // Actions partition: row=2 goes to col2, everything else to col1.
-    // We still pass each action its position in `this.actions` as `idx`
+    // We pass each action its position in the effective list as `idx`
     // so cursor / keyboard nav stays consistent across layouts.
-    this.actions.forEach((action, idx) => {
+    scope.actions.forEach((action, idx) => {
       const target = action.row === 2 ? col2 : col1;
       target.appendChild(this.buildActionRow(action, idx));
     });
@@ -840,6 +971,7 @@ export class InlineAgent {
     this.currentEditable = null;
     this.currentSelection = null;
     this.currentRect = null;
+    this.activeScopeConfig = null;
     if (this.hideTimer) { clearTimeout(this.hideTimer); this.hideTimer = null; }
   }
 
@@ -864,9 +996,10 @@ export class InlineAgent {
     // Only handle navigation keys when an editable with selection is focused —
     // we don't want to swallow Esc / ArrowDown in other contexts.
     if (e.key === 'Escape') { this.hide(); return; }
+    const scopeActions = this.active().actions;
     if (e.key === 'ArrowDown' || (e.ctrlKey && e.key === 'n')) {
       e.preventDefault();
-      this.cursor = Math.min(this.actions.length - 1, this.cursor + 1);
+      this.cursor = Math.min(scopeActions.length - 1, this.cursor + 1);
       this.paintActive();
     } else if (e.key === 'ArrowUp' || (e.ctrlKey && e.key === 'p')) {
       e.preventDefault();
@@ -875,9 +1008,9 @@ export class InlineAgent {
     } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey || e.altKey)) {
       // Use modifier + Enter so plain Enter in the editable still adds a newline.
       e.preventDefault();
-      const action = this.actions[this.cursor];
+      const action = scopeActions[this.cursor];
       if (!action) return;
-      if (this.cfg.layout === 'toolbar' && action.kind === 'dropdown') {
+      if (this.active().layout === 'toolbar' && action.kind === 'dropdown') {
         const btn = this.menuList?.querySelector<HTMLElement>(`.ia-tool[data-idx="${this.cursor}"]`);
         if (btn) this.openDropdown(action, btn);
       } else {
@@ -1006,13 +1139,18 @@ export class InlineAgent {
     }
 
     try {
-      const llm = resolveLLM(this.llm, 'inline');
+      // Snapshot the active scope's effective config for this run. Capture
+      // ONCE so the menu-time scope wins even if a later registration
+      // would have changed the resolution mid-flight.
+      const scope = this.active();
+      const llm = resolveLLM(scope.llm, 'inline');
       const userMessage = `Instruction: ${instruction}\n\nContext (with selection marked):\n"""\n${contextPrompt}\n"""`;
-      const systemMessage = this.cfg.systemPrompt ?? SYSTEM_PROMPT;
+      const systemMessage = scope.systemPrompt ?? SYSTEM_PROMPT;
       const mode = action.displayAs ?? 'replace';
+      const scopeTools = scope.tools;
 
       const streamingProvider = llm as unknown as StreamingProvider;
-      const canStream = typeof streamingProvider.streamComplete === 'function' && !this.cfg.tools;
+      const canStream = typeof streamingProvider.streamComplete === 'function' && !scopeTools;
 
       if (canStream && (mode === 'replace' || mode === 'subtitle' || mode === 'confirm')) {
         const handle = streamingProvider.streamComplete!({
@@ -1043,8 +1181,8 @@ export class InlineAgent {
           this.dddk?.subtitle.finalizeStreamed({ autoHide: 0 });
         }
       } else {
-        const result = this.cfg.tools
-          ? await this.runWithTools(llm, systemMessage, userMessage, sel.text.length, myToken)
+        const result = scopeTools
+          ? await this.runWithTools(llm, systemMessage, userMessage, sel.text.length, myToken, scopeTools)
           : await llm.complete({
               messages: [
                 { role: 'system', content: systemMessage },
@@ -1248,8 +1386,8 @@ export class InlineAgent {
     userMessage: string,
     selLength: number,
     myToken: number,
+    tools: ActionDefinition[],
   ): Promise<{ content: string }> {
-    const tools = this.cfg.tools ?? [];
     const toolDefs = tools.map((t) => ({
       name: t.name,
       description: t.description,
@@ -1515,6 +1653,11 @@ export class InlineAgent {
     if (!fullValue.startsWith(prefix)) return;
     const instruction = fullValue.slice(prefix.length).trim();
     if (!instruction) return;
+    // Resolve scope for the trigger element. The prefix flow doesn't go
+    // through `handleSelectionChange`, so `activeScopeConfig` isn't set
+    // yet — do it manually here so a scoped textarea still gets its
+    // overridden llm / systemPrompt for the prefix-AI replacement.
+    this.activeScopeConfig = resolveInlineScope(target, this.scopes, this.scopeResolver, instruction);
 
     if (this.cfg.prefixTrigger?.confirmBeforeReplace) {
       const zh = this.cfg.locale === 'zh-TW';
@@ -1530,10 +1673,11 @@ export class InlineAgent {
     this.runToken++;
     const myToken = this.runToken;
     try {
-      const llm = resolveLLM(this.llm, 'inline');
+      const scope = this.active();
+      const llm = resolveLLM(scope.llm, 'inline');
       const result = await llm.complete({
         messages: [
-          { role: 'system', content: this.cfg.systemPrompt ?? SYSTEM_PROMPT },
+          { role: 'system', content: scope.systemPrompt ?? SYSTEM_PROMPT },
           { role: 'user', content: `Instruction: ${instruction}\n\nContext (with selection marked):\n"""\n[[SEL]][[/SEL]]\n"""\n\nReturn JSON: { "replacement": "..." }` },
         ],
         thinking: 'off',

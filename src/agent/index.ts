@@ -94,6 +94,9 @@ export {
   InlineAgent,
   type InlineAgentConfig,
   type InlineAction,
+  type InlineScopeConfig,
+  type ScopeHandle,
+  type ScopeResolver,
 } from './inline';
 
 // ─── Agent cursor (visual layer) ───────────────────────────────────
