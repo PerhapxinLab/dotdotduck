@@ -28,22 +28,28 @@ export function buildPlanSystemPrompt(ctx: PlanPromptContext): string {
   const sections: string[] = [];
   const agent = ctx.agentName ?? 'Agent';
 
-  sections.push(`You are the planning layer for ${agent}. Given the user's task and the site context below, output a SHORT task summary and an ORDERED list of todos. The webagent loop will execute the todos one turn at a time — every todo you write becomes one turn of work.`);
+  sections.push(`You are the planning layer for ${agent}. Output a SHORT task summary and an ORDERED list of todos. The webagent runs them one turn at a time.
 
-  sections.push(`# Output format
+# Step 0 — pick the destination FIRST (before anything else)
 
-Return JSON with fields \`task_summary\` (one short sentence in the user's language) and \`todos\` (ordered array). Each todo has \`intent\` (one of navigate / narrate / click / fill / ask / finish), \`description\` (one short clause describing what the user will perceive happen), and \`expected_turn\` (1-based integer).
+Before reading any other section, scan the user's task text for routing keywords. The route map is defined by the host in the appendSystemPrompt section below ("# Route → topic map"). Read that table BEFORE deciding the first todo.
+
+The first todo is ALMOST ALWAYS a \`navigate\` to the route that owns the user's topic. The DOM of the current page is NOT a substitute — even when the current page mentions a topic in passing, the dedicated page for that topic is the right destination. The user did not ask "summarize what you see"; they asked a topical question, and topic → route is decided by the host's route map, not by what happens to be on screen.
+
+EXCEPTION 1: the current page already IS the route the topic owns. Then skip the navigate and go straight to narrate.
+EXCEPTION 2: the user explicitly says "stay here" / "tell me about THIS page" / "what's on this page" / "讀這頁".
+
+# Output format
+
+JSON: \`task_summary\` (one short sentence in user's language) and \`todos\` (ordered array). Each todo has \`intent\` (navigate / narrate / click / fill / ask / finish), \`description\` (one short clause), \`expected_turn\` (1-based int).
 
 # How to plan
 
-Plan only the todos needed to cover the user's ask. When the ask is covered, the plan ends.
-One todo equals one turn. Never fold a navigate and a narrate into the same todo — they happen on different turns because the DOM dump only refreshes after navigate completes.
-A todo description states what the team SAYS or DOES for the user. It is not a meta-checklist of topics to cover.
-The last todo always has intent \`finish\` so the webagent knows the task is over.
+One todo = one turn. Never fold navigate and narrate into one todo (DOM dump only refreshes after navigate). Plan only the todos needed to cover the ask. Last todo is always \`finish\`.
 
 # Use the page DOM
 
-If the host context includes a \`# Current page DOM\` section, that is the agent's eyes — what the user actually sees right now. Prefer routes / links / sections you can find IN THE DOM over routes you only know from the briefed sitemap. The briefed sitemap can go stale; the DOM cannot. When the user asks about a topic and a matching link visibly exists on the current page (e.g. "Coming soon" → \`/platform\`, "API reference" → \`/docs/api\`), the FIRST todo is \`navigate\` to that exact path, regardless of whether the briefed sitemap listed it.`);
+The host context's \`# Current page DOM\` section is what the user sees NOW. Use it to (a) check if you're already on the right route, (b) pick the exact selector for click/fill todos. It does NOT override the host's route map — see Step 0.`);
 
   if (ctx.brand) {
     const lines: string[] = ['# Product context'];

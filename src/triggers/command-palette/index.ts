@@ -1284,22 +1284,31 @@ export class CommandPalette {
     // HeatRank / context-promotion scatters same-section items across
     // the filtered array. The lastSection toggle below only collapses
     // ADJACENT same-section rows; with HeatRank, the [Go to, Settings,
-    // ..., Go to, ...] order would emit "前往" twice. Reorder items so
-    // each section's rows are contiguous; section order follows the
-    // FIRST appearance of each section in the original filtered order
-    // (preserves "the most relevant first" intent).
-    const firstIdxBySection = new Map<string, number>();
-    this.filtered.forEach((it, i) => {
+    // ..., Go to, ...] order would emit "前往" twice.
+    //
+    // Section order is derived from REGISTRATION ORDER (this.rootItems),
+    // NOT from filtered order — otherwise a HeatRank-promoted item drags
+    // its whole section to the top, violating the host's hand-curated
+    // section sequence (host registered Settings then Go-to → Settings
+    // must render above Go-to even when Go-to has the hottest item).
+    // Within a section, HeatRank ordering of items is preserved.
+    const sectionRegOrder = new Map<string, number>();
+    for (const it of this.rootItems) {
       const s = it.section ?? 'Commands';
-      if (!firstIdxBySection.has(s)) firstIdxBySection.set(s, i);
+      if (!sectionRegOrder.has(s)) sectionRegOrder.set(s, sectionRegOrder.size);
+    }
+    // Sections that appear in filtered but were never in rootItems
+    // (post-mount additions / fallbacks / Tips) tail-append in their
+    // first-seen order.
+    this.filtered.forEach((it) => {
+      const s = it.section ?? 'Commands';
+      if (!sectionRegOrder.has(s)) sectionRegOrder.set(s, sectionRegOrder.size);
     });
     this.filtered.sort((a, b) => {
       const sa = a.section ?? 'Commands';
       const sb = b.section ?? 'Commands';
       if (sa === sb) return 0;
-      const ia = firstIdxBySection.get(sa)!;
-      const ib = firstIdxBySection.get(sb)!;
-      return ia - ib;
+      return sectionRegOrder.get(sa)! - sectionRegOrder.get(sb)!;
     });
 
     let lastSection = '';
