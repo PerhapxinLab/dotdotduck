@@ -203,6 +203,42 @@ export async function* executeLoop(
       agent.setStatusInternal('navigating');
       const path = String(toolCall.arguments.path ?? '');
       const from = session.currentPage;
+      // Validate against the sitemap when one is configured. Without
+      // this, small models invent paths from labels they read in route
+      // descriptions ("Coming soon" → /coming-soon, "roadmap" →
+      // /roadmap) and land on 404. With it on, the SDK rejects unknown
+      // paths with a clear message + the actual path list, so the
+      // model retries with a real route on the next turn.
+      const sm = agent.configRef.sitemap;
+      const knownPaths: string[] = [];
+      if (Array.isArray(sm)) {
+        for (const e of sm) if (typeof e?.path === 'string') knownPaths.push(e.path);
+      } else if (sm && typeof sm === 'object') {
+        // SitemapNode tree — walk recursively for `.path` fields
+        const stack: unknown[] = [sm];
+        while (stack.length) {
+          const node = stack.pop() as { path?: string; children?: unknown[] } | undefined;
+          if (!node || typeof node !== 'object') continue;
+          if (typeof node.path === 'string') knownPaths.push(node.path);
+          if (Array.isArray(node.children)) stack.push(...node.children);
+        }
+      }
+      if (knownPaths.length > 0 && path && !knownPaths.includes(path)) {
+        result = {
+          ok: false,
+          reason: 'navigation',
+          message: `Path "${path}" is not in this site's sitemap. The valid paths are: ${knownPaths.map((p) => `"${p}"`).join(', ')}. Pick one of those and retry. Do not invent paths from label words.`,
+        };
+        yield { kind: 'tool-end', name: 'navigate', result, toolCallId: toolCall.id };
+        pushAgentStep(session, {
+          preText: textBuffer || undefined,
+          toolCall: { name: toolCall.name, arguments: toolCall.arguments },
+          toolCallId: toolCall.id,
+          result,
+        });
+        agent.persistSessionInternal();
+        continue;
+      }
       // Surface the loading beat BEFORE the router fires so the host can
       // show a loading indicator until `navigated` arrives.
       yield { kind: 'navigating', from, to: path };
@@ -511,6 +547,14 @@ async function* dispatchOneAction(
             emitPresentSurface: undefined,
             session,
             defaultPauseNote: '',
+            // Without this, the cursor + tap pulse never fire on the
+            // narrate-about beat — the synthesized border call has to
+            // see the same cursorTrail flag the regular tool path
+            // passes through. Same hint shape, same source of truth.
+            uiHints: {
+              cursorTrail: agent.configRef.cursorTrail,
+              preferClickLinkOverNavigate: agent.configRef.preferClickLinkOverNavigate,
+            },
           },
           'border',
           { selector: about },

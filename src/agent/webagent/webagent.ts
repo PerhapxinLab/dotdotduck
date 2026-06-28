@@ -53,7 +53,13 @@ import { DEFAULT_CONTEXT_PROVIDERS } from './context-providers';
 const DEFAULT_MAX_STEPS = 30;
 const DEFAULT_MAX_ERRORS = 3;
 const DEFAULT_LLM_TIMEOUT_MS = 60_000;
-const DEFAULT_CONTINUITY_MS = 5 * 60 * 1000;
+// Default = 0 (cross-query continuity OFF). Within ONE user query
+// the agent's loop already carries memory / master_todos across all
+// its internal turns — that's the loop, not "continuity". Continuity
+// is about the NEXT user query reusing the prior query's session;
+// almost nobody wants that by default. Hosts building chat-style
+// follow-up agents opt in by setting e.g. 60_000.
+const DEFAULT_CONTINUITY_MS = 0;
 
 /**
  * Per-LLM-call performance sample emitted to the orchestrator after each

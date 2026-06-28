@@ -28,51 +28,39 @@ export function buildPlanSystemPrompt(ctx: PlanPromptContext): string {
   const sections: string[] = [];
   const agent = ctx.agentName ?? 'Agent';
 
-  sections.push(`You are the planning layer for ${agent}. Output a SHORT task summary and an ORDERED list of todos. The webagent runs them one turn at a time.
+  // Single short core. The webagent loop already knows how to execute
+  // todos; the planner just needs to know its JOB, its OUTPUT SHAPE,
+  // and that the user message carries the live DOM. No section headers,
+  // no example routes, no keyword rules. Trust the model to reason
+  // from the host's route descriptions + the current DOM.
+  sections.push(
+    `You are ${agent}'s planner. Output JSON: { task_summary, todos }.
 
-# Output format
+- task_summary: one short sentence the user will see.
+- todos: ordered array. Each item: { intent, description, expected_turn }. intent ∈ navigate | narrate | click | fill | ask | finish. Last item's intent is "finish".
+- One todo = one turn. Don't combine navigate and narrate — the DOM only refreshes after navigate.
 
-JSON: \`task_summary\` (one short sentence in user's language) and \`todos\` (ordered array). Each todo has \`intent\` (navigate / narrate / click / fill / ask / finish), \`description\` (one short clause), \`expected_turn\` (1-based int).
+The user message carries the user's task, the current page DOM, and any selection. Pick the route whose description best matches the user's topic; navigate there if you're not already on it, then narrate. Reply in the user's input language.`
+  );
 
-# How to plan
-
-One todo = one turn. Never fold navigate and narrate into one todo — the DOM dump only refreshes after navigate completes. Plan only the todos needed to cover the ask, no more. The last todo is always \`finish\`.
-
-# What you can see
-
-You have two views of the site:
-
-- The HOST's route descriptions (in the host's appendSystemPrompt and brand sections below) — what each route is for, in plain prose. These tell you which page OWNS which topic.
-- The CURRENT page DOM (in the user message under "# Current page DOM") — what the user sees right now, including the sidebar / nav links available for navigation. This tells you what page you're on and what's reachable from here.
-
-Use both together. The user asked a topical question; pick the route whose description best matches that topic. If you're already on that route, skip the navigate and narrate directly. If not, the first todo is \`navigate\` to that route — even when the current page happens to mention the topic in passing, the dedicated page is where the user gets the real answer.
-
-If multiple routes could plausibly match, read their descriptions more carefully and pick the most specific. Do not use the current page as a fallback when a better-fit route exists.`);
-
-  if (ctx.brand) {
-    const lines: string[] = ['# Product context'];
-    if (ctx.brand.productName) lines.push(`- Product: ${ctx.brand.productName}`);
-    if (ctx.brand.voice) lines.push(`- Voice: ${ctx.brand.voice}`);
-    if (ctx.brand.constraints?.length) {
-      lines.push('- Hard constraints:');
-      for (const c of ctx.brand.constraints) lines.push(`  - ${c}`);
-    }
-    sections.push(lines.join('\n'));
-  }
-
+  // Persona + brand voice + constraints inline as prose, no headers.
+  const personaLines: string[] = [];
   if (ctx.persona) {
     const identity = typeof ctx.persona === 'string' ? ctx.persona : ctx.persona.identity;
-    if (identity?.trim()) {
-      sections.push(`# Speak as\n\n${identity.trim()}`);
-    }
+    if (identity?.trim()) personaLines.push(identity.trim());
   }
+  if (ctx.brand?.voice) personaLines.push(`Voice: ${ctx.brand.voice}`);
+  if (ctx.brand?.constraints?.length) {
+    for (const c of ctx.brand.constraints) personaLines.push(c);
+  }
+  if (personaLines.length) sections.push(personaLines.join('\n'));
 
-  if (ctx.sitemap) {
+  // Sitemap is auto-rendered ONLY when the host hasn't provided their
+  // own route descriptions via appendSystemPrompt. Avoids duplicating
+  // "what each route is for" in two competing places — the host's
+  // prose descriptions are richer than the auto-rendered list.
+  if (ctx.sitemap && !ctx.appendSystemPrompt) {
     sections.push(renderSitemap(ctx.sitemap));
-  }
-
-  if (ctx.locale) {
-    sections.push(`# Language\n\ntask_summary in \`${ctx.locale}\` unless the user clearly used another language.`);
   }
 
   if (ctx.appendSystemPrompt) {

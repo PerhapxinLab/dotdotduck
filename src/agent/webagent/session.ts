@@ -90,6 +90,13 @@ export function clearSession(key: string = DEFAULT_SESSION_KEY): void {
  *     OR last update is within continuityMs
  */
 export function isSessionLive(session: AgentSession, continuityMs: number): boolean {
+  // Explicit reload (F5 / Ctrl+R / Ctrl+Shift+R) means the user
+  // wants a clean slate. Stored sessions surviving a reload feel
+  // haunted — the agent claims to "remember" attempts from a tab
+  // the user manually reset. Treat reload as the boundary that ends
+  // session continuity, full stop. Cross-PAGE-navigation continuity
+  // (SPA route change) still works because that's not a reload.
+  if (isReloadNavigation()) return false;
   if (session.status === 'thinking' || session.status === 'executing' || session.status === 'navigating' || session.status === 'waiting') {
     return true;
   }
@@ -97,6 +104,28 @@ export function isSessionLive(session: AgentSession, continuityMs: number): bool
     return Date.now() - session.updatedAt <= continuityMs;
   }
   return false;
+}
+
+/**
+ * Was the current page entered via reload? Cached on first call —
+ * `performance.getEntriesByType('navigation')` returns the same
+ * record for the lifetime of the document. Returns false for SSR /
+ * environments without performance API.
+ */
+let _isReloadCache: boolean | null = null;
+function isReloadNavigation(): boolean {
+  if (_isReloadCache !== null) return _isReloadCache;
+  if (typeof performance === 'undefined' || !performance.getEntriesByType) {
+    _isReloadCache = false;
+    return false;
+  }
+  try {
+    const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+    _isReloadCache = nav?.type === 'reload';
+  } catch {
+    _isReloadCache = false;
+  }
+  return _isReloadCache;
 }
 
 /**

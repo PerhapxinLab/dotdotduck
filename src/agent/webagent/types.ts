@@ -433,7 +433,13 @@ export interface WebAgentConfig {
    * Multi-turn continuity. After a turn ends, follow-ups within this
    * window append to the current session as user turns. Older than this
    * and the next `runStream()` starts a fresh session.
-   * Default 5 * 60 * 1000 (5 minutes). Pass `0` to disable continuity.
+   *
+   * Default `0` (OFF) — most webagent usage is one-shot ("how do I X?",
+   * answer, done); carrying prior turns into a new ask causes the LLM
+   * to conflate unrelated questions. Hosts building conversational
+   * agents (chat-style follow-ups) opt in by setting e.g.
+   * `5 * 60 * 1000`. Cross-PAGE continuity (SPA navigation mid-run)
+   * is independent and always on.
    */
   sessionContinuityMs?: number;
 
