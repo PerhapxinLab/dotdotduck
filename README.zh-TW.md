@@ -32,6 +32,9 @@ https://github.com/user-attachments/assets/18d797df-4952-421a-a2b3-16aef1ebcb34
 <td width="45%" valign="top">
 
 - **Ctrl/⌘+K 打開**。註冊的指令跟 Ask AI 並排在同一張清單 — 切主題、切語言、開帳單、找客戶，全部用同一個入口處理。
+- **內嵌掛載或彈窗，同一份 item**。`dddk.palette.mountInline(host)` 把 palette 常駐嵌進 sidebar / drawer / 對話框（無背景遮罩、不會點外面關閉）。Ctrl/⌘+K 依然有效 — 會把完整 modal 疊在 inline 上方，關掉時再復原。host 寫一份 item 就同時得到兩個 surface。
+- **多行 row + 縮圖**。Item 支援 `lines: string[]`（多行 metadata 直欄）跟 `image`（縮圖 URL）— 書封 + 標題 + 簡介 + 作者多行排版、商品照、客戶頭像，免寫 custom renderer。
+- **可選送出按鈕**。`submitButton: true` 在 input 右側放一顆圓形 send 鈕，按它（或 Enter）會把當前 query 送給 host 註冊的 fallback item。
 - **前綴路由** — `/command`、`@entity`、`order:`、`#tag` — 給使用者一個方便的入口，不管當下卡在哪都能找得到答案。
 - **多層客製**疊在一起：CSS 變數換主題、Skill SDK（多數 host 只需要 Script / Prompt；進階再用 Action / Surface / Panel）寫劇本、或直接把現有的 host 功能接成 palette item。
 - **零內建指令** — palette 裡顯示什麼完全由你決定。SDK 提供基礎建設，詞彙交給你。
@@ -52,7 +55,8 @@ https://github.com/user-attachments/assets/18d797df-4952-421a-a2b3-16aef1ebcb34
 <td width="45%" valign="top">
 
 - **DOM-grounded 自主迴圈**。讀目前可見的頁面，一次選一個 tool，跑之前先把步驟唸到字幕條上給使用者看。
-- **內建 action 一籃子** — `navigate`、`click`、`fill_input`、`ask_user_choice`、`border`、`highlight` 等等。要加自己的也行，LLM 自己選用哪一個。
+- **加入制的 action bundle**。預設只裝 `coreActions`（4 個：navigate · click · border · scroll_to）— 每個 host 都會用到的核心。要 `formActions`（fill_input · select_option · clear_input · press_key）、`flowActions`（wait · pause · ask_user · ask_user_choice）或 `extraActions`（highlight · track_intent · escalate_to_human）就傳進 `customActions` opt-in。預設小 = prompt 便宜、目錄誠實。當然也可以加自己的，LLM 自己選用哪一個。
+- **每個動作都有滑鼠**。`cursorTrail: true` 打開後，每個動作執行**之前**會有合成游標滑到目標 — click / fill_input / border / highlight / scroll_to（游標切成滑鼠滾輪圖示沿著捲動路徑走）/ narrate 帶 `about`（自動透過合成的 `border` call 拿到）。內含執行前停頓 + 抵達脈動 + reduced-motion fallback。
 - **每一步都靠 Space 把關**。單擊接受 · 雙擊拒絕 · Esc 取消。使用者在事情發生**之前**就看得到它要做什麼。
 - **不確定時主動問**。`ask_user_choice` 對應 2-4 個選項，`ask_user` 接收自由文字。不會偷偷做決定，也不會憑空猜。
 - **自帶 key**。LLM 可走 OpenAI、Google AI Studio、或 server 端的 `ProxyProvider`；per-role routing 把便宜的模型留給後處理、把旗艦留給 agent 迴圈。STT 預設用瀏覽器內建的 Web Speech 零設定，要換 Whisper 或任何廠商就一行 `transcribe(audio)` callback。
@@ -247,6 +251,9 @@ https://github.com/user-attachments/assets/18d797df-4952-421a-a2b3-16aef1ebcb34
 - ✅ **InlineAgent scoping** — `inlineAgent.attachScope(selector, config)` 給每個區域自己的 action set。文件評論區的 textarea 跟編輯器裡的 code block 不該共用同一組 action；以 selection 落點 element 為起點往上 walk、innermost-wins，selector 表達不出來的 case 用 `setScopeResolver(callback)` fallback。scope 可以獨立 override `actions` / `llm` / `systemPrompt` / `layout` / `tools`，或用 `appendActions` / `appendSystemPrompt` 疊在 root 之上。
 - ✅ **`onLoopEnd` hook** — agent loop 收尾 UI：`silent` / `text` / `feedback`（Space 接受 · 雙擊拒絕 · Esc 算 null — 全部會發 `agent_feedback` event）/ `ask_user`（收尾用的多選問題）。zero-config host 也會看到溫和的「完成 ✓」收尾。
 - ✅ **`agent_tool_failed` intent event** — tool handler 回 `{ ok: false }`（或 throw — `reason: 'unknown'`，message 保留）就 fire。補可觀測性的洞 — 之前 `agent_tool_end` 在 host emitter 有但沒進 intent stream，現在 dashboard 可以畫「哪個 tool 在掉、為什麼掉、掉得多頻繁」。
+- ✅ **加入制 action bundle** — v0.2 前預設 12 個 action 全裝、host 用 `excludeTools` 拔；實測 dddk-frontend 拔了 6/12。v0.2 翻過來：預設只裝 `coreActions`（navigate / click / border / scroll_to）。要 `formActions` / `flowActions` / `extraActions` 就 `customActions` opt-in。`builtinActions` 留下當聯集向後相容。Prompt 更小、目錄更誠實、鼓勵目的導向裝配。
+- ✅ **每個動作都有游標** — 合成游標以前只在 `click`（跟 `preferClickLinkOverNavigate` 開時的 `navigate`）出現。v2 擴展到所有互動 tool：`border` / `highlight` / `fill_input` 動作前游標滑到目標；`scroll_to` 把游標切成滑鼠滾輪圖示、沿著捲動路徑走、落在終點、再切回箭頭；`narrate` 帶 `about` 透過合成的 `border` call 自動繼承。新 runtime API：`moveCursorTo(el)`、`cursorPulse()`、`setCursorMode('pointer' | 'scroll' | 'reading')`。
+- ✅ **Inline palette + 多元 row** — `dddk.palette.mountInline(host, opts?)` 把 palette 常駐嵌進 host 元素（無背景遮罩、不會點外面關閉）。跟 Ctrl/⌘+K modal 共用同一份 item；Ctrl/⌘+K 會把 modal 疊上來，關掉時還原 inline。新增 `PaletteItem.lines: string[]`（多行 metadata 直欄）+ `image: string`（縮圖 URL）+ `submitButton: boolean`（input 右側圓形送出鈕）。
 - ✅ **自架分析層**（`@perhapxin/dddk/analytics`） — 每個 `BaseEvent` 都可以落地到瀏覽器本地的 IndexedDB `EventStore`，可查詢、有上限保護（預設 50k 事件 / 30 天，host 可調 `Infinity` 並決定政策：`'ring'` / `'drop-new'` / `{ notifyHost }`）。內建 `toCSV` / `toNDJSON` / `toSQL` 三種匯出，搭配 function-based `SqlSchemaMapper` 重塑成 host 自己的 DB schema；canonical `dddk_events` DDL 出貨 SQLite / Postgres / MySQL 三種方言。
 - ✅ **內建迷你 dashboard**（`@perhapxin/dddk/analytics/dashboard`） — `renderDashboard(container, store)` 把六張 vanilla SVG 圖（每日事件量、palette 熱門指令、agent 完成率、回饋分布、語音啟動、平均 LLM 延遲）掛到任何 DOM container；自動套用 host 的 `--dddk-*` 主題 token、不依賴任何 charting library、中英雙語 label、可選自動刷新。Host 想加自己的卡片，直接用 `lineChart` / `barChart` / `donut` / `numberTile` 同樣的 primitive 自己組。
 
