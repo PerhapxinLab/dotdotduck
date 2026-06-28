@@ -352,6 +352,21 @@ export interface WebAgentConfig {
   /** sessionStorage key. Default 'webagent.session'. */
   sessionStorageKey?: string;
 
+  /**
+   * Inject a shared `AgentSession` instead of letting the agent
+   * create + persist its own. Use to share conversation history +
+   * memory across multiple WebAgent instances (e.g. different
+   * personas per route) so cross-page continuity survives even when
+   * the active agent changes. The agent reads + appends to the same
+   * object; it does NOT replace the reference on continuity expiry
+   * — that's the host's job (via `dddk.sessions.reset(name)`).
+   *
+   * When set, the agent skips the lazy `createSession` step and the
+   * `loadSession` lookup. The host (or `dddk.sessions`) becomes
+   * solely responsible for the session's lifecycle. v0.2 · Wave 2·A.
+   */
+  session?: AgentSession;
+
   /** Override default tool list (advanced). */
   toolDefinitions?: ToolDefinition[];
 

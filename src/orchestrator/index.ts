@@ -46,6 +46,8 @@ import type {
 
 import type { DotDotDuckConfig } from './types';
 import { AgentLifecycle } from './agent-lifecycle';
+import { SessionsRegistry } from './sessions-registry';
+import { AgentsRegistry } from './agents-registry';
 import { SkillDispatcher } from './skill-dispatcher';
 import { HighlightOverlay } from './highlight';
 import { IntentBuffer } from './intent-buffer';
@@ -54,6 +56,10 @@ import { defaultStorage, searchPageText } from './helpers';
 
 export type { DotDotDuckConfig } from './types';
 export { searchPageText, blobToDataUrl, defaultStorage } from './helpers';
+export { SessionsRegistry } from './sessions-registry';
+export type { SessionRegistration } from './sessions-registry';
+export { AgentsRegistry } from './agents-registry';
+export type { RegisterableAgent } from './agents-registry';
 
 export class DotDotDuck {
   readonly skills: SkillRegistry;
@@ -134,6 +140,22 @@ export class DotDotDuck {
    */
   _pendingSurface: { resolve: (data: Record<string, unknown> | null) => void } | null = null;
   /** @internal */ _agentInstance: WebAgent | null = null;
+  /**
+   * Named session registry — `dddk.sessions`. Hosts use this to share
+   * a single `AgentSession` across multiple agents (one persona per
+   * route, etc.) so cross-page conversation history + memory carry
+   * over even when the active agent changes. v0.2.0 · Wave 2·A.
+   */
+  readonly sessions: SessionsRegistry = new SessionsRegistry();
+  /**
+   * Named agent registry — `dddk.agents`. Hosts register multiple
+   * `WebAgent` instances by name + designate which one is "active"
+   * (the one palette / voice / dwell routes to). Singleton
+   * `dddk.getAgent()` keeps working — it returns the active agent
+   * when the registry is in use, otherwise the lazy-built one.
+   * v0.2.0 · Wave 2·A.
+   */
+  readonly agents: AgentsRegistry = new AgentsRegistry();
   /** @internal */ _voiceEnabled: boolean;
   /** @internal */ _agentEnabled: boolean;
   /** @internal */ _currentSelection: SelectionContext | null = null;
@@ -572,9 +594,15 @@ export class DotDotDuck {
     return this._agentEnabled;
   }
 
-  /** Access the underlying WebAgent (null until first startAgent call). */
+  /**
+   * Active WebAgent. With multi-instance wiring (v0.2.0 · Wave 2·A),
+   * this returns whichever agent the host put in `dddk.agents` and
+   * called `setActive(name)` on; falls back to the lazy-built
+   * singleton from `startAgent` for hosts that haven't adopted the
+   * registry. `null` when no agent is configured.
+   */
   getAgent(): WebAgent | null {
-    return this._agentInstance;
+    return this.agents.getActive() ?? this._agentInstance;
   }
 
   /** Forward a user response to the agent (for ask_user / surface form submits). */

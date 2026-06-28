@@ -11,8 +11,8 @@
 
 // ─── orchestrator ──────────────────────────────────────────────────
 
-export { DotDotDuck, searchPageText } from './orchestrator';
-export type { DotDotDuckConfig } from './orchestrator';
+export { DotDotDuck, searchPageText, SessionsRegistry, AgentsRegistry } from './orchestrator';
+export type { DotDotDuckConfig, SessionRegistration, RegisterableAgent } from './orchestrator';
 
 // ─── tools registry ────────────────────────────────────────────────
 

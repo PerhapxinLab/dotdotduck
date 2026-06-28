@@ -79,6 +79,13 @@ export class WebAgent {
   /** @internal */ config: ResolvedConfig;
   /** @internal */ actions: Map<string, ActionDefinition> = new Map();
   /** @internal */ session: AgentSession | null = null;
+  /**
+   * True when the host injected a `session` via config — disables
+   * the agent's own auto-create / auto-load + auto-persist paths
+   * because the session is owned upstream (typically `dddk.sessions`).
+   * @internal
+   */
+  private sessionInjected = false;
   /** @internal */ currentSelection: SelectionContext | null = null;
   /** @internal */ currentIndexMap: Map<string, Element> = new Map();
   /** @internal */ navigateBridge: ((path: string) => void | Promise<void>) | null = null;
@@ -147,6 +154,14 @@ export class WebAgent {
 
     this.destructivePatterns = config.destructivePatterns ?? DEFAULT_DESTRUCTIVE_PATTERNS;
 
+    // Host injected a shared session — adopt it as the initial session
+    // and stop the agent from auto-loading / auto-replacing it. This is
+    // the entry point for multi-instance session sharing.
+    if (config.session) {
+      this.session = config.session;
+      this.sessionInjected = true;
+    }
+
     this.crossTabKey = `${this.config.sessionStorageKey}.crosstab`;
     if (config.crossTabSync) {
       this.broadcastChannel = setupCrossTabSync({
@@ -191,7 +206,10 @@ export class WebAgent {
   clearSession(): void {
     this.session = null;
     this.continuityEnded = false;
-    clearSession(this.config.sessionStorageKey);
+    // Injected mode: don't touch localStorage — the registry persists.
+    if (!this.sessionInjected) {
+      clearSession(this.config.sessionStorageKey);
+    }
   }
 
   /**
@@ -296,10 +314,17 @@ export class WebAgent {
   runStream(task: string, opts: RunOptions = {}): AsyncIterable<AgentEvent> {
     const currentPath = typeof location !== 'undefined' ? location.pathname + location.search : '/';
 
-    const fresh = opts.freshSession === true || this.continuityEnded ||
-      !this.session ||
-      !isSessionLive(this.session, this.config.sessionContinuityMs) ||
-      (this.config.sessionScope === 'palette' && this.continuityEnded);
+    // Continuity / fresh-session logic only applies to agents that own
+    // their own session. Injected sessions are upstream-owned: the
+    // host (or `dddk.sessions.reset`) decides when a session ends,
+    // not this agent. We still respect an explicit `opts.freshSession`
+    // — that's a per-call override the host can pass through.
+    const fresh = this.sessionInjected
+      ? opts.freshSession === true || !this.session
+      : opts.freshSession === true || this.continuityEnded ||
+        !this.session ||
+        !isSessionLive(this.session, this.config.sessionContinuityMs) ||
+        (this.config.sessionScope === 'palette' && this.continuityEnded);
 
     if (fresh) {
       this.stop();
@@ -327,6 +352,9 @@ export class WebAgent {
    */
   resumeStream(): AsyncIterable<AgentEvent> {
     if (!this.session) {
+      // Injected mode skips the localStorage lookup — the registry
+      // owns the session and will have already wired one in.
+      if (this.sessionInjected) return emptyStream();
       const saved = loadSession(this.config.sessionStorageKey);
       if (!saved) return emptyStream();
       this.session = saved;
@@ -394,6 +422,12 @@ export class WebAgent {
   /** @internal */
   persistSessionInternal(): void {
     if (!this.session) return;
+    // Injected sessions are owned by `dddk.sessions` (or the host
+    // directly) — persisting per-agent would race a sibling agent's
+    // save under the same key. Skip the localStorage write; the
+    // upstream session registry is responsible. Cross-tab sync is
+    // also disabled in injected mode since the registry mediates.
+    if (this.sessionInjected) return;
     saveSession(this.session, this.config.sessionStorageKey);
     publishCrossTab(this.session, this.crossTabKey, this.broadcastChannel);
   }
