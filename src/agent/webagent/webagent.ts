@@ -33,7 +33,7 @@ import {
   shouldAutoResume,
   DEFAULT_SESSION_KEY,
 } from './session';
-import { builtinActions, presentSurface } from './actions';
+import { coreActions, presentSurface } from './actions';
 import { setupCrossTabSync, publishCrossTab } from './cross-tab';
 import { DEFAULT_DESTRUCTIVE_PATTERNS, isDestructiveByPattern } from './destructive';
 import {
@@ -147,7 +147,12 @@ export class WebAgent {
         '[dddk] `disableBuiltinActions` is deprecated since v0.2.0; rename to `excludeTools` (and consider `disableAutoPauseAfterNarrate` to control the runtime auto-pause separately).',
       );
     }
-    for (const action of builtinActions) {
+    // v0.2.0 — default install is `coreActions` (navigate / click /
+    // border / scroll_to). Form, flow, and extra bundles are opt-in
+    // via `customActions`. Hosts who want the v0.1 "all installed"
+    // behaviour pass `customActions: builtinActions`. `excludeTools`
+    // operates on whatever ended up installed (core ± opt-ins).
+    for (const action of coreActions) {
       if (!excluded.has(action.name)) this.actions.set(action.name, action);
     }
     // present_surface is opt-in: registered only when the host enables it

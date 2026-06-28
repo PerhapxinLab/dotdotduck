@@ -195,6 +195,11 @@ const fillInput: ActionDefinition<{ selector: string; value: string }> = {
     if (!found.ok) return found.result;
     const el = found.el as HTMLInputElement | HTMLTextAreaElement;
     if (!isInteractive(el)) return { ok: false, reason: 'not_interactive' };
+    // Glide cursor to the field before focusing — same UX beat as
+    // `click`: the user sees "the agent is going to type HERE next".
+    if (ctx.uiHints?.cursorTrail) {
+      try { await moveCursorTo(el); } catch { /* nicety */ }
+    }
     el.focus();
     setNativeInputValue(el, value);
     el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -450,28 +455,82 @@ export const trackIntent: ActionDefinition<{ kind: string; payload?: Record<stri
 // for the agent's typical product-driving flows. Re-introduce when a
 // real host needs popup-driven OAuth round-tripping.
 
-// ─── exports ────────────────────────────────────────────────────────
+// ─── exports — bundled by purpose (v0.2.0 opt-in pivot) ─────────────
+//
+// Pre-v0.2 model: `builtinActions` (12 actions) was installed by default;
+// hosts trimmed via `excludeTools`. Empirically dddk-frontend disabled 6
+// of 12 — the "default everything + remove" pattern bloated the prompt
+// catalog for narrow use cases. v0.2 flips to opt-in:
+//
+//   - Default install = `coreActions` only (4 actions).
+//   - Hosts opt in to form / flow / extra bundles via `customActions`.
+//   - `builtinActions` kept as union for back-compat — passing it as
+//     `customActions` restores v0.1 behaviour.
+//
+// Rule of thumb when picking bundles:
+//   - Always-on agent that just points + navigates → `coreActions`
+//   - Form-filling agent (signup flows, checkout)  → `+ formActions`
+//   - Conversational agent (Q&A, pauses, choices) → `+ flowActions`
 
-export const builtinActions: ActionDefinition[] = [
+/**
+ * The four actions every webagent host needs. Installed by default.
+ * `navigate` (route changes), `click` (interactive elements),
+ * `border` (visual pointing), `scroll_to` (paginated content).
+ */
+export const coreActions: ActionDefinition[] = [
   navigate,
-  scrollTo,
-  wait,
   click,
+  borderAction,
+  scrollTo,
+] as ActionDefinition[];
+
+/**
+ * Form / input manipulation. Opt in when the agent needs to type or
+ * pick from selects. Off by default to keep the prompt slim on read-
+ * only marketing / docs surfaces.
+ */
+export const formActions: ActionDefinition[] = [
   fillInput,
   selectOption,
   clearInput,
   pressKey,
-  // `borderAction` is the canonical "point at an element" tool. The old
-  // `highlightAction` (translucent paint overlay, intended for text spans)
-  // was removed from the builtin set in v0.1.0+ because two visually-similar
-  // marker tools confused the model — it would pick one inconsistently and
-  // the visual style flipped between turns. Hosts that genuinely need the
-  // paint-overlay style can re-register it via `customActions`; for most
-  // sites, border-only is the right default.
-  borderAction,
+] as ActionDefinition[];
+
+/**
+ * Control-flow actions — waiting, pausing, asking the user. Opt in
+ * for conversational agents. Auto-pause-after-narrate is independent
+ * (controlled by `disableAutoPauseAfterNarrate`).
+ */
+export const flowActions: ActionDefinition[] = [
+  wait,
   pause,
   askUser,
   askUserChoice,
+] as ActionDefinition[];
+
+/**
+ * Less-common visual / escalation actions. `highlight` is a paint
+ * overlay (vs `border`'s frame) — was historically dropped from
+ * default because the LLM couldn't reliably pick one. `track_intent`
+ * is for hosts wiring custom analytics tunnels. `escalate_to_human`
+ * is for support flows. `present_surface` is registered separately
+ * via `allowPresent` + `setSurfaceMounter`.
+ */
+export const extraActions: ActionDefinition[] = [
+  highlightAction,
+  trackIntent,
+  escalateToHuman,
+] as ActionDefinition[];
+
+/**
+ * Union of all bundles EXCEPT `present_surface` (which needs explicit
+ * `allowPresent` + a mounter). Pass to `customActions` to restore
+ * pre-v0.2 "install everything" behaviour.
+ */
+export const builtinActions: ActionDefinition[] = [
+  ...coreActions,
+  ...formActions,
+  ...flowActions,
 ] as ActionDefinition[];
 
 // Opt-in: workflow actions (v0.2.0 ROADMAP 2.x) are NOT auto-registered.

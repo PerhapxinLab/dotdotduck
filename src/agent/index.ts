@@ -34,8 +34,15 @@ export {
 export { readDOM, type DomReadOptions } from './webagent/dom-reader';
 
 export {
+  // v0.2.0 — bundled action sets. Default install = `coreActions`;
+  // opt in to the rest via `customActions`. `builtinActions` is the
+  // union (back-compat). See actions.ts for the picking guide.
+  coreActions,
+  formActions,
+  flowActions,
+  extraActions,
   builtinActions,
-  // Opt-in action exports — host registers via `customActions`.
+  // Individual opt-in action exports — registered via `customActions`.
   escalateToHuman,
   trackIntent,
   workflowActions,

@@ -100,6 +100,12 @@ export {
   clearOverlays,
   listOverlays,
   readDOM,
+  // v0.2.0 action bundles — default install = `coreActions`; pass the
+  // other bundles to `customActions` to opt in.
+  coreActions,
+  formActions,
+  flowActions,
+  extraActions,
   builtinActions,
   // Opt-in action exports — host opts in via `customActions: [...]`.
   escalateToHuman,
