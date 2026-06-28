@@ -107,6 +107,9 @@ export type {
   ContextRequest,
 } from './webagent/types';
 
+export { TaskAgent } from './task';
+export type { TaskAgentConfig, TaskRunOptions, TaskTool } from './task';
+
 export {
   defaultUrlProvider,
   defaultPageSummaryProvider,

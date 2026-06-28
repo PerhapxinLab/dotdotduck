@@ -19,6 +19,10 @@ export type LLMRole =
   | 'vision'
   | 'utility'
   | 'plan'
+  /** v0.2.0 · Wave 2·B. Conversational + tool-calling agent
+   *  (TaskAgent). Defaults to `webagent` when not explicitly set on
+   *  the router. */
+  | 'task'
   /** @deprecated — alias for `vision`. */
   | 'webagentWithSelection'
   /** @deprecated — alias for `utility`. */
@@ -35,6 +39,8 @@ export interface LLMRouter {
   utility?: LLMProvider;
   /** Pre-loop planner. */
   plan?: LLMProvider;
+  /** v0.2.0 · Wave 2·B. TaskAgent — conversational + tool calling. */
+  task?: LLMProvider;
   /** @deprecated — use `vision`. */
   webagentWithSelection?: LLMProvider;
   /** @deprecated — use `utility`. */
@@ -66,5 +72,10 @@ export function resolveLLM(source: LLMSource, role: LLMRole): LLMProvider {
       return source.utility ?? source.inline ?? source.voiceCleanup ?? source.webagent;
     case 'plan':
       return source.plan ?? source.webagent;
+    case 'task':
+      // TaskAgent prefers an explicit `task` provider, else the
+      // utility tier (short single-shot LLM is similar billing
+      // shape), else falls back to the main webagent model.
+      return source.task ?? source.utility ?? source.inline ?? source.webagent;
   }
 }

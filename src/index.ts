@@ -77,6 +77,7 @@ export type {
 export {
   WebAgent,
   InlineAgent,
+  TaskAgent,
   AgentCursor,
   StreamingEnvelopeParser,
   Memory,
@@ -153,6 +154,9 @@ export type {
   ContextProviderHandle,
   ContextRole,
   ContextRequest,
+  TaskAgentConfig,
+  TaskRunOptions,
+  TaskTool,
   InlineScopeConfig,
   ScopeHandle,
   ScopeResolver,
