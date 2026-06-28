@@ -105,9 +105,16 @@ export function applyStreamingPauseHint(
   if (!scroll) return;
   const hintEl = document.createElement('div');
   hintEl.setAttribute(UI_ATTR, 'streaming-pause');
+  // Dedupe: many callers pass the gesture-hint string as `opts.hint`
+  // (because that's what the agent's pauseHandler propagates), then
+  // the rejectHint fallback resolves to the same i18n key — same
+  // string rendered TWICE stacked. Skip the upper "text" div when it
+  // matches the lower "hints" string.
+  const rejectHint = opts.rejectHint ?? defaultPauseRejectHint(host);
+  const showText = opts.hint && opts.hint.trim() !== rejectHint.trim();
   hintEl.innerHTML = `
-    <div ${UI_ATTR}="streaming-pause-text">${escapeHtml(opts.hint)}</div>
-    <div ${UI_ATTR}="streaming-pause-hints">${escapeHtml(opts.rejectHint ?? defaultPauseRejectHint(host))}</div>
+    ${showText ? `<div ${UI_ATTR}="streaming-pause-text">${escapeHtml(opts.hint)}</div>` : ''}
+    <div ${UI_ATTR}="streaming-pause-hints">${escapeHtml(rejectHint)}</div>
   `;
   scroll.appendChild(hintEl);
   autoScrollStream(host);

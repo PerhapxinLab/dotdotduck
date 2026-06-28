@@ -19,20 +19,23 @@ export function isTouchOnlyDevice(): boolean {
   }
 }
 
-/** Single tap → accept, double tap → reject. Feature-detects
- *  `pointerType === 'touch'` so mouse clicks pass through (single-tap-
- *  to-accept on desktop = misclick footgun). Dispatches DOM custom
- *  events so the orchestrator runs the full gesture pipeline rather
- *  than invoking subtitle methods in isolation. */
+/** Single click/tap → accept (= space), double click/tap → reject
+ *  (= double space). v0.2.0: extended from touch-only to also handle
+ *  mouse — users asked "clicking the subtitle should equal space".
+ *  Interactive children (button / input / textarea / a / role="button"
+ *  / close-×) still handle their own pointer events; the gesture only
+ *  fires on the bare subtitle surface. */
 export function bindTouchTapGestures(el: HTMLElement): void {
   let lastTapAt = 0;
   let singleTapTimer: ReturnType<typeof setTimeout> | null = null;
   const doubleTapMs = 320;
   el.addEventListener('pointerup', (e) => {
-    if (e.pointerType !== 'touch') return;
-    // Interactive children handle themselves.
+    if (e.pointerType !== 'touch' && e.pointerType !== 'mouse' && e.pointerType !== 'pen') return;
+    // Interactive children handle themselves. The close × button is
+    // matched via its data-dddk-ui="bar-close" attribute so the
+    // selector doesn't have to know its tag.
     const target = e.target as HTMLElement | null;
-    if (target?.closest('button, input, textarea, a, [role="button"]')) return;
+    if (target?.closest('button, input, textarea, a, [role="button"], [data-dddk-ui="bar-close"]')) return;
     const now = Date.now();
     if (now - lastTapAt < doubleTapMs) {
       if (singleTapTimer !== null) { clearTimeout(singleTapTimer); singleTapTimer = null; }
