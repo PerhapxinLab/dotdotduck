@@ -143,6 +143,16 @@ export type IntentEvent =
    */
   | { kind: 'agent_pause_decision'; runId: string; decision: 'continue' | 'stop'; timestamp: number }
   /**
+   * v0.2.0 · Wave 2·E. Emitted when a tool handler returns
+   * `{ ok: false }` (or throws — `reason: 'unknown'`, message in
+   * `message`). Fills the visibility gap where the lifecycle's
+   * `agent_tool_start` / `agent_tool_end` events fire on the host
+   * emitter but never landed in the intent stream — dashboards
+   * couldn't see which tools failed, why, or how often. `runId`
+   * joins back to `agent_run_started`.
+   */
+  | { kind: 'agent_tool_failed'; runId: string; name: string; reason: import('./agent/webagent/types').ActionFailureReason; message?: string; timestamp: number }
+  /**
    * End-of-loop closure response. `satisfied: true` = Space accept;
    * `false` = double-tap reject; `null` = picker selection (value in
    * `summary`). `runId` joins back to `agent_run_started`; `skillId` set

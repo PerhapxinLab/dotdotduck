@@ -526,6 +526,24 @@ export class AgentLifecycle {
 
           case 'tool-end':
             host._emitter.emit('agent_tool_end', { name: ev.name, result: ev.result });
+            // v0.2.0 · Wave 2·E — also surface failures into the intent
+            // stream so dashboards can chart "which tool is failing,
+            // why, how often". `agent_tool_end` stays on the host
+            // emitter for runtime listeners; failed runs also fire
+            // `agent_tool_failed` into the intent buffer.
+            if (!ev.result.ok) {
+              const failedRunId = host._intentBuffer.currentRunId;
+              if (failedRunId) {
+                host._intentBuffer.emitIntent(host._emitter, {
+                  kind: 'agent_tool_failed',
+                  runId: failedRunId,
+                  name: ev.name,
+                  reason: ev.result.reason,
+                  message: ev.result.message,
+                  timestamp: Date.now(),
+                });
+              }
+            }
             break;
 
           case 'navigating':
