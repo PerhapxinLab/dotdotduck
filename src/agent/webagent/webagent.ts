@@ -48,6 +48,7 @@ import type {
 } from './execute-action';
 import { executeLoop, executeCotLoop } from './runtime/loops';
 import { emptyStream } from './runtime/helpers';
+import { DEFAULT_CONTEXT_PROVIDERS } from './context-providers';
 
 const DEFAULT_MAX_STEPS = 30;
 const DEFAULT_MAX_ERRORS = 3;
@@ -164,6 +165,17 @@ export class WebAgent {
     if (config.session) {
       this.session = config.session;
       this.sessionInjected = true;
+    }
+
+    // Install default context providers for all six roles. Hosts that
+    // call `registerContextProvider(role, fn)` swap the default out;
+    // calling `handle.remove()` later restores the default. The
+    // runtime hasn't been migrated to consult `contextProviders` for
+    // every slot yet (DOM still goes through `readDOM` directly to
+    // keep the index map intact); the providers are available for
+    // host-side inspection / extension regardless.
+    for (const [role, fn] of Object.entries(DEFAULT_CONTEXT_PROVIDERS) as Array<[ContextRole, ContextProvider]>) {
+      this.contextProviders.set(role, fn);
     }
 
     this.crossTabKey = `${this.config.sessionStorageKey}.crosstab`;

@@ -107,6 +107,18 @@ export type {
   ContextRequest,
 } from './webagent/types';
 
+export {
+  defaultUrlProvider,
+  defaultPageSummaryProvider,
+  defaultDomProvider,
+  defaultScreenshotProvider,
+  defaultHistoryProvider,
+  defaultSelectionProvider,
+  recordNavigation,
+  DEFAULT_CONTEXT_PROVIDERS,
+  getDefaultContextProvider,
+} from './webagent/context-providers';
+
 // ─── Agent cursor (visual layer) ───────────────────────────────────
 
 export { AgentCursor, type AgentCursorConfig } from './cursor';

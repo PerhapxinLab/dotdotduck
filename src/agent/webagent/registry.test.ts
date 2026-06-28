@@ -78,7 +78,17 @@ console.log('tool registry:');
 console.log('context provider registry:');
 
 {
+  // v0.2·D — defaults are auto-installed in the constructor.
   const agent = new WebAgent({ llm: fakeLlm });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cp = (agent as any).contextProviders as Map<string, ContextProvider>;
+  check('constructor installs default for `url`',          cp.has('url'));
+  check('constructor installs default for `page_summary`', cp.has('page_summary'));
+  check('constructor installs default for `dom`',          cp.has('dom'));
+  check('constructor installs default for `screenshot`',   cp.has('screenshot'));
+  check('constructor installs default for `history`',      cp.has('history'));
+  check('constructor installs default for `selection`',    cp.has('selection'));
+  // Host override flips the slot to their function.
   const h1 = agent.registerContextProvider('dom', makeProvider('dump-A'));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   check('registerContextProvider stores under role', (agent as any).contextProviders.has('dom'));
@@ -89,10 +99,11 @@ console.log('context provider registry:');
   const cur = (agent as any).contextProviders.get('dom') as ContextProvider | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   check('h2.remove restores the prior provider', (cur?.({} as any) ?? '') === 'dump-A');
-  // Now remove the original — slot should empty out.
+  // Now remove h1 — slot should fall back to the SDK default.
   h1.remove();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  check('h1.remove leaves the slot empty', !(agent as any).contextProviders.has('dom'));
+  const after = (agent as any).contextProviders.get('dom') as ContextProvider | undefined;
+  check('h1.remove falls back to SDK default (slot still populated)', after !== undefined);
 }
 
 {
