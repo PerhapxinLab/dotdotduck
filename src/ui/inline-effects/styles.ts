@@ -70,6 +70,17 @@ export function ensureInlineEffectsStyles(): void {
       flex: 1; min-width: 0;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
+    [${UI_ATTR}="inline-diff"] .id-history-toggle {
+      align-self: flex-start;
+      padding: 2px 6px; margin-bottom: 2px;
+      background: transparent; border: 0; border-radius: 4px;
+      color: var(--dddk-text-muted, #6b6b6b);
+      font: inherit; font-size: 10.5px; cursor: pointer;
+    }
+    [${UI_ATTR}="inline-diff"] .id-history-toggle:hover {
+      background: var(--dddk-bg-soft, rgba(0,0,0,0.04));
+      color: var(--dddk-text, #18181b);
+    }
     [${UI_ATTR}="inline-diff"] .id-diff {
       display: block; max-height: 280px; overflow-y: auto;
       padding: 8px 10px;

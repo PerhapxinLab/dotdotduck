@@ -30,6 +30,12 @@ export interface InlineDiffLabels {
   followUpPlaceholder?: string;
   /** Send follow-up button. Default 'Send'. */
   send?: string;
+  /** History collapse toggle when hidden — `{n}` substitutes the hidden count.
+   *  Default 'Show {n} earlier edits'. */
+  expandHistory?: string;
+  /** History collapse toggle when expanded — `{n}` substitutes the hidden count.
+   *  Default 'Hide {n} earlier edits'. */
+  collapseHistory?: string;
 }
 
 export interface InlineDiffOpts {
@@ -49,6 +55,11 @@ export interface InlineDiffOpts {
    *  (`'follow-up'` while session is in chat mode). The panel waits for the
    *  caller to settle the new text via `.applyNewText(newText)`. */
   onFollowUp?: (prompt: string) => Promise<string | null>;
+  /** Fires the instant the user clicks Reject (or hits Escape) BEFORE the
+   *  result Promise settles. Use this to abort an in-flight stream so the
+   *  network call doesn't keep running after the user has decided to discard
+   *  the edit. Also fires on `.dispose()`. */
+  onCancel?: () => void;
 }
 
 export interface InlineDiffHandle {
@@ -98,6 +109,8 @@ export function mountInlineDiff(
     copy: opts.labels?.copy ?? 'Copy',
     followUpPlaceholder: opts.labels?.followUpPlaceholder ?? 'Make it shorter / formal / …',
     send: opts.labels?.send ?? 'Send',
+    expandHistory: opts.labels?.expandHistory ?? 'Show {n} earlier edits',
+    collapseHistory: opts.labels?.collapseHistory ?? 'Hide {n} earlier edits',
   };
 
   const el = document.createElement('div');
@@ -185,8 +198,12 @@ export function mountInlineDiff(
     resolveOuter(out);
   };
 
+  const cancel = (out: Exclude<InlineDiffOutcome, { kind: 'follow-up' }>) => {
+    try { opts.onCancel?.(); } catch { /* listener threw, still close */ }
+    finish(out);
+  };
   acceptBtn.addEventListener('click', () => finish({ kind: 'accept', text: currentNew }));
-  rejectBtn.addEventListener('click', () => finish({ kind: 'reject' }));
+  rejectBtn.addEventListener('click', () => cancel({ kind: 'reject' }));
   if (insertBtn) insertBtn.addEventListener('click', () => finish({ kind: 'insert-after', text: currentNew }));
   copyBtn.addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(currentNew); } catch { /* ignore */ }
@@ -232,9 +249,44 @@ export function mountInlineDiff(
         e.preventDefault();
         void sendFollowUp();
       }
-      if (e.key === 'Escape') finish({ kind: 'reject' });
+      if (e.key === 'Escape') cancel({ kind: 'reject' });
     });
   }
+
+  // How many recent history turns stay visible by default before the strip
+  // collapses to "↳ N earlier ▼". Click the toggle to expand back to all.
+  const HISTORY_VISIBLE = 3;
+  let historyExpanded = false;
+  let historyToggle: HTMLButtonElement | null = null;
+  const reflowHistory = () => {
+    const chips = Array.from(history.querySelectorAll<HTMLElement>('.id-history-chip'));
+    if (chips.length <= HISTORY_VISIBLE) {
+      if (historyToggle) {
+        historyToggle.remove();
+        historyToggle = null;
+      }
+      for (const c of chips) c.style.display = '';
+      return;
+    }
+    const hidden = chips.length - HISTORY_VISIBLE;
+    if (!historyToggle) {
+      historyToggle = document.createElement('button');
+      historyToggle.type = 'button';
+      historyToggle.className = 'id-history-toggle';
+      historyToggle.addEventListener('click', () => {
+        historyExpanded = !historyExpanded;
+        reflowHistory();
+      });
+      history.insertBefore(historyToggle, history.firstChild);
+    }
+    historyToggle.textContent = historyExpanded
+      ? `▲ ${labels.collapseHistory.replace('{n}', String(hidden))}`
+      : `▼ ${labels.expandHistory.replace('{n}', String(hidden))}`;
+    chips.forEach((c, i) => {
+      const fromEnd = chips.length - 1 - i;
+      c.style.display = historyExpanded || fromEnd < HISTORY_VISIBLE ? '' : 'none';
+    });
+  };
 
   const setBusy = (busy: boolean) => {
     acceptBtn.disabled = busy;
@@ -279,9 +331,13 @@ export function mountInlineDiff(
       chip.appendChild(promptEl);
       history.appendChild(chip);
       history.style.display = '';
+      // Collapse beyond N visible turns. The most recent N stay visible; older
+      // ones are hidden behind a "show all" toggle so the chip strip never
+      // grows past a comfortable height.
+      reflowHistory();
       place(opts.rect);
     },
-    dispose() { finish({ kind: 'reject' }); },
+    dispose() { cancel({ kind: 'reject' }); },
     result,
   };
 }
