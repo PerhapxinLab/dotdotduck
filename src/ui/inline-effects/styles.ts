@@ -52,6 +52,24 @@ export function ensureInlineEffectsStyles(): void {
       z-index: var(--dddk-z-bar, 9700);
       animation: dddk-pl-fadein 120ms ease;
     }
+    [${UI_ATTR}="inline-diff"] .id-history {
+      display: flex; flex-direction: column; gap: 4px;
+      padding-bottom: 6px; margin-bottom: 2px;
+      border-bottom: 1px dashed var(--dddk-border, rgba(0,0,0,0.08));
+    }
+    [${UI_ATTR}="inline-diff"] .id-history-chip {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 11px; color: var(--dddk-text-muted, #6b6b6b);
+    }
+    [${UI_ATTR}="inline-diff"] .id-history-chip::before {
+      content: '↳';
+      color: var(--dddk-text-faint, #a8a8a8);
+      flex: 0 0 auto;
+    }
+    [${UI_ATTR}="inline-diff"] .id-history-prompt {
+      flex: 1; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
     [${UI_ATTR}="inline-diff"] .id-diff {
       display: block; max-height: 280px; overflow-y: auto;
       padding: 8px 10px;

@@ -275,6 +275,10 @@ function defaultBody(opts: CompleteOptions): Record<string, unknown> {
     temperature: opts.temperature,
     maxTokens: opts.maxTokens,
     model: opts.model,
+    // Forward jsonMode so the backend can set `response_format:{type:'json_object'}`.
+    // The webagent's cotMode (`agent_turn` structured envelope) relies on this —
+    // without it weaker models free-form and emit an "invalid agent_turn envelope".
+    jsonMode: opts.jsonMode,
   };
 }
 

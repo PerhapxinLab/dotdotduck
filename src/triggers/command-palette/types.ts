@@ -52,6 +52,15 @@ export interface PaletteItem {
    * Style via `[data-dddk-ui="palette-item-line"]` (and `...-line-0/1/...`).
    */
   lines?: string[];
+  /**
+   * Search-action row: hidden in the empty state, and PINNED TO THE TOP of the
+   * results the moment the user types anything (regardless of fuzzy match). The
+   * live query is substituted into `name`/`description` wherever the token `{q}`
+   * appears, and the handler receives the raw query as its `arg`. Use for a
+   * "search for «query»" entry that routes to a full results page. Grouped under
+   * its `section` like any item, so it leads that section.
+   */
+  searchAction?: boolean;
   icon?: string;
   /**
    * Thumbnail image URL for the row (e.g. a book cover, product shot, avatar).

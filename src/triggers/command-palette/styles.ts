@@ -315,13 +315,17 @@ export function ensurePaletteStyles(): void {
       overscroll-behavior: contain;       /* same — captures wheel on overflow */
       flex: 1; min-width: 0;
     }
+    /* Inline accordion: appended INSIDE the active row so the whole option grows
+       taller. flex-basis:100% drops it onto a new full-width line under the
+       icon + text; it inherits the row's active background (one expanded card). */
     [${UI_ATTR}="palette-detail"] {
-      width: 40%;
-      padding: 16px;
+      flex-basis: 100%;
+      width: 100%;
+      padding: 6px 8px 4px 50px;
       overflow-y: auto;
       overscroll-behavior: contain;
       font-size: var(--dddk-font-size-sm, 13px);
-      background: var(--dddk-bg, transparent);
+      color: var(--dddk-text, #18181b);
     }
     /* Palette-scoped text-selection — high-contrast on both themes. */
     [${UI_ATTR}="palette"] ::selection,
@@ -354,6 +358,9 @@ export function ensurePaletteStyles(): void {
       padding-right: calc(28px + var(--dddk-palette-row-padding-right, 8px));
       cursor: pointer;
       display: flex; align-items: center;
+      /* wrap so an inline detail host (appended into the active row) drops onto
+         a new full-width line under the icon + text — the whole option grows. */
+      flex-wrap: wrap;
       gap: var(--dddk-palette-row-gap, 12px);
       border-radius: var(--dddk-palette-row-radius, 6px);
     }

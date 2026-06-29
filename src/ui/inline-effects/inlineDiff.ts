@@ -8,6 +8,7 @@
 
 import { ensureInlineEffectsStyles } from './styles';
 import { UI_ATTR } from '../../utils/dom';
+import type { InlineChatTurn } from './chatSession';
 
 export type InlineDiffOutcome =
   | { kind: 'accept'; text: string }
@@ -55,6 +56,9 @@ export interface InlineDiffHandle {
   update(rect: { left: number; top: number; bottom: number }): void;
   /** Replace the "new" text — used after a follow-up returns. */
   applyNewText(newText: string): void;
+  /** Append a turn to the history chip stack above the diff. Used after a
+   *  successful follow-up to remind the user what they have asked so far. */
+  pushHistoryTurn(turn: InlineChatTurn): void;
   /** Programmatically reject + dispose. */
   dispose(): void;
   /** Promise that resolves with the user's final decision (accept / reject /
@@ -86,6 +90,13 @@ export function mountInlineDiff(
 
   const el = document.createElement('div');
   el.setAttribute(UI_ATTR, 'inline-diff');
+
+  // Optional history strip — populated by pushHistoryTurn() after each
+  // successful follow-up. The strip stays hidden until the first turn lands.
+  const history = document.createElement('div');
+  history.className = 'id-history';
+  history.style.display = 'none';
+  el.appendChild(history);
 
   const diff = document.createElement('div');
   diff.className = 'id-diff';
@@ -219,6 +230,18 @@ export function mountInlineDiff(
       if (disposed) return;
       currentNew = text;
       newSpan.textContent = text;
+    },
+    pushHistoryTurn(turn) {
+      if (disposed) return;
+      const chip = document.createElement('div');
+      chip.className = 'id-history-chip';
+      const promptEl = document.createElement('span');
+      promptEl.className = 'id-history-prompt';
+      promptEl.textContent = turn.prompt;
+      chip.appendChild(promptEl);
+      history.appendChild(chip);
+      history.style.display = '';
+      place(opts.rect);
     },
     dispose() { finish({ kind: 'reject' }); },
     result,

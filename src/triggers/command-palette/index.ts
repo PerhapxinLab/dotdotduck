@@ -1275,6 +1275,10 @@ export class CommandPalette {
   private renderList(): void {
     if (!this.list) return;
     this.list.innerHTML = '';
+    // Shared across this render's row listeners: real clicks fire mousedown AND
+    // click; the mousedown handler sets this so the trailing click is a no-op
+    // (only programmatic clicks — no preceding mousedown — fall through).
+    let pressHandled = false;
 
     // (Tips rows are now part of `this.filtered` in empty-state — see
     // `refilter()` + `buildTipItems()`. The section header gets emitted by
@@ -1387,34 +1391,40 @@ export class CommandPalette {
         ${textHtml}
         ${item.shortcut ? `<span data-dddk-ui="palette-item-shortcut">${escapeHtml(item.shortcut)}</span>` : ''}
       `;
-      li.addEventListener('mouseenter', () => this.setCursor(idx));
-      // Use mousedown so the activation happens before any blur side-effects.
-      // stopPropagation is critical: activate() can call handler that runs
-      // `p.replace(...)`, which removes THIS li from the DOM mid-event. Once
-      // detached, the bubbling mousedown reaches the backdrop handler which
-      // checks `panel.contains(e.target)` — the now-detached target fails
-      // that check and the palette wrongly closes. Stop the bubble so the
-      // backdrop never sees the click. (Click-outside still works because
-      // those clicks land on the backdrop directly, not on a row.)
+      // Two-stage press: hover NO LONGER auto-selects (so the wheel scrolls the
+      // list smoothly under the pointer instead of every row stealing focus and
+      // re-expanding). A press on a row that HAS a `detail` and isn't already
+      // active just EXPANDS it; pressing the already-expanded row COMMITS
+      // (navigates). Rows without detail commit on the first press, as before.
+      const press = (): void => {
+        const it = this.filtered[idx];
+        if (it?.detail && this.cursor !== idx) this.setCursor(idx);
+        else this.activate(idx);
+      };
+      // Use mousedown so it happens before any blur side-effects, and
+      // stopPropagation so a handler that detaches THIS li mid-event doesn't
+      // bubble to the backdrop close handler (which would wrongly close).
       li.addEventListener('mousedown', (e) => {
         e.preventDefault();    // keep input focus
-        e.stopPropagation();   // do NOT bubble to the backdrop close handler
-        this.activate(idx);
+        e.stopPropagation();
+        pressHandled = true;   // swallow the trailing real `click`
+        press();
       });
-      // Also listen for `click` events so programmatic invocations
-      // (webagent's `click` action → `el.click()`) activate the row.
-      // Real user mousedown calls `activate` then `<li>` is usually
-      // detached (palette closes / replaces). The `isConnected` guard
-      // prevents a second activation when click fires on the detached
-      // node a moment later.
+      // `click` only acts for PROGRAMMATIC invocations (webagent `el.click()` —
+      // no preceding mousedown). Real clicks already handled by mousedown above.
       li.addEventListener('click', (e) => {
+        if (pressHandled) { pressHandled = false; return; }
         if (!li.isConnected) return;
         e.preventDefault();
         e.stopPropagation();
-        this.activate(idx);
+        press();
       });
       this.list!.appendChild(li);
     });
+    // After a re-render the cursor row exists again but its inline detail was
+    // wiped by `innerHTML = ''` — re-render it so the expanded description /
+    // table under the active row survives filtering.
+    this.renderDetailFor(this.filtered[this.cursor]);
   }
 
   /** Set the highlighted row without re-rendering. */
@@ -1447,6 +1457,16 @@ export class CommandPalette {
       this.detailHost.innerHTML = '';
       this.detailHost.style.display = 'none';
       return;
+    }
+    // Inline accordion: render the detail INSIDE the active row so the whole
+    // selected option grows taller (one expanded, highlighted card) rather than
+    // spawning a separate block. The host is appended as the last child of the
+    // active <li>; the row is `flex-wrap` so this full-width host drops onto a
+    // new line under the icon + text. The host has no `data-idx`, so the cursor
+    // logic never lands on it.
+    const activeLi = this.list?.querySelector('[data-active]');
+    if (activeLi && this.detailHost.parentElement !== activeLi) {
+      activeLi.appendChild(this.detailHost);
     }
     this.detailHost.style.display = 'block';
     this.detailHost.innerHTML = '<div data-dddk-ui="palette-detail-loading">…</div>';
