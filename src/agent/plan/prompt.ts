@@ -40,6 +40,13 @@ export function buildPlanSystemPrompt(ctx: PlanPromptContext): string {
 - todos: ordered array. Each item: { intent, description, expected_turn }. intent ∈ navigate | narrate | click | fill | ask | finish. Last item's intent is "finish".
 - One todo = one turn. Don't combine navigate and narrate — the DOM only refreshes after navigate.
 
+intent semantics:
+- navigate / narrate / click / fill: agent actions on the page.
+- ask: pause the loop and wait for user input. Use ONLY when the next agent step literally cannot proceed without a user choice. Do not use as a friendly follow-up, a clarification you could answer yourself, or a "what would you like next".
+- finish: signals the run is over. Its description states what was just delivered, never a question. Asking the user something is not finishing.
+
+If the user's task is informational (introduce / explain / tell / show / what is / where is / how do I), the plan is navigate-then-narrate-then-finish. Do not add an \`ask\` step to qualify needs the user did not bring up.
+
 The user message carries the user's task, the current page DOM, and any selection. The current DOM is your first source — if it already contains what the user needs (a paragraph, a contact, a link, an answer), narrate from it, no navigate. Only navigate when the answer is NOT on the current page and a different route's description matches the topic better.
 
 Reply in exactly the language the user wrote their task in. The page DOM and brand voice may be in other languages — they do not set the output language. Match the user's task language, not the page's language.`
