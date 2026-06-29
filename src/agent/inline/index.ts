@@ -115,6 +115,13 @@ export interface InlineAgentConfig {
    */
   shortcut?: string;
   /**
+   * Default `displayAs` for actions that don't set their own. Overrides
+   * the per-action default ('inline-diff' for rewrites, 'subtitle' for
+   * explain). Set to `'replace'` to restore the pre-0.3 instant-splice
+   * behaviour globally without editing every action's config.
+   */
+  defaultDisplayAs?: 'replace' | 'subtitle' | 'confirm' | 'inline-diff';
+  /**
    * Override the system prompt sent to the LLM for inline edits. The
    * default is universal (works for any input language — the LLM detects
    * + replies in the same language) and enforces a strict JSON output
@@ -265,7 +272,7 @@ export interface InlineAction {
 
 export class InlineAgent {
   private cfg: Required<Pick<InlineAgentConfig, 'locale' | 'hideAfterMs' | 'translateTargets' | 'layout' | 'enableSubtitle' | 'maxToolRounds'>>
-    & Pick<InlineAgentConfig, 'ignoreSelector' | 'llm' | 'columnLabels' | 'prefixTrigger' | 'systemPrompt' | 'tools'>;
+    & Pick<InlineAgentConfig, 'ignoreSelector' | 'llm' | 'columnLabels' | 'prefixTrigger' | 'systemPrompt' | 'tools' | 'defaultDisplayAs'>;
   private llm: LLMSource;
   private actions: InlineAction[];
   private menu: HTMLDivElement | null = null;
@@ -317,6 +324,7 @@ export class InlineAgent {
       tools: config.tools && config.tools.length > 0 ? config.tools : undefined,
       enableSubtitle: config.enableSubtitle ?? false,
       maxToolRounds: config.maxToolRounds ?? 3,
+      defaultDisplayAs: config.defaultDisplayAs,
     };
     this.llm = config.llm;
 
@@ -377,14 +385,19 @@ export class InlineAgent {
           if (!target) return null;
           return `Translate the text to ${target.label} (locale ${target.id}). Keep the same tone. Output only the translation. Source text:\n"""\n${ctx.text}\n"""`;
         },
+        // Translation flow: Insert-below is the obvious choice (keep original
+        // line, drop translation underneath) so default to inline-diff.
+        displayAs: 'inline-diff',
       },
       { id: 'improve', icon: '✦',
         label: { en: I18N.en.improve, 'zh-TW': I18N['zh-TW'].improve },
         instruction: `Rewrite to improve clarity, flow, and grammar. Keep the same meaning AND the same language. Output only the rewritten text.`,
+        displayAs: 'inline-diff',
       },
       { id: 'fix', icon: '✓',
         label: { en: I18N.en.fix, 'zh-TW': I18N['zh-TW'].fix },
         instruction: `Fix spelling and grammar. Do not change meaning, language, or style. Output only the corrected text.`,
+        displayAs: 'inline-diff',
       },
       { id: 'shorter', icon: '↤',
         label: { en: I18N.en.shorter, 'zh-TW': I18N['zh-TW'].shorter },
@@ -394,14 +407,17 @@ export class InlineAgent {
         // words. We name concrete things to drop (hedging, repetition,
         // examples, qualifiers) and set a HARD floor of "at least half".
         instruction: `Aggressively shorten this text to AT MOST half its original length. Keep only the core point. Drop: filler words, hedging ("perhaps", "I think", "可能", "或許"), repetition, redundant clauses, examples, qualifiers, and any sentence that merely restates a previous one. If two sentences can be one, make it one. Keep the same language as the input. Output ONLY the shortened text — no preamble, no explanation, no quotes.`,
+        displayAs: 'inline-diff',
       },
       { id: 'longer', icon: '↦',
         label: { en: I18N.en.longer, 'zh-TW': I18N['zh-TW'].longer },
         instruction: `Expand the text with more detail and examples. Keep the same language. Output only the result.`,
+        displayAs: 'inline-diff',
       },
       { id: 'tone', icon: '◐',
         label: { en: I18N.en.tone, 'zh-TW': I18N['zh-TW'].tone },
         instruction: `Rewrite the text in a more professional, formal tone. Keep the same language. Output only the result.`,
+        displayAs: 'inline-diff',
       },
       { id: 'explain', icon: '?',
         label: { en: I18N.en.explain, 'zh-TW': I18N['zh-TW'].explain },
@@ -1158,7 +1174,7 @@ export class InlineAgent {
       const llm = resolveLLM(scope.llm, 'inline');
       const userMessage = `Instruction: ${instruction}\n\nContext (with selection marked):\n"""\n${contextPrompt}\n"""`;
       const systemMessage = scope.systemPrompt ?? SYSTEM_PROMPT;
-      const mode = action.displayAs ?? 'replace';
+      const mode = action.displayAs ?? this.cfg.defaultDisplayAs ?? 'replace';
       const scopeTools = scope.tools;
 
       const streamingProvider = llm as unknown as StreamingProvider;
@@ -1173,7 +1189,11 @@ export class InlineAgent {
           instruction,
           llm,
           streamingProvider,
-          canStream,
+          // Tools imply multi-round agentic flow which doesn't fit the
+          // single-turn diff panel; fall back to the non-stream path that
+          // runs runWithTools internally.
+          canStream: canStream && !scopeTools,
+          scopeTools,
           myToken,
         });
       } else if (canStream && (mode === 'replace' || mode === 'subtitle' || mode === 'confirm')) {
@@ -1566,9 +1586,10 @@ export class InlineAgent {
     llm: ReturnType<typeof resolveLLM>;
     streamingProvider: StreamingProvider;
     canStream: boolean;
+    scopeTools?: ReturnType<typeof resolveLLM> extends never ? never : InlineAgentConfig['tools'];
     myToken: number;
   }): Promise<void> {
-    const { target, sel, systemMessage, llm, streamingProvider, canStream, myToken } = args;
+    const { target, sel, systemMessage, llm, streamingProvider, canStream, scopeTools, myToken } = args;
 
     const rect = this.getSelectionRect(target);
     const anchor = rect
@@ -1640,17 +1661,20 @@ export class InlineAgent {
           }
           return replacementBuf.trim() ? replacementBuf : null;
         }
-        // Non-streaming fallback — one-shot call, then write the whole
-        // extracted text into the panel.
-        const result = await llm.complete({
-          messages: [
-            { role: 'system', content: systemMessage },
-            { role: 'user', content: userMsg },
-          ],
-          thinking: 'off',
-          temperature: 0,
-          maxTokens: Math.max(256, sel.text.length * 4 + 200),
-        });
+        // Non-streaming fallback — either a vanilla complete() or, when the
+        // scope wires tools, the multi-round runWithTools loop (one whole
+        // body lands at the end; no token-by-token reveal in the panel).
+        const result = scopeTools
+          ? await this.runWithTools(llm, systemMessage, userMsg, sel.text.length, myToken, scopeTools)
+          : await llm.complete({
+              messages: [
+                { role: 'system', content: systemMessage },
+                { role: 'user', content: userMsg },
+              ],
+              thinking: 'off',
+              temperature: 0,
+              maxTokens: Math.max(256, sel.text.length * 4 + 200),
+            });
         const replacement = extractReplacement(result.content);
         if (replacement) panel?.applyNewText(replacement);
         return replacement;
