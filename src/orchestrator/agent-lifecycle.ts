@@ -16,6 +16,7 @@ import {
   type AgentEvent,
   type SelectionContext,
 } from '../agent';
+import { hideCursor as hideWebagentCursor } from '../agent/webagent/cursor';
 import type { OnLoopEnd } from '../agent/webagent/types';
 import { sdkString } from '../utils/sdk-i18n';
 import type { DotDotDuck } from './index';
@@ -56,6 +57,7 @@ export class AgentLifecycle {
     // start a new task.
     host._highlight.clearHighlight();
     clearWebagentOverlays();
+    hideWebagentCursor();
     host.subtitle.hide();
     let selection =
       options.selection === undefined ? host._currentSelection : options.selection;
@@ -259,6 +261,7 @@ export class AgentLifecycle {
     host.subtitle.hideIndicator();
     host._highlight.clearHighlight();
     clearWebagentOverlays();
+    hideWebagentCursor();
     // Voice + palette have their own next UI (mic indicator / palette
     // open) — don't double-up with a stopped subtitle that immediately
     // gets replaced. Close / esc / reject show the feedback line.
@@ -494,6 +497,7 @@ export class AgentLifecycle {
       host.subtitle.hideIndicator();
       host._highlight.clearHighlight();
       clearWebagentOverlays();
+      hideWebagentCursor();
     };
 
     try {
@@ -576,6 +580,13 @@ export class AgentLifecycle {
             );
             host._highlight.clearHighlight();
             clearWebagentOverlays();
+            // Synthetic cursor sticks to its last viewport position
+            // by design (it's position:fixed). Once the loop has ended
+            // that "last position" is stale — anchored to an element
+            // that may have scrolled away, or just visually orphaned
+            // from the now-clean page. Hide it on every terminal
+            // event so it stops floating around.
+            hideWebagentCursor();
             host._emitter.emit('agent_final', undefined);
             await this.renderLoopClosure();
             this.endAgentRunCompleted();
@@ -595,6 +606,7 @@ export class AgentLifecycle {
               }
               host._highlight.clearHighlight();
               clearWebagentOverlays();
+              hideWebagentCursor();
               host._emitter.emit('agent_error', { error: ev.error });
             }
             break;
