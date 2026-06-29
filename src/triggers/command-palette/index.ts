@@ -1449,7 +1449,21 @@ export class CommandPalette {
   private move(delta: number): void {
     const next = Math.max(0, Math.min(this.filtered.length - 1, this.cursor + delta));
     this.setCursor(next);
-    this.list?.querySelector('[data-active]')?.scrollIntoView({ block: 'nearest' });
+    // Keep the active row's HEADER (title line) visible. A row with an expanded
+    // inline detail (e.g. orders / cart preview) can be taller than the list
+    // viewport — plain `scrollIntoView({block:'nearest'})` then aligns the row's
+    // BOTTOM and clips the title line off the top edge. Scroll on the next frame
+    // (after the async detail has laid out) and prioritise the row's TOP: if the
+    // row is taller than the viewport or its top is above the fold, align the top.
+    requestAnimationFrame(() => {
+      const active = this.list?.querySelector('[data-active]') as HTMLElement | null;
+      if (!active || !this.list) return;
+      const list = this.list;
+      const lr = list.getBoundingClientRect();
+      const ar = active.getBoundingClientRect();
+      if (ar.top < lr.top || ar.height >= list.clientHeight) list.scrollTop += ar.top - lr.top;
+      else if (ar.bottom > lr.bottom) list.scrollTop += ar.bottom - lr.bottom;
+    });
   }
 
   /** Render the right detail pane if the active item provides `detail()`. */
