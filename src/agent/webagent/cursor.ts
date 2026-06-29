@@ -98,6 +98,17 @@ let lastX = -1;
 let lastY = -1;
 let currentMode: CursorMode = 'pointer';
 
+/**
+ * Anchored target. Once a move call lands on this element, a RAF
+ * loop keeps the cursor's viewport position in sync with the
+ * element's `getBoundingClientRect()` on every frame — so the
+ * cursor follows the element when the user scrolls, the page
+ * relayouts, or content reflows. Calling `hideCursor` /
+ * `setCursorAnchor(null)` releases the lock.
+ */
+let anchorEl: Element | null = null;
+let anchorRafId: number | null = null;
+
 function ensureCursor(): HTMLDivElement {
   if (cursorEl && document.body.contains(cursorEl)) return cursorEl;
   if (!document.getElementById(CURSOR_STYLE_ID)) {
@@ -153,6 +164,11 @@ function reducedMotion(): boolean {
 export async function moveCursorAndTap(targetEl: Element): Promise<void> {
   if (typeof document === 'undefined' || !document.body) return;
 
+  // Release any prior anchor BEFORE the glide animation — otherwise
+  // the RAF loop keeps pulling the cursor back to the old target
+  // mid-transition.
+  setCursorAnchor(null);
+
   const wrap = ensureCursor();
   await ensureInView(targetEl);
   const { destX, destY } = cursorAnchor(targetEl);
@@ -183,35 +199,76 @@ export async function moveCursorAndTap(targetEl: Element): Promise<void> {
   wrap.style.transform = `translate(${destX}px, ${destY}px) scale(1)`;
   await sleep(reduced ? 0 : 90);
   wrap.classList.remove('tapping');
+
+  // Glide done — anchor the cursor TO the element. From now on the
+  // RAF loop keeps the cursor's viewport coords aligned with the
+  // element's rect so scrolls / layout shifts don't desync it.
+  setCursorAnchor(targetEl);
 }
 
 /**
- * Pick a visually grounded anchor on `targetEl` for the cursor:
- *
- * - Small clickable things (buttons, link rows, icons) → center, the
- *   intuitive "tap the middle" point.
- * - Tall or wide blocks (tables, sections, articles) → an inset
- *   near the top-left so the cursor reads as "pointing AT the block
- *   from its corner" rather than floating somewhere inside it. Geometric
- *   center of a 600px-tall section is "the middle of rows 4-5" which
- *   feels disconnected from any actual content.
+ * Center of the target's current viewport rect. No heuristics — the
+ * cursor anchor mechanism below keeps recomputing this every frame
+ * so layout shifts / scrolls follow naturally. If the model picked a
+ * giant element as the target, that's a model-side problem
+ * (`narrate.about` should be the specific element it's referring to,
+ * not the section wrapper), not something for this function to
+ * smooth over.
  */
 function cursorAnchor(targetEl: Element): { destX: number; destY: number } {
   const rect = targetEl.getBoundingClientRect();
-  const BIG = 220;
-  const isBig = rect.height > BIG || rect.width > BIG;
-  if (isBig) {
-    // Top-left inset. Clamp so the cursor stays visibly inside the
-    // element, with a small breath from the actual edge.
-    const inset = 24;
-    const x = rect.left + Math.min(rect.width - 6, inset);
-    const y = rect.top  + Math.min(rect.height - 6, inset);
-    return { destX: x, destY: y };
-  }
-  // Center for normal-sized targets — buttons, link rows, glyphs.
-  const destX = rect.left + Math.min(rect.width - 6, Math.max(6, rect.width / 2));
-  const destY = rect.top  + Math.min(rect.height - 6, Math.max(6, rect.height / 2));
+  const destX = rect.left + rect.width  / 2;
+  const destY = rect.top  + rect.height / 2;
   return { destX, destY };
+}
+
+/**
+ * Anchor the cursor to `el` and start a RAF loop that keeps the
+ * cursor's viewport position in sync with `el`'s rect every frame.
+ * Stops automatically when `setCursorAnchor(null)` is called, when
+ * a new anchor replaces it, or when the cursor hides.
+ *
+ * Without this, the cursor's position was a snapshot taken at the
+ * moment of `moveCursorAndTap` — page scrolls AFTER the move left
+ * the cursor pointing at whatever happened to be at that viewport
+ * coordinate, totally disconnected from the element the agent had
+ * gestured at.
+ */
+function setCursorAnchor(el: Element | null): void {
+  anchorEl = el;
+  if (anchorRafId !== null) {
+    cancelAnimationFrame(anchorRafId);
+    anchorRafId = null;
+  }
+  if (!el) return;
+  const tick = (): void => {
+    if (!anchorEl || anchorEl !== el || !cursorEl) {
+      anchorRafId = null;
+      return;
+    }
+    // Element disconnected (removed from DOM) — release the anchor.
+    if (!el.isConnected) {
+      anchorEl = null;
+      anchorRafId = null;
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    const x = rect.left + rect.width  / 2;
+    const y = rect.top  + rect.height / 2;
+    // Skip transform update if nothing changed — avoids triggering
+    // unnecessary repaints and lets the existing CSS transition
+    // (used during the initial glide) play out.
+    if (x !== lastX || y !== lastY) {
+      // Direct write WITHOUT animation — keeps cursor stuck to
+      // the moving target instead of trailing behind on scroll.
+      cursorEl.style.transition = 'none';
+      cursorEl.style.transform = `translate(${x}px, ${y}px)`;
+      lastX = x;
+      lastY = y;
+    }
+    anchorRafId = requestAnimationFrame(tick);
+  };
+  anchorRafId = requestAnimationFrame(tick);
 }
 
 /**
@@ -249,10 +306,10 @@ async function ensureInView(targetEl: Element): Promise<void> {
  */
 export async function moveCursorTo(targetEl: Element): Promise<void> {
   if (typeof document === 'undefined' || !document.body) return;
+  setCursorAnchor(null);
   const wrap = ensureCursor();
-  const rect = targetEl.getBoundingClientRect();
-  const destX = rect.left + Math.min(rect.width - 6, Math.max(6, rect.width / 2));
-  const destY = rect.top + Math.min(rect.height - 6, Math.max(6, rect.height / 2));
+  await ensureInView(targetEl);
+  const { destX, destY } = cursorAnchor(targetEl);
   const reduced = reducedMotion();
   const glideMs = reduced ? 0 : 360;
 
@@ -268,6 +325,10 @@ export async function moveCursorTo(targetEl: Element): Promise<void> {
   setPosition(wrap, destX, destY);
   await sleep(glideMs);
   cursorPulse();
+
+  // Anchor the cursor to the element so scrolls / layout shifts
+  // keep it visually attached.
+  setCursorAnchor(targetEl);
 }
 
 /**
@@ -309,6 +370,7 @@ export function setCursorMode(mode: CursorMode): void {
  * position before reaching the new target.
  */
 export function hideCursor(): void {
+  setCursorAnchor(null);
   if (cursorEl) cursorEl.classList.add('hidden');
   lastX = -1;
   lastY = -1;
@@ -316,6 +378,7 @@ export function hideCursor(): void {
 
 /** Remove the cursor DOM entirely. Call on `dddk.destroy()`. */
 export function destroyCursor(): void {
+  setCursorAnchor(null);
   if (cursorEl && cursorEl.parentElement) cursorEl.parentElement.removeChild(cursorEl);
   cursorEl = null;
   lastX = -1;
