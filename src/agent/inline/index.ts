@@ -25,6 +25,11 @@
 import { resolveLLM, type LLMSource } from '../llm/router';
 import type { ToolCall } from '../llm/types';
 import type { StreamingProvider, StreamChunk } from '../llm/stream';
+import {
+  mountInlineDiff,
+  InlineChatSession,
+  type InlineDiffHandle,
+} from '../../ui/inline-effects';
 import type { ActionDefinition } from '../webagent/types';
 import type { DotDotDuck } from '../../orchestrator';
 import { escapeHtml } from '../../utils/dom';
@@ -228,8 +233,15 @@ export interface InlineAction {
    *    for risky / opinionated edits where the user wants to preview
    *    before commit. Space accepts, double-tap Space rejects (same as
    *    every other subtitle action prompt).
+   *  - `'inline-diff'`: anchor a strikethrough-old → new diff panel under
+   *    the selection. Streams tokens into the panel; on accept splices into
+   *    the editable, on `insert-after` inserts as new text just after the
+   *    selection (use for translation), on copy writes to clipboard. The
+   *    panel carries a follow-up composer so the user can keep refining
+   *    ("make it shorter", "more formal") with full chat history grounded
+   *    on the original selection. Reject aborts the in-flight stream.
    */
-  displayAs?: 'replace' | 'subtitle' | 'confirm';
+  displayAs?: 'replace' | 'subtitle' | 'confirm' | 'inline-diff';
   /**
    * Static LLM instruction. Either set this OR `build` OR `handler`.
    * Precedence: `handler` > `build` > `instruction`.
@@ -1152,7 +1164,19 @@ export class InlineAgent {
       const streamingProvider = llm as unknown as StreamingProvider;
       const canStream = typeof streamingProvider.streamComplete === 'function' && !scopeTools;
 
-      if (canStream && (mode === 'replace' || mode === 'subtitle' || mode === 'confirm')) {
+      if (mode === 'inline-diff') {
+        await this.runInlineDiff({
+          target,
+          sel,
+          systemMessage,
+          userMessage,
+          instruction,
+          llm,
+          streamingProvider,
+          canStream,
+          myToken,
+        });
+      } else if (canStream && (mode === 'replace' || mode === 'subtitle' || mode === 'confirm')) {
         const handle = streamingProvider.streamComplete!({
           messages: [
             { role: 'system', content: systemMessage },
@@ -1521,6 +1545,191 @@ export class InlineAgent {
       'reply WITHOUT a tool call and produce the final `{ "replacement": "..." }` ' +
       'object. Do not narrate your tool calls in the final reply — just the JSON.'
     );
+  }
+
+  /**
+   * inline-diff mode. Mount the diff panel anchored under the selection,
+   * stream tokens into it, then await the user's accept / insert-after /
+   * copy / reject decision. Follow-up rounds keep the panel open and
+   * stream a refined result grounded on the original selection.
+   *
+   * Reject (button / Escape / dispose) aborts the in-flight stream via a
+   * per-stream AbortController — the upstream provider sees the disconnect
+   * and stops generating tokens (cooperative cancel).
+   */
+  private async runInlineDiff(args: {
+    target: HTMLElement;
+    sel: { text: string; start: number; end: number };
+    systemMessage: string;
+    userMessage: string;
+    instruction: string;
+    llm: ReturnType<typeof resolveLLM>;
+    streamingProvider: StreamingProvider;
+    canStream: boolean;
+    myToken: number;
+  }): Promise<void> {
+    const { target, sel, systemMessage, llm, streamingProvider, canStream, myToken } = args;
+
+    const rect = this.getSelectionRect(target);
+    const anchor = rect
+      ? { left: rect.left, top: rect.top, bottom: rect.bottom }
+      : { left: 0, top: 0, bottom: 0 };
+
+    let abortCtrl = new AbortController();
+    let panel: InlineDiffHandle | null = null;
+
+    // Stream one round (initial OR follow-up) into the diff panel; returns
+    // the extracted replacement text or null on abort / empty.
+    const streamOnce = async (userMsg: string): Promise<string | null> => {
+      if (myToken !== this.runToken) return null;
+      abortCtrl = new AbortController();
+      if (panel) panel.streamStart();
+      try {
+        if (canStream) {
+          const streamOpts = {
+            messages: [
+              { role: 'system' as const, content: systemMessage },
+              { role: 'user' as const, content: userMsg },
+            ],
+            thinking: 'off' as const,
+            temperature: 0,
+            maxTokens: Math.max(256, sel.text.length * 4 + 200),
+            signal: abortCtrl.signal,
+          };
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const handle = streamingProvider.streamComplete!(streamOpts as any);
+          let inReplacement = false;
+          let processedLen = 0;
+          let replacementBuf = '';
+          for await (const chunk of handle) {
+            if (myToken !== this.runToken || abortCtrl.signal.aborted) break;
+            const totalText = chunk.text;
+            if (!inReplacement) {
+              const startIdx = totalText.indexOf(REPLACEMENT_START);
+              if (startIdx < 0) continue;
+              inReplacement = true;
+              processedLen = startIdx + REPLACEMENT_START.length;
+            }
+            const newRaw = totalText.slice(processedLen);
+            const end = findEndMarker(newRaw);
+            let safeChunk: string;
+            let consumeLen: number;
+            let finished = false;
+            if (end !== null) {
+              safeChunk = newRaw.slice(0, end.idx);
+              consumeLen = end.idx + end.len;
+              finished = true;
+            } else {
+              let safeEnd = newRaw.length;
+              for (const variant of REPLACEMENT_END_VARIANTS) {
+                const partial = findPartialMarkerTail(newRaw, variant);
+                if (partial >= 0 && partial < safeEnd) safeEnd = partial;
+              }
+              safeChunk = newRaw.slice(0, safeEnd);
+              consumeLen = safeEnd;
+            }
+            let emit = safeChunk;
+            if (replacementBuf === '' && emit.startsWith('\n')) emit = emit.slice(1);
+            else if (replacementBuf === '' && emit.startsWith('\r\n')) emit = emit.slice(2);
+            if (emit) {
+              replacementBuf += emit;
+              panel?.applyStreamChunk(emit);
+            }
+            processedLen += consumeLen;
+            if (finished) break;
+          }
+          return replacementBuf.trim() ? replacementBuf : null;
+        }
+        // Non-streaming fallback — one-shot call, then write the whole
+        // extracted text into the panel.
+        const result = await llm.complete({
+          messages: [
+            { role: 'system', content: systemMessage },
+            { role: 'user', content: userMsg },
+          ],
+          thinking: 'off',
+          temperature: 0,
+          maxTokens: Math.max(256, sel.text.length * 4 + 200),
+        });
+        const replacement = extractReplacement(result.content);
+        if (replacement) panel?.applyNewText(replacement);
+        return replacement;
+      } catch (err) {
+        // AbortError (user clicked reject) — silent. Anything else surfaces
+        // via the existing catch in runAction.
+        if ((err as Error)?.name === 'AbortError') return null;
+        throw err;
+      } finally {
+        if (panel) panel.streamDone();
+      }
+    };
+
+    // Persistent chat session: every follow-up prompt carries the original
+    // selection + all prior turns so "make it shorter" / "more formal" stay
+    // grounded.
+    const session = new InlineChatSession(sel.text, async ({ original, history, prompt }) => {
+      const ask = history.length
+        ? `Original selection:\n${original}\n\nPrior edits (oldest first):\n${history
+            .map((t, i) => `${i + 1}. (${t.prompt})\n→ ${t.result}`)
+            .join('\n')}\n\nNow follow this instruction: ${prompt}`
+        : `Original selection:\n${original}\n\nInstruction: ${prompt}`;
+      const userMsg = `Instruction: ${prompt}\n\nContext (with selection marked):\n"""\n${ask}\n"""`;
+      return streamOnce(userMsg);
+    });
+
+    panel = mountInlineDiff(sel.text, '', {
+      rect: anchor,
+      enableInsertAfter: true,
+      enableFollowUp: true,
+      labels: {
+        accept: this.t('accept'),
+        reject: this.t('reject'),
+        insertAfter: this.t('insertAfter'),
+        copy: this.t('copy'),
+        followUpPlaceholder: this.t('followUpPlaceholder'),
+        send: this.t('send'),
+      },
+      onFollowUp: async (prompt) => {
+        const next = await session.send(prompt);
+        if (next != null) panel?.pushHistoryTurn({ prompt, result: next });
+        return next;
+      },
+      onCancel: () => { abortCtrl.abort(); this.runToken++; },
+    });
+
+    panel.streamStart();
+    const first = await streamOnce(args.userMessage);
+    panel.streamDone();
+    if (first == null) {
+      panel.dispose();
+      return;
+    }
+
+    const outcome = await panel.result;
+    if (myToken !== this.runToken) return;
+    if (outcome.kind === 'accept') {
+      this.applyResult(target, sel, outcome.text);
+    } else if (outcome.kind === 'insert-after') {
+      // Insert as new text immediately after the selection — original stays.
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        const ins = `\n${outcome.text}`;
+        const before = target.value.slice(0, sel.end);
+        const after = target.value.slice(sel.end);
+        target.value = `${before}${ins}${after}`;
+        const cursor = sel.end + ins.length;
+        target.setSelectionRange(cursor, cursor);
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        target.dispatchEvent(new Event('change', { bubbles: true }));
+      } else if (target.isContentEditable) {
+        const winSel = window.getSelection();
+        if (winSel && winSel.rangeCount > 0) {
+          const range = winSel.getRangeAt(0);
+          range.collapse(false);
+          range.insertNode(document.createTextNode(`\n${outcome.text}`));
+        }
+      }
+    }
+    // 'copy' wrote to clipboard inside the panel; 'reject' is a no-op.
   }
 
   private applyResult(

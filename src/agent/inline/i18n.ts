@@ -17,6 +17,13 @@ export const I18N = {
     cancel: 'Cancel',
     processing: 'Working…',
     failed: 'Failed',
+    // inline-diff panel
+    accept: 'Accept',
+    reject: 'Reject',
+    insertAfter: 'Insert below',
+    copy: 'Copy',
+    followUpPlaceholder: 'Make it shorter / formal / translate…',
+    send: 'Send',
   },
   'zh-TW': {
     header: '用 AI 編輯',
@@ -31,6 +38,12 @@ export const I18N = {
     cancel: '取消',
     processing: '處理中…',
     failed: '失敗',
+    accept: '接受',
+    reject: '還原',
+    insertAfter: '插到下一行',
+    copy: '複製',
+    followUpPlaceholder: '再短一點 / 改正式語氣 / 翻譯⋯',
+    send: '送出',
   },
 } as const;
 
