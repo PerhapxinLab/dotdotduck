@@ -84,6 +84,14 @@ export function ensureInlineEffectsStyles(): void {
       color: var(--dddk-accent, #6366f1);
       font-weight: 500;
     }
+    [${UI_ATTR}="inline-diff"] .id-new-streaming::after {
+      content: '▍';
+      display: inline-block;
+      margin-left: 1px;
+      animation: dddk-pl-blink 1s steps(2) infinite;
+      color: var(--dddk-accent, #6366f1);
+    }
+    @keyframes dddk-pl-blink { to { opacity: 0; } }
     [${UI_ATTR}="inline-diff"] .id-arrow {
       display: inline-block; margin: 0 6px;
       color: var(--dddk-text-faint, #9b9b9b);

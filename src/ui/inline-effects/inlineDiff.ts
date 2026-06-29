@@ -56,6 +56,18 @@ export interface InlineDiffHandle {
   update(rect: { left: number; top: number; bottom: number }): void;
   /** Replace the "new" text — used after a follow-up returns. */
   applyNewText(newText: string): void;
+  /** Append a streamed chunk to the current "new" text. Used by the caller
+   *  during SSE — tokens land character by character, then `streamDone()`
+   *  flips the panel out of busy state. Safe to mix with `applyNewText` for
+   *  follow-up rounds (the next stream starts fresh from the new baseline). */
+  applyStreamChunk(chunk: string): void;
+  /** Mark the in-flight stream as finished. Re-enables follow-up + action
+   *  buttons. Idempotent. */
+  streamDone(): void;
+  /** Begin a fresh stream — clears the current "new" text and disables
+   *  buttons. Used at the start of EVERY follow-up so the user sees the
+   *  panel reset before the next stream lands. */
+  streamStart(): void;
   /** Append a turn to the history chip stack above the diff. Used after a
    *  successful follow-up to remind the user what they have asked so far. */
   pushHistoryTurn(turn: InlineChatTurn): void;
@@ -224,12 +236,38 @@ export function mountInlineDiff(
     });
   }
 
+  const setBusy = (busy: boolean) => {
+    acceptBtn.disabled = busy;
+    if (insertBtn) insertBtn.disabled = busy;
+    copyBtn.disabled = busy;
+    if (input) input.disabled = busy;
+    if (sendBtn) sendBtn.disabled = busy;
+    // Reject stays enabled so the user can always bail out.
+    if (busy) newSpan.classList.add('id-new-streaming');
+    else newSpan.classList.remove('id-new-streaming');
+  };
+
   return {
     update(nextRect) { if (!disposed) place(nextRect); },
     applyNewText(text) {
       if (disposed) return;
       currentNew = text;
       newSpan.textContent = text;
+    },
+    applyStreamChunk(chunk) {
+      if (disposed) return;
+      currentNew += chunk;
+      newSpan.textContent = currentNew;
+    },
+    streamStart() {
+      if (disposed) return;
+      currentNew = '';
+      newSpan.textContent = '';
+      setBusy(true);
+    },
+    streamDone() {
+      if (disposed) return;
+      setBusy(false);
     },
     pushHistoryTurn(turn) {
       if (disposed) return;

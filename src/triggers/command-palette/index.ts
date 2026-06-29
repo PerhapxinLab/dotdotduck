@@ -1398,7 +1398,10 @@ export class CommandPalette {
       // (navigates). Rows without detail commit on the first press, as before.
       const press = (): void => {
         const it = this.filtered[idx];
-        if (it?.detail && this.cursor !== idx) this.setCursor(idx);
+        // First press on a "rich" row — one that expands when active, i.e. has a
+        // `detail` pane OR an `image` thumbnail that enlarges — just selects it;
+        // pressing the already-active row commits. Plain rows commit immediately.
+        if ((it?.detail || it?.image) && this.cursor !== idx) this.setCursor(idx);
         else this.activate(idx);
       };
       // Use mousedown so it happens before any blur side-effects, and
