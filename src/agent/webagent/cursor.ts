@@ -298,10 +298,20 @@ export function setCursorMode(mode: CursorMode): void {
   wrap.innerHTML = CURSOR_SVG_BY_MODE[mode];
 }
 
-/** Hide the cursor (e.g. when the agent run ends). Does not destroy the
- *  element — next call to `moveCursorAndTap` re-shows it. */
+/**
+ * Hide the cursor (e.g. when the agent run ends). Does not destroy the
+ * element — next call to `moveCursorAndTap` re-shows it.
+ *
+ * Resets `lastX / lastY` to the "first use" sentinel so the NEXT
+ * agent run starts the entrance glide from off-screen-left, not from
+ * wherever the previous run's last action happened to land. Without
+ * this, the cursor would visibly fly across the page from a stale
+ * position before reaching the new target.
+ */
 export function hideCursor(): void {
   if (cursorEl) cursorEl.classList.add('hidden');
+  lastX = -1;
+  lastY = -1;
 }
 
 /** Remove the cursor DOM entirely. Call on `dddk.destroy()`. */
