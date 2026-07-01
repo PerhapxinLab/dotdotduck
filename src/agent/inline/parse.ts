@@ -18,52 +18,48 @@ Your ONLY job is to compute the new text that should replace the fragment betwee
 
 Language rule: detect the language of the surrounding text and write the replacement in the SAME language, unless the instruction explicitly requests another language (e.g. "translate to Japanese"). This applies to any human language — English, Traditional Chinese, Japanese, Spanish, Arabic, etc.
 
-OUTPUT FORMAT — emit ONLY the replacement text, wrapped in these exact markers, with no surrounding prose, JSON, code fences, or commentary:
+Output format — wrap the new fragment text inside a single <replacement>…</replacement> XML tag. Nothing outside the tag: no prose, no JSON, no code fences.
 
-<<<REPLACEMENT>>>
-<the new fragment text>
-<<<END>>>
+<replacement>the new fragment text</replacement>
 
-The closing marker is literally <<<END>>> (three angle-brackets, the word END, three angle-brackets). DO NOT emit any of these instead: <<</REPLACEMENT>>>, [[/REPLACEMENT]], [[/REPLACEMENT>>>, <<<REPLACEMENT/>>>, or any other variant. The brackets you used for [[SEL]] are NOT the brackets used here — these markers use <<<...>>> only.
+The text inside the tag replaces the original fragment between [[SEL]] and [[/SEL]]. Keep punctuation and whitespace clean. Stream-friendly: the runtime begins inserting your text into the user's input the moment the opening <replacement> tag closes, character by character; don't put leading newlines inside the tag unless they belong in the replacement.`;
 
-The text between the markers replaces ONLY the original fragment between [[SEL]] and [[/SEL]]. Keep punctuation and whitespace clean. Stream-friendly: the runtime starts inserting your text into the user's input the moment <<<REPLACEMENT>>> closes, character by character. Don't put leading newlines after <<<REPLACEMENT>>> unless they belong in the replacement.`;
-
-export const REPLACEMENT_START = '<<<REPLACEMENT>>>';
-export const REPLACEMENT_END = '<<<END>>>';
+export const REPLACEMENT_START = '<replacement>';
+export const REPLACEMENT_END = '</replacement>';
 
 /**
- * End-marker variants the streaming parser will accept. The canonical
- * form is `<<<END>>>`, but small / fast models confuse the SEL marker
- * style (`[[/SEL]]`) with the REPLACEMENT marker style and emit hybrids
- * like `[[/REPLACEMENT>>>` or `<<</REPLACEMENT>>>`. Treating any of these
- * as "end of replacement" keeps the leak out of the user's input.
- *
- * Order matters only for tie-breaking when two variants overlap — we
- * pick the earliest occurrence (lowest indexOf), so collisions are rare.
+ * End-marker variants the streaming parser accepts. The canonical form
+ * is `</replacement>` — a plain XML close tag that every model handles
+ * reliably because it matches HTML/XML training data. The extras below
+ * are legacy from the previous `<<<END>>>` prompt: kept so proxies
+ * with cached responses still parse, but new prompts drive the XML
+ * form and won't emit them.
  */
 export const REPLACEMENT_END_VARIANTS: readonly string[] = [
+  '</replacement>',
+  '<< /replacement >>',       // rare stylistic variant
+  // Legacy end markers from the old `<<<END>>>` prompt format. Kept
+  // for back-compat while cached responses cycle out.
   '<<<END>>>',
   '<<</REPLACEMENT>>>',
   '[[/REPLACEMENT>>>',
-  '[[/REPLACEMENT/>>>',   // observed hybrid: SEL's [[…]] + REPLACEMENT/>>> tail
+  '[[/REPLACEMENT/>>>',
   '[[/REPLACEMENT]]',
   '<<<REPLACEMENT/>>>',
   '<<<END_REPLACEMENT>>>',
   '<<</END>>>',
-  // Small models occasionally echo the SEL closing marker from the input
-  // contract instead of the REPLACEMENT closing marker. Treat as end so
-  // it never reaches the user's editable.
   '[[/SEL]]',
 ];
 
 /**
  * Catch-all pattern for any marker shape the enumerated list missed.
- * Any combination of `<<<`/`[[` opener + optional slashes + `REPLACEMENT`
- * or `END` or `SEL` word + optional slashes + `>>>`/`]]` closer counts
- * as an end marker. Prevents future model hybrids (`<<<REPLACEMENT/]]`,
- * `[[END>>>`, …) from leaking a raw marker into the user's editable.
+ * Handles both the canonical XML close (`</replacement>`) and any
+ * legacy bracket-word-bracket hybrid a cached-response proxy might
+ * still return. Any combination of `<`/`<<<`/`[[` opener + optional
+ * slashes + `replacement`/`end`/`sel` word (case-insensitive) +
+ * optional slashes + `>`/`>>>`/`]]` closer counts as an end marker.
  */
-const END_MARKER_FALLBACK_RE = /(?:<<<|\[\[)\s*\/?\s*(?:REPLACEMENT|END|SEL)\s*\/?\s*(?:>>>|\]\])/;
+const END_MARKER_FALLBACK_RE = /(?:<{1,3}|\[\[)\s*\/?\s*(?:replacement|end|sel)\s*\/?\s*(?:>{1,3}|\]\])/i;
 
 /** Scan `text` for the earliest end-marker variant. Returns the match
  *  position and the matched marker's length, or null if none. */
