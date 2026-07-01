@@ -1591,10 +1591,28 @@ export class InlineAgent {
   }): Promise<void> {
     const { target, sel, systemMessage, llm, streamingProvider, canStream, scopeTools, myToken } = args;
 
+    // Anchor logic differs from the action menu on purpose. The MENU
+    // is narrow (~200 px), so `getSelectionRect` returning the END of
+    // a multi-line selection reads as "attached to the caret" — good.
+    // The DIFF PANEL is ~500-600 px wide though; anchoring at the end
+    // pushes it off the right edge and the panel's viewport clamp
+    // rebounds it to the wrong quadrant. Compute a panel-specific
+    // anchor that lands directly below the OPENING line of the
+    // selection: use the input's caret-coord helper for the START
+    // offset and reuse the shared rect's bottom for the last-line Y.
     const rect = this.getSelectionRect(target);
-    const anchor = rect
+    let anchor = rect
       ? { left: rect.left, top: rect.top, bottom: rect.bottom }
       : { left: 0, top: 0, bottom: 0 };
+    if (rect && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
+      const start = target.selectionStart ?? 0;
+      const startCoords = getCaretCoords(target, start);
+      anchor = { left: startCoords.left, top: rect.top, bottom: rect.bottom };
+    } else if (rect) {
+      // contenteditable path — the DOM Range's own left edge is the
+      // start of the selection, so `rect.left` is already correct.
+      anchor = { left: rect.left, top: rect.top, bottom: rect.bottom };
+    }
 
     let abortCtrl = new AbortController();
     let panel: InlineDiffHandle | null = null;
@@ -1962,19 +1980,15 @@ export class InlineAgent {
         startCoords.top + startCoords.height,
         endCoords.top + endCoords.height,
       );
-      // Multi-line selection → anchor the panel at the START-of-
-      // selection left edge, below the LAST line. Menu (single-line
-      // popover, ~200 px wide) previously anchored at endCoords.left
-      // and that stayed close to the selection because it's narrow.
-      // The inline-diff panel is ~500-600 px wide though — anchoring
-      // at endCoords.left pushes its right edge off-screen, then the
-      // panel's viewport clamp shoves it further left, so it lands in
-      // the wrong quadrant of the screen. startCoords.left puts the
-      // panel's left edge directly below the selection's opening line,
-      // which reads as "attached to the selected text".
+      // Multi-line selection → anchor the menu at the END of the
+      // selection (where the user's cursor is) with zero width. This
+      // is right for the popover MENU (narrow, ~200 px, stays near
+      // the caret). The wider inline-diff panel needs a different
+      // anchor (start-of-selection); that's computed separately at
+      // the panel's call site — see `runInlineDiffFlow` → anchor.
       const sameLine = Math.abs(endCoords.top - startCoords.top) < startCoords.height * 0.5;
       if (!sameLine) {
-        return new DOMRect(startCoords.left, endCoords.top, 0, endCoords.height);
+        return new DOMRect(endCoords.left, endCoords.top, 0, endCoords.height);
       }
       const left = Math.min(startCoords.left, endCoords.left);
       const right = Math.max(startCoords.left, endCoords.left);
