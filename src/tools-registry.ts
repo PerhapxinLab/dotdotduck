@@ -140,7 +140,7 @@ export class ToolsRegistry {
 
   unregister(id: string): boolean {
     const removed = this.tools.delete(id);
-    // v0.2.0 · Wave 2·C: WebAgent now supports runtime un-register
+    // v0.2.0: WebAgent now supports runtime un-register
     // via `unregisterAction`. Mirror the delete into the live agent
     // so the next step actually loses the tool.
     if (removed && this.liveAgent) {
@@ -154,7 +154,6 @@ export class ToolsRegistry {
   }
 
   /**
-   * v0.2.0 ROADMAP item 1.6.
    *
    * Wait for any in-flight agent turn to complete, so the very next
    * turn observes whatever tools have just been registered. Without

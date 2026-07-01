@@ -1,5 +1,5 @@
 /**
- * v0.2.0 ROADMAP 2.6 — multi-step transaction skill pattern.
+ * multi-step transaction skill pattern.
  *
  * Some product flows aren't a one-shot agent task. They're transactions:
  * step 1 needs to land BEFORE step 2 runs (e.g. create draft → add line

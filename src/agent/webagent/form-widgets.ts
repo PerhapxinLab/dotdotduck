@@ -1,5 +1,5 @@
 /**
- * v0.2.0 ROADMAP 2.4 — form widget adapter registry.
+ * form widget adapter registry.
  *
  * Real product forms wrap their inputs in UI-library widgets:
  * react-select, antd Select, MUI Autocomplete, headless-ui Listbox,

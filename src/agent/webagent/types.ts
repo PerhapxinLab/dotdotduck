@@ -30,13 +30,13 @@ export type ActionFailureReason =
   | 'cancelled'
   | 'user_declined'
   /**
-   * v0.2.0 ROADMAP 2.3: the target is in scope the agent can read but
+   * the target is in scope the agent can read but
    * not act on — typically a cross-origin iframe or popup. The agent
    * narrates the boundary to the user and may offer to hand off.
    */
   | 'cross_origin'
   /**
-   * v0.2.0 ROADMAP 2.8: the route the agent navigated to requires
+   * the route the agent navigated to requires
    * authentication; user must sign in before the agent can proceed.
    */
   | 'auth_required'
@@ -110,7 +110,7 @@ export interface SelectionContext {
 }
 
 // ─── Live registry — runtime tool + context provider registration ──
-// v0.2.0 · Wave 2·C. Hosts wire tools / context providers any time;
+// Hosts wire tools / context providers any time;
 // the in-flight step finishes on its frozen action snapshot, the
 // next step / turn sees the new entry. `remove()` is idempotent.
 
@@ -123,7 +123,7 @@ export interface ToolHandle {
 /**
  * Names the context provider supplies — they map to the slots the
  * runtime asks for when building a per-turn context. SDK ships
- * defaults for each (v0.2.0 · Wave 2·D); hosts can replace any
+ * defaults for each; hosts can replace any
  * single slot without re-implementing the others.
  */
 export type ContextRole =
@@ -422,7 +422,7 @@ export interface WebAgentConfig {
    *
    * When set, the agent skips the lazy `createSession` step and the
    * `loadSession` lookup. The host (or `dddk.sessions`) becomes
-   * solely responsible for the session's lifecycle. v0.2 · Wave 2·A.
+   * solely responsible for the session's lifecycle. v0.2.
    */
   session?: AgentSession;
 
@@ -676,7 +676,7 @@ export interface WebAgentConfig {
   disableAutoPauseAfterNarrate?: boolean;
 
   /**
-   * Enable the streaming `agent_turn` envelope path (v0.2.0 ROADMAP
+   * Enable the streaming `agent_turn` envelope path (v0.2.0)
    * 1.9). When `true`, the runtime parses tool-call args incrementally
    * as the LLM streams them, so `narrate` strings start appearing in
    * the subtitle bar as the LLM types them — instead of waiting for

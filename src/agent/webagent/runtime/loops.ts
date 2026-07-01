@@ -243,7 +243,7 @@ export async function* executeLoop(
       // show a loading indicator until `navigated` arrives.
       yield { kind: 'navigating', from, to: path };
 
-      // v0.2.0 ROADMAP — preferClickLinkOverNavigate.
+      // preferClickLinkOverNavigate.
       // When the host opts in, look for a visible <a href="${path}"> on
       // the page and trigger it like a user click (with the synthetic
       // cursor if cursorTrail is also on). This keeps demos looking like

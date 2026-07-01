@@ -48,7 +48,7 @@ export async function buildMessages(agent: WebAgent): Promise<LLMMessage[]> {
     filter: agent.configRef.domFilter,
     maxLength: agent.configRef.domMaxLength,
   });
-  // Wave 2·D·2 — consult the registered DOM provider for the prompt
+  // Consult the registered DOM provider for the prompt
   // text portion. The runtime KEEPS using readDOM for the indexMap
   // (selector resolution at action-dispatch needs that map); only
   // the LLM-visible string is swappable. Hosts who registered a

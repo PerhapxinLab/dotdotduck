@@ -64,7 +64,7 @@ const STRINGS = {
     'palette.screenshot.hint': 'Drag to select · Esc cancels',
     'form.assist.scanning': 'Scanning {count} fields…',
     'prefs.title': 'Settings: {skill}',
-    // v0.2.0 ROADMAP 1.3 — voice module labels in the SDK i18n fallback
+    // voice module labels in the SDK i18n fallback
     'voice.listening': 'Listening',
     'voice.unsupported': 'Voice input not supported',
     'voice.failed': 'Voice input failed',

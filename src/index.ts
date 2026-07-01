@@ -86,7 +86,7 @@ export {
   SemanticMemory,
   DrawerMemory,
   createDrawerMemory,
-  // v0.2.0 ROADMAP 1.1 — unified memory facade
+  // unified memory facade
   UnifiedMemory,
   createUnifiedMemory,
   Plan,
@@ -174,7 +174,7 @@ export type {
   Drawer,
   DrawerMemoryOpts,
   DrawerSearchOpts,
-  // v0.2.0 ROADMAP 1.1 — unified memory facade types
+  // unified memory facade types
   UnifiedMemoryConfig,
   RememberOpts,
   RecallResult,
@@ -267,7 +267,7 @@ export {
   mockToolCall,
 } from './skills/evals';
 
-// v0.2.0 ROADMAP 2.6 — multi-step transaction with rollback
+// multi-step transaction with rollback
 export { runTransaction } from './skills/transaction';
 export type {
   TransactionStep,
@@ -275,7 +275,7 @@ export type {
   TransactionOutcome,
 } from './skills/transaction';
 
-// v0.2.0 ROADMAP 2.4 — form widget adapter registry
+// form widget adapter registry
 export {
   registerFormWidget,
   unregisterFormWidget,

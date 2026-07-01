@@ -13,7 +13,7 @@
   <a href="https://www.npmjs.com/package/@perhapxin/dddk"><img src="https://img.shields.io/npm/v/@perhapxin/dddk.svg?style=flat-square" alt="npm" /></a>
   <a href="https://www.npmjs.com/package/@perhapxin/dddk"><img src="https://img.shields.io/npm/dm/@perhapxin/dddk.svg?style=flat-square" alt="downloads" /></a>
   <a href="https://github.com/PerhapxinLab/dotdotduck/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue?style=flat-square" alt="license" /></a>
-  <a href="https://dddk.perhapxin.com/docs/v0.2.0/dddk/overview"><img src="https://img.shields.io/badge/docs-online-blue?style=flat-square" alt="docs" /></a>
+  <a href="https://dddk.perhapxin.com/docs/v0.2.1/dddk/overview"><img src="https://img.shields.io/badge/docs-online-blue?style=flat-square" alt="docs" /></a>
 </p>
 
 <p align="center"><a href="./README.md">English →</a></p>
@@ -234,9 +234,19 @@ https://github.com/user-attachments/assets/18d797df-4952-421a-a2b3-16aef1ebcb34
 
 8. **語音不只用在瀏覽器**。同一套 `Voice` + `utility` LLM 角色撐得起 IoT 面板、kiosk 終端、服務機台、銀髮 / 不想打字使用者的無障礙介面。所有有麥克風的裝置共用一個心智模型。
 
+## v0.2.1 — 最新
+
+疊在 v0.2.0 上的 patch。**無破壞性改動**。完整 release notes：[release-notes.zh-TW.md](./docs/v0.2.1/dddk/release-notes.zh-TW.md)。
+
+- **InlineAgent inline-diff UX** — 每個內建 action（improve / fix / shorter / longer / tone / translate）都會用「刪除線舊文 / 新文」預覽 + accept / reject / 插入下方 / 複製 + 後續對話。要回到直接 splice 就 `defaultDisplayAs: 'replace'`。
+- **新 UI primitive** — `mountProcessingLine`、`mountInlineDiff`、`InlineChatSession` 在 `@perhapxin/dddk/ui`，host 自己驅動 editor surface 也能用。
+- **Cursor 錨在目標上** — RAF loop 讓合成游標即時跟著元素過 scroll / resize / layout shift。每個 terminal event 也都會 hide cursor + 重置位置狀態。
+- **Planner 語意收緊** — `finish` 是結束（不是問題），`ask` 只給真擋路的決策用。資訊類 task 走 `navigate → narrate → finish`，不插後續 ask。
+- **Palette 鍵盤導航** — 高 row 上下移動時標題不會被切掉。
+
 ## v0.2.0 — 已出貨
 
-webagent 核心架構重寫。一個破壞性改動（預設只裝 `coreActions`，不是全部 12 個 builtin action）。完整 release notes：[release-notes.zh-TW.md](./docs/v0.2.0/dddk/release-notes.zh-TW.md)。
+webagent 核心架構重寫。一個破壞性改動（預設只裝 `coreActions`，不是全部 12 個 builtin action）。
 
 **成本驗證 — 完成。** `gpt-5.4-nano` 跑完整單檔 webagent loop，任務成功率跟 `gpt-5.4-mini` 同等，成本約低一個量級。[dddk.perhapxin.com](https://dddk.perhapxin.com) 的 `webagent` + `plan` 兩個角色已換 nano 作預設。
 
@@ -294,15 +304,15 @@ dotdotduck 仍在積極開發中。能跑，但會有粗糙的邊角。先講幾
 
 ## 文件
 
-- **v0.2.0 有什麼新東西** → [release notes](https://dddk.perhapxin.com/docs/v0.2.0/dddk/release-notes) · [migration guide](https://dddk.perhapxin.com/docs/v0.2.0/dddk/migrating)
+- **v0.2.1 有什麼新東西** → [release notes](https://dddk.perhapxin.com/docs/v0.2.1/dddk/release-notes) · [migration guide](https://dddk.perhapxin.com/docs/v0.2.1/dddk/migrating)
 
-- **完整文件** → [dddk.perhapxin.com/docs](https://dddk.perhapxin.com/docs/v0.2.0/dddk/overview)
-- **Agent**（DOM-grounded 迴圈 + InlineAgent + sitemap + Memory）→ [/dddk/agent](https://dddk.perhapxin.com/docs/v0.2.0/dddk/agent/overview)
-- **LLM** provider + router + adapter registry → [/dddk/llm](https://dddk.perhapxin.com/docs/v0.2.0/dddk/llm/providers)
-- **Skills** 系統 + evals → [/dddk/skills](https://dddk.perhapxin.com/docs/v0.2.0/dddk/skills/overview)
-- **Modules**（voice / Dwell / inline / immersive translate / proactive / analytics）→ [/dddk/modules](https://dddk.perhapxin.com/docs/v0.2.0/dddk/modules/overview)
-- **Toolbox**（search + recommend）→ [/dddk/toolbox](https://dddk.perhapxin.com/docs/v0.2.0/dddk/toolbox/overview)
-- **Theming** → [/dddk/theming](https://dddk.perhapxin.com/docs/v0.2.0/dddk/theming)
+- **完整文件** → [dddk.perhapxin.com/docs](https://dddk.perhapxin.com/docs/v0.2.1/dddk/overview)
+- **Agent**（DOM-grounded 迴圈 + InlineAgent + sitemap + Memory）→ [/dddk/agent](https://dddk.perhapxin.com/docs/v0.2.1/dddk/agent/overview)
+- **LLM** provider + router + adapter registry → [/dddk/llm](https://dddk.perhapxin.com/docs/v0.2.1/dddk/llm/providers)
+- **Skills** 系統 + evals → [/dddk/skills](https://dddk.perhapxin.com/docs/v0.2.1/dddk/skills/overview)
+- **Modules**（voice / Dwell / inline / immersive translate / proactive / analytics）→ [/dddk/modules](https://dddk.perhapxin.com/docs/v0.2.1/dddk/modules/overview)
+- **Toolbox**（search + recommend）→ [/dddk/toolbox](https://dddk.perhapxin.com/docs/v0.2.1/dddk/toolbox/overview)
+- **Theming** → [/dddk/theming](https://dddk.perhapxin.com/docs/v0.2.1/dddk/theming)
 
 ## 安裝
 
@@ -337,7 +347,7 @@ const dddk = new DotDotDuck({
 dddk.mount();
 ```
 
-按 `Ctrl/⌘+K`、打 `/introduce`、看它跑。完整的[安裝指南](https://dddk.perhapxin.com/docs/v0.2.0/dddk/quickstart-frameworks)有 React / Vue / Svelte / Solid 的整合說明。
+按 `Ctrl/⌘+K`、打 `/introduce`、看它跑。完整的[安裝指南](https://dddk.perhapxin.com/docs/v0.2.1/dddk/quickstart-frameworks)有 React / Vue / Svelte / Solid 的整合說明。
 
 ## 主題
 

@@ -12,7 +12,7 @@
  * pattern from v0.1 (one session, one localStorage key) keeps
  * working. Sessions without a `persistKey` live in memory only.
  *
- * v0.2.0 · Wave 2·A.
+ * v0.2.0.
  */
 
 import type { AgentSession } from '../agent/webagent/types';

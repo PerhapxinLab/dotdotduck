@@ -9,9 +9,9 @@
  * continuity when the agents share a session via `dddk.sessions`.
  *
  * Holds WebAgent instances today; TaskAgent slots in via the same
- * interface once Wave 2·B ships.
+ * interface
  *
- * v0.2.0 · Wave 2·A.
+ * v0.2.0.
  */
 
 import type { WebAgent } from '../agent';
@@ -19,7 +19,7 @@ import type { WebAgent } from '../agent';
 /**
  * Minimum the orchestrator + registry needs from any registered
  * agent. WebAgent satisfies this naturally; TaskAgent will once
- * Wave 2·B lands.
+ * 
  */
 export interface RegisterableAgent {
   isRunning?(): boolean;

@@ -9,7 +9,7 @@
  * Caveat: the runtime's internal `currentIndexMap` (the map from
  * `[3]`-style indices back to live elements for selector resolution)
  * is owned by the runtime's direct `readDOM` call, NOT by this
- * provider. As of Wave 2·D the runtime continues to use its own
+ * provider. Currently the runtime continues to use its own
  * `readDOM` invocation for that path; the provider is consulted
  * only where the runtime is being migrated. A host that overrides
  * the dom provider AND wants the runtime to actually consult it

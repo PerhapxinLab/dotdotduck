@@ -1,6 +1,6 @@
 /**
  * Transport layer — batching, retry, ordering — for the unified ingest
- * stream. v0.2.0 ROADMAP item 7.4.
+ * stream. 
  *
  * Pluggable sink: anything implementing `EventSink` works. The
  * transport handles the bits that every sink would otherwise reinvent:

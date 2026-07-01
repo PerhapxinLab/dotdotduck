@@ -1,7 +1,7 @@
 /**
  * Smoke tests for WebAgent's live tool + context provider registry.
  *
- * v0.2.0 · Wave 2·C. Run via:
+ * v0.2.0. Run via:
  *   pnpm tsx src/agent/webagent/registry.test.ts
  *
  * Covers:

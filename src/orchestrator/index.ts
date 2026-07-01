@@ -144,7 +144,7 @@ export class DotDotDuck {
    * Named session registry — `dddk.sessions`. Hosts use this to share
    * a single `AgentSession` across multiple agents (one persona per
    * route, etc.) so cross-page conversation history + memory carry
-   * over even when the active agent changes. v0.2.0 · Wave 2·A.
+   * over even when the active agent changes. v0.2.0.
    */
   readonly sessions: SessionsRegistry = new SessionsRegistry();
   /**
@@ -153,7 +153,7 @@ export class DotDotDuck {
    * (the one palette / voice / dwell routes to). Singleton
    * `dddk.getAgent()` keeps working — it returns the active agent
    * when the registry is in use, otherwise the lazy-built one.
-   * v0.2.0 · Wave 2·A.
+   * v0.2.0.
    */
   readonly agents: AgentsRegistry = new AgentsRegistry();
   /** @internal */ _voiceEnabled: boolean;
@@ -397,7 +397,6 @@ export class DotDotDuck {
   }
 
   /**
-   * v0.2.0 ROADMAP item 7.3.
    *
    * Public host-facing `track(name, props?)` API. Mirrors the standard
    * product-analytics surface — engineers recognise this from existing
@@ -596,7 +595,7 @@ export class DotDotDuck {
   }
 
   /**
-   * Active WebAgent. With multi-instance wiring (v0.2.0 · Wave 2·A),
+   * Active WebAgent. With multi-instance wiring (v0.2.0),
    * this returns whichever agent the host put in `dddk.agents` and
    * called `setActive(name)` on; falls back to the lazy-built
    * singleton from `startAgent` for hosts that haven't adopted the

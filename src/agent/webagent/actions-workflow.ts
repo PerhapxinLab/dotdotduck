@@ -1,5 +1,5 @@
 /**
- * v0.2.0 ROADMAP 2.x — workflow actions.
+ * workflow actions.
  *
  * The agent needs hooks for the common patterns that show up when it
  * operates real product UIs:

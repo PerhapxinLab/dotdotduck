@@ -143,7 +143,7 @@ export type IntentEvent =
    */
   | { kind: 'agent_pause_decision'; runId: string; decision: 'continue' | 'stop'; timestamp: number }
   /**
-   * v0.2.0 · Wave 2·E. Emitted when a tool handler returns
+   * v0.2.0. Emitted when a tool handler returns
    * `{ ok: false }` (or throws — `reason: 'unknown'`, message in
    * `message`). Fills the visibility gap where the lifecycle's
    * `agent_tool_start` / `agent_tool_end` events fire on the host
@@ -160,14 +160,14 @@ export type IntentEvent =
    */
   | { kind: 'agent_feedback'; runId?: string; skillId?: string; satisfied: boolean | null; summary: string; timestamp: number }
   /**
-   * v0.2.0 ROADMAP 7.3. Host-defined event emitted via the public
+   * Host-defined event emitted via the public
    * `dddk.track(name, props?)` API. Goes through the same intent
    * stream as the typed events; downstream sinks treat it like any
    * other intent.
    */
   | { kind: 'custom_track'; name: string; props: Record<string, unknown>; timestamp: number }
   /**
-   * v0.2.0 ROADMAP 4.7. Fired when the agent explicitly hands off to
+   * Fired when the agent explicitly hands off to
    * a human operator via the `escalate_to_human` action. `runId`
    * ties back to the originating run.
    */

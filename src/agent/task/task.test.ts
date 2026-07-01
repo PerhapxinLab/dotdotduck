@@ -1,5 +1,5 @@
 /**
- * Smoke tests for TaskAgent. v0.2.0 · Wave 2·B.
+ * Smoke tests for TaskAgent. v0.2.0.
  *
  *   pnpm tsx src/agent/task/task.test.ts
  *

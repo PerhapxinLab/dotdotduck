@@ -13,7 +13,7 @@
   <a href="https://www.npmjs.com/package/@perhapxin/dddk"><img src="https://img.shields.io/npm/v/@perhapxin/dddk.svg?style=flat-square" alt="npm" /></a>
   <a href="https://www.npmjs.com/package/@perhapxin/dddk"><img src="https://img.shields.io/npm/dm/@perhapxin/dddk.svg?style=flat-square" alt="downloads" /></a>
   <a href="https://github.com/PerhapxinLab/dotdotduck/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue?style=flat-square" alt="license" /></a>
-  <a href="https://dddk.perhapxin.com/docs/v0.2.0/dddk/overview"><img src="https://img.shields.io/badge/docs-online-blue?style=flat-square" alt="docs" /></a>
+  <a href="https://dddk.perhapxin.com/docs/v0.2.1/dddk/overview"><img src="https://img.shields.io/badge/docs-online-blue?style=flat-square" alt="docs" /></a>
 </p>
 
 <p align="center"><a href="./README.zh-TW.md">繁體中文 →</a></p>
@@ -234,9 +234,19 @@ Several physical entry points to send context into dddk. No new vocabulary to le
 
 8. **Voice doesn't stop at the browser.** The same `Voice` + `utility` LLM shape powers IoT panels, kiosk terminals, service machines, and accessibility-first surfaces for elderly users or anyone who'd rather not type. One mental model across every device that has a microphone.
 
+## v0.2.1 — latest
+
+Patch on top of v0.2.0. **No breaking changes.** Full notes: [release-notes.md](./docs/v0.2.1/dddk/release-notes.md).
+
+- **InlineAgent inline-diff UX** — every built-in action (improve / fix / shorter / longer / tone / translate) now previews changes in a strikethrough-old / new panel with accept / reject / insert-below / copy + follow-up chat. Opt back to instant-splice with `defaultDisplayAs: 'replace'`.
+- **New UI primitives** — `mountProcessingLine`, `mountInlineDiff`, `InlineChatSession` on `@perhapxin/dddk/ui` for hosts driving their own editor surface.
+- **Cursor anchored to its target** — RAF loop keeps the synthetic cursor visually attached to the element it landed on, through scroll / resize / layout shifts. Cursor also hides cleanly on every terminal event and resets its position state between runs.
+- **Planner semantics tightened** — `finish` means end of run (never a question); `ask` reserved for genuinely blocking user choices. Informational asks plan `navigate → narrate → finish` with no follow-up qualification.
+- **Palette keyboard nav** — active row's title stays visible on tall rows with expanded inline detail.
+
 ## v0.2.0 — what shipped
 
-Architectural rework of the webagent core. One breaking change (`coreActions` is the default install, not all 12 builtin actions). Full notes: [release-notes.md](./docs/v0.2.0/dddk/release-notes.md).
+Architectural rework of the webagent core. One breaking change (`coreActions` is the default install, not all 12 builtin actions).
 
 **Cost validation — done.** `gpt-5.4-nano` runs the full monolithic webagent loop with the same task-success rate as `gpt-5.4-mini` at roughly an order of magnitude lower cost. That's the new default for `webagent` + `plan` roles on [dddk.perhapxin.com](https://dddk.perhapxin.com).
 
@@ -294,14 +304,14 @@ None of this is baked into `@perhapxin/dddk`. The package itself ships LLM provi
 
 ## Documentation
 
-- **What's new in v0.2.0** → [release notes](https://dddk.perhapxin.com/docs/v0.2.0/dddk/release-notes) · [migration guide](https://dddk.perhapxin.com/docs/v0.2.0/dddk/migrating)
-- **Full docs** → [dddk.perhapxin.com/docs](https://dddk.perhapxin.com/docs/v0.2.0/dddk/overview)
-- **Agent** (DOM-grounded loop + InlineAgent + sitemap + Memory) → [/dddk/agent](https://dddk.perhapxin.com/docs/v0.2.0/dddk/agent/overview)
-- **LLM** providers + router + adapter registry → [/dddk/llm](https://dddk.perhapxin.com/docs/v0.2.0/dddk/llm/providers)
-- **Skills** system + evals → [/dddk/skills](https://dddk.perhapxin.com/docs/v0.2.0/dddk/skills/overview)
-- **Modules** (voice / Dwell / inline / immersive translate / proactive / analytics) → [/dddk/modules](https://dddk.perhapxin.com/docs/v0.2.0/dddk/modules/overview)
-- **Toolbox** (search + recommend) → [/dddk/toolbox](https://dddk.perhapxin.com/docs/v0.2.0/dddk/toolbox/overview)
-- **Theming** → [/dddk/theming](https://dddk.perhapxin.com/docs/v0.2.0/dddk/theming)
+- **What's new in v0.2.1** → [release notes](https://dddk.perhapxin.com/docs/v0.2.1/dddk/release-notes) · [migration guide](https://dddk.perhapxin.com/docs/v0.2.1/dddk/migrating)
+- **Full docs** → [dddk.perhapxin.com/docs](https://dddk.perhapxin.com/docs/v0.2.1/dddk/overview)
+- **Agent** (DOM-grounded loop + InlineAgent + sitemap + Memory) → [/dddk/agent](https://dddk.perhapxin.com/docs/v0.2.1/dddk/agent/overview)
+- **LLM** providers + router + adapter registry → [/dddk/llm](https://dddk.perhapxin.com/docs/v0.2.1/dddk/llm/providers)
+- **Skills** system + evals → [/dddk/skills](https://dddk.perhapxin.com/docs/v0.2.1/dddk/skills/overview)
+- **Modules** (voice / Dwell / inline / immersive translate / proactive / analytics) → [/dddk/modules](https://dddk.perhapxin.com/docs/v0.2.1/dddk/modules/overview)
+- **Toolbox** (search + recommend) → [/dddk/toolbox](https://dddk.perhapxin.com/docs/v0.2.1/dddk/toolbox/overview)
+- **Theming** → [/dddk/theming](https://dddk.perhapxin.com/docs/v0.2.1/dddk/theming)
 
 ## Install
 
@@ -336,7 +346,7 @@ const dddk = new DotDotDuck({
 dddk.mount();
 ```
 
-Press `Ctrl/⌘+K`, type `/introduce`, watch it run. The full [quickstart guide](https://dddk.perhapxin.com/docs/v0.2.0/dddk/quickstart-frameworks) covers React / Vue / Svelte / Solid wiring.
+Press `Ctrl/⌘+K`, type `/introduce`, watch it run. The full [quickstart guide](https://dddk.perhapxin.com/docs/v0.2.1/dddk/quickstart-frameworks) covers React / Vue / Svelte / Solid wiring.
 
 ## Theming
 

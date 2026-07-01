@@ -5,7 +5,7 @@
  * `webagent.registerContextProvider(role, fn)` — the registration
  * automatically restores the SDK default on `handle.remove()`.
  *
- * v0.2.0 · Wave 2·D.
+ * v0.2.0.
  */
 
 import type { ContextProvider, ContextRole } from '../types';

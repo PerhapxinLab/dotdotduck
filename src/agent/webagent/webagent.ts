@@ -203,8 +203,8 @@ export class WebAgent {
 
   /**
    * Context provider registry — one slot per `ContextRole`. SDK
-   * ships defaults (wired in v0.2.0 · Wave 2·D); hosts can replace
-   * a single slot without re-implementing the others. v0.2.0 · Wave 2·C.
+   * ships defaults (wired in v0.2.0); hosts can replace
+   * a single slot without re-implementing the others. v0.2.0.
    */
   /** @internal */ contextProviders: Map<ContextRole, ContextProvider> = new Map();
 
@@ -240,7 +240,7 @@ export class WebAgent {
   /**
    * Explicit unregister by name. Returns `true` when an action was
    * actually removed. Hosts who don't keep the `ToolHandle` around
-   * can call this instead. v0.2.0 · Wave 2·C.
+   * can call this instead. v0.2.0.
    */
   unregisterAction(name: string): boolean {
     return this.actions.delete(name);
@@ -250,7 +250,7 @@ export class WebAgent {
    * Replace the producer for one context slot (`url`, `page_summary`,
    * `dom`, `screenshot`, `history`, `selection`). Returns a
    * `ContextProviderHandle` that restores the previous binding on
-   * `remove()`. SDK defaults are installed lazily in v0.2.0 · Wave 2·D;
+   * `remove()`. SDK defaults are installed lazily in v0.2.0;
    * registering here before defaults are wired still works — the
    * registered provider replaces the SDK default at lookup time.
    */
@@ -273,7 +273,7 @@ export class WebAgent {
   /**
    * Drop a registered provider for `role`. Returns `true` when one
    * was removed. After removal, the SDK default (when present)
-   * applies at lookup time. v0.2.0 · Wave 2·C.
+   * applies at lookup time. v0.2.0.
    */
   unregisterContextProvider(role: ContextRole): boolean {
     return this.contextProviders.delete(role);

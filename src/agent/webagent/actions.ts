@@ -753,7 +753,7 @@ export const builtinActions: ActionDefinition[] = [
   ...flowActions,
 ] as ActionDefinition[];
 
-// Opt-in: workflow actions (v0.2.0 ROADMAP 2.x) are NOT auto-registered.
+// Opt-in: workflow actions are NOT auto-registered.
 // Host opts in with `new WebAgent({ ..., customActions: workflowActions })`
 // — keeps the default prompt catalog focused on the actions the host
 // actually uses.

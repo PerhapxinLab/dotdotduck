@@ -530,7 +530,7 @@ export class AgentLifecycle {
 
           case 'tool-end':
             host._emitter.emit('agent_tool_end', { name: ev.name, result: ev.result });
-            // v0.2.0 · Wave 2·E — also surface failures into the intent
+            // v0.2.0 — also surface failures into the intent
             // stream so dashboards can chart "which tool is failing,
             // why, how often". `agent_tool_end` stays on the host
             // emitter for runtime listeners; failed runs also fire

@@ -1,7 +1,7 @@
 /**
  * TaskAgent types. Plain-protocol agent — conversation + host-defined
  * tool calling, NO DOM dump, NO CoT envelope. Lives beside WebAgent
- * and InlineAgent as the third agent kind. v0.2.0 · Wave 2·B.
+ * and InlineAgent as the third agent kind. v0.2.0.
  */
 
 import type { LLMSource } from '../llm/router';
@@ -64,7 +64,7 @@ export interface TaskRunOptions {
 /**
  * One emit from `streamAsk` — incremental text delta, optional
  * tool-call markers, and a `done` flag on the terminal chunk.
- * v0.2.0 · Wave 2·B.
+ * v0.2.0.
  */
 export interface TaskAgentStreamChunk {
   /** Newly added text since the previous chunk. Empty between

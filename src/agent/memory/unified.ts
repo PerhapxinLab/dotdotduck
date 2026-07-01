@@ -1,5 +1,5 @@
 /**
- * v0.2.0 ROADMAP 1.1 — Unified memory facade.
+ * Unified memory facade.
  *
  * The SDK has shipped TWO memory subsystems in parallel since v0.1.0:
  *

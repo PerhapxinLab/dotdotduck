@@ -1,5 +1,5 @@
 /**
- * Unified ingest event schema — v0.2.0 ROADMAP item 7.1.
+ * Unified ingest event schema .
  *
  * Every event flowing through the SDK conforms to this shape: intent
  * events (existing `IntentEvent` union), raw browser telemetry (clicks,

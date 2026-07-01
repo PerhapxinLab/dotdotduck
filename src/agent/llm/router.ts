@@ -19,7 +19,7 @@ export type LLMRole =
   | 'vision'
   | 'utility'
   | 'plan'
-  /** v0.2.0 · Wave 2·B. Conversational + tool-calling agent
+  /** v0.2.0. Conversational + tool-calling agent
    *  (TaskAgent). Defaults to `webagent` when not explicitly set on
    *  the router. */
   | 'task'
@@ -39,7 +39,7 @@ export interface LLMRouter {
   utility?: LLMProvider;
   /** Pre-loop planner. */
   plan?: LLMProvider;
-  /** v0.2.0 · Wave 2·B. TaskAgent — conversational + tool calling. */
+  /** v0.2.0. TaskAgent — conversational + tool calling. */
   task?: LLMProvider;
   /** @deprecated — use `vision`. */
   webagentWithSelection?: LLMProvider;
