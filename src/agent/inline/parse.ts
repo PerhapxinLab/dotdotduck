@@ -45,6 +45,7 @@ export const REPLACEMENT_END_VARIANTS: readonly string[] = [
   '<<<END>>>',
   '<<</REPLACEMENT>>>',
   '[[/REPLACEMENT>>>',
+  '[[/REPLACEMENT/>>>',   // observed hybrid: SEL's [[…]] + REPLACEMENT/>>> tail
   '[[/REPLACEMENT]]',
   '<<<REPLACEMENT/>>>',
   '<<<END_REPLACEMENT>>>',
@@ -55,6 +56,15 @@ export const REPLACEMENT_END_VARIANTS: readonly string[] = [
   '[[/SEL]]',
 ];
 
+/**
+ * Catch-all pattern for any marker shape the enumerated list missed.
+ * Any combination of `<<<`/`[[` opener + optional slashes + `REPLACEMENT`
+ * or `END` or `SEL` word + optional slashes + `>>>`/`]]` closer counts
+ * as an end marker. Prevents future model hybrids (`<<<REPLACEMENT/]]`,
+ * `[[END>>>`, …) from leaking a raw marker into the user's editable.
+ */
+const END_MARKER_FALLBACK_RE = /(?:<<<|\[\[)\s*\/?\s*(?:REPLACEMENT|END|SEL)\s*\/?\s*(?:>>>|\]\])/;
+
 /** Scan `text` for the earliest end-marker variant. Returns the match
  *  position and the matched marker's length, or null if none. */
 export function findEndMarker(text: string): { idx: number; len: number } | null {
@@ -64,6 +74,13 @@ export function findEndMarker(text: string): { idx: number; len: number } | null
     if (idx >= 0 && (best === null || idx < best.idx)) {
       best = { idx, len: m.length };
     }
+  }
+  // Regex fallback — only kicks in if none of the enumerated variants
+  // matched. Guarantees any bracket-word-bracket combo terminates the
+  // stream instead of leaking.
+  if (best === null) {
+    const m = END_MARKER_FALLBACK_RE.exec(text);
+    if (m) best = { idx: m.index, len: m[0].length };
   }
   return best;
 }
@@ -109,6 +126,9 @@ function stripStrayMarkers(s: string): string {
     out = out.split(m).join('');
   }
   out = out.split(REPLACEMENT_START).join('');
+  // Regex fallback — sweeps any leftover bracket-word-bracket combos
+  // the enumerated list missed.
+  out = out.replace(new RegExp(END_MARKER_FALLBACK_RE.source, 'g'), '');
   return out;
 }
 
