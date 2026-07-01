@@ -1,8 +1,22 @@
-# webagent — Overview
+# Agent — Overview
 
-## What it is
+## Three agent kinds
 
-**webagent is a DOM-grounded agent toolkit.**
+As of v0.2.0 dddk ships three agent classes, each purpose-built. Pick the one that matches your surface:
+
+| Class | Sees the DOM? | Protocol | Use case |
+|---|---|---|---|
+| **`WebAgent`** | ✅ full page dump per turn | CoT envelope (or plain, opt-in) | Operating the current page — navigate, click, fill, narrate with visual overlays. The default agent. |
+| **`TaskAgent`** | ❌ no DOM | Plain chat + OpenAI tool-calls | Conversation + host-defined tools. Customer support, RAG over host data, backend orchestrators. |
+| **`InlineAgent`** | ❌ scoped to the current selection | Streaming | Text inside inputs / textareas / contenteditable — improve / translate / rewrite / summarize / diff-preview UX. |
+
+The three share `AgentSession` shape so instances can share conversation history (`dddk.sessions` + `dddk.agents` registries; see [/api.md#multi-instance](./api.md)).
+
+This overview page covers **`WebAgent`** — the DOM-grounded one. TaskAgent lives at [/task-agent.md](./task-agent.md). InlineAgent's docs are under [../modules/inline-agent.md](../modules/inline-agent.md).
+
+## What WebAgent is
+
+**A DOM-grounded agent toolkit.**
 
 It lets an AI agent work directly on the page the user is currently looking at — read DOM, click buttons, fill forms, navigate, highlight / border elements, persist state across pages, and pause to ask the user when needed.
 

@@ -12,7 +12,7 @@
 
 慣例：**每個 Surface 最多一個 Card**。要再分組就用 `Group`，要凸顯選項用 `OptionGroup` / `ChoiceList`。
 
-## 四個 rich layout piece（v0.1.0 新增）
+## 四個 rich layout piece
 
 針對「商品推薦 / 多選項 / 圖+文 + 鍵盤導航」這類場景：
 

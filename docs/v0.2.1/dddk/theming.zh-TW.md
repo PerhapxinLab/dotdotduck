@@ -452,4 +452,4 @@ dotdotduck 不夾帶字型。host 自己 load：
 - **Accent 繼承範圍。** `--dddk-accent` 會流到每個 dddk surface — palette focus row、button bg、Dwell ring、Spotter ring。在 `:root` 蓋一次通常就是你要的。如果 host 在比較深的層級蓋（`.dashboard { --dddk-accent: blue }`），只有 render 在 `.dashboard` *裡面*的 dddk UI 看得到；portal 到 `<body>` 的 UI（palette、modal Surface）看不到。要整個 app 統一 accent，蓋在 `:root` 或 `html`。
 - **Reset stylesheet。** Host 如果做激進的 CSS reset（`* { all: unset }` 那種），dddk UI 會壞，因為 `<button>` 這類元素還要靠預設 render。Reset 規則應該 scope 到 host 內容，別 global。
 
-如果你的環境真的需要硬隔離（例如要把 dddk 嵌進一個不信任的 host page，像 third-party extension），開 issue — Shadow DOM 模式是「有需求才會回來看」的東西，但 v0.1.0 還不在 roadmap 上。
+如果你的環境真的需要硬隔離（例如要把 dddk 嵌進一個不信任的 host page，像 third-party extension），開 issue — Shadow DOM 模式是「有需求才會回來看」的東西，但不在 roadmap 上。

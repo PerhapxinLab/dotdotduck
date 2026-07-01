@@ -9,14 +9,36 @@
 - Failures return a normalised error — never throw into the agent loop.
 - DOM actions `query` first to confirm the target exists; if not, return `{ ok: false, reason: 'not_found' }`.
 
-## Full list (12 built-ins)
+## Action bundles (opt-in as of v0.2.0)
+
+The default install is `coreActions` (5). Everything else is opt-in via `customActions`:
+
+```ts
+import { WebAgent, coreActions, formActions, flowActions, extraActions, builtinActions } from '@perhapxin/dddk';
+
+// Restore v0.1 behaviour (all 15 installed):
+new WebAgent({ ..., customActions: builtinActions });
+
+// Or opt-in per bundle:
+new WebAgent({ ..., customActions: [...formActions] });
+```
+
+| Bundle | Members | Default? |
+|---|---|---|
+| `coreActions` | `narrate`, `navigate`, `click`, `border`, `scroll_to` | ✅ auto-installed |
+| `formActions` | `fill_input`, `select_option`, `clear_input`, `press_key`, `hold_key`, `double_click`, `long_press`, `drag` | opt-in |
+| `flowActions` | `wait`, `pause`, `ask_user`, `ask_user_choice` | opt-in |
+| `extraActions` | `highlight`, `track_intent`, `escalate_to_human` | opt-in |
+| `workflowActions` | `validate_form`, `wait_until` | opt-in |
+
+## Full list
 
 ### Navigation / page control
 
 | Action | Params | Behaviour |
 |---|---|---|
-| `navigate` | `{ path: string }` | SPA-friendly page change. Always gated with a Space confirmation (the runtime emits a `confirm` event before running). |
-| `scroll_to` | `{ selector }` | Smooth-scrolls to the element. Use before narrating about something below the fold. |
+| `navigate` | `{ path: string }` | SPA-friendly page change. Rejects paths not in the configured `sitemap` (v0.2.0) with the valid path list so the model can retry. Always gated with a Space confirmation (the runtime emits a `confirm` event before running). |
+| `scroll_to` | `{ selector }` | Smooth-scrolls to the element. Use before narrating about something below the fold. With `cursorTrail: true` the cursor swaps to a mouse-wheel glyph, travels along the scroll path, and reverts to pointer. |
 | `wait` | `{ ms?, selector?, timeout? }` | Two modes — sleep `ms` milliseconds, or poll until a CSS `selector` appears (with `timeout`). Capped at 5 s. |
 
 ### DOM interaction
@@ -24,23 +46,28 @@
 | Action | Params | Behaviour |
 |---|---|---|
 | `click` | `{ selector }` | Click the element. Use this for submit buttons too — there is no separate `submit_form`. |
+| `double_click` | `{ selector }` | Real `dblclick` event (not two `click`s), so handlers bound to `ondblclick` actually run — open / expand / rename modes. |
+| `long_press` | `{ selector, ms? }` | mousedown + touchstart → wait → mouseup + touchend. Default 600 ms, caps at 5 s. Context menus, drag handles, mobile long-press. |
+| `drag` | `{ from, to, steps? }` | mousedown on `from` → N interpolated mousemove events → mouseup on `to`. Also fires HTML5 `dragstart` / `dragover` / `drop` / `dragend` so React-DnD / SortableJS / native HTML5 DnD all light up. Sortable lists, kanban, slider handles. |
 | `fill_input` | `{ selector, value }` | Fill an input or textarea (dispatches `input` + `change`). |
 | `select_option` | `{ selector, value }` | Pick a `<select>` option. |
 | `clear_input` | `{ selector }` | Clear a field. |
-| `press_key` | `{ key, selector? }` | Dispatch a keyboard event (`keydown` + `keyup`) on an element. `key` is the W3C key name (`"Enter"`, `"Escape"`, `"ArrowDown"`, `" "`, single chars). `selector` is optional — omitted = `document.activeElement`. Use for Enter to submit, Escape to dismiss, arrow keys, etc. |
+| `press_key` | `{ key, selector?, modifiers? }` | Dispatch a keyboard event (`keydown` + `keyup`) on an element. `key` is the W3C key name (`"Enter"`, `"Escape"`, `"ArrowDown"`, `" "`, single chars). `modifiers`: `('ctrl' \| 'shift' \| 'alt' \| 'meta')[]` for chord dispatch — Ctrl+S / Cmd+K / Shift+Tab. `selector` optional — omitted = `document.activeElement`. |
+| `hold_key` | `{ key, ms, selector?, modifiers? }` | Hold a key down for `ms` milliseconds (keydown → wait → keyup). Push-to-talk, hold-Ctrl multi-select, hold-to-zoom. Caps at 5 s. |
 
 ### Visual overlays (shown to the user)
 
 | Action | Params | Behaviour |
 |---|---|---|
-| `border` | `{ selector, color?, label? }` | Draw a border around the element. Calling `border` or `highlight` auto-clears any prior overlay; there is no `clear_overlays` tool. **In CoT mode the standalone `border` tool is HIDDEN from the model** — framing is set via `narrate.about` instead (see below). The action stays registered for the legacy / classic loop and host customActions. |
-| `highlight` | `{ selector, color?, label? }` | Translucent fill — for inline text spans / paragraphs. Same auto-clear behaviour. Not in the default builtin set; opt in via `customActions`. |
+| `border` | `{ selector, color?, label? }` | Draw a border around the element. Calling `border` or `highlight` auto-clears any prior overlay. **In CoT mode the standalone `border` tool is HIDDEN from the model** — framing is set via `narrate.about` instead (see below). |
+| `highlight` | `{ selector, color?, label? }` | Translucent fill — for inline text spans / paragraphs. Same auto-clear. Not in `coreActions`; opt in via `extraActions` or `customActions`. |
 
-### Talking to the user
+### Narration + user prompts
 
 | Action | Params | Behaviour |
 |---|---|---|
-| `pause` | `{ note? }` | Wait for the user to press Space before the next subject. **Hidden from the CoT tool list** — the runtime auto-pauses after every narrate, exposing `pause` would invite double-pauses. Stays available in classic mode. |
+| `narrate` | `{ text, about? }` | First-class action in `coreActions` (v0.2.0). CoT runtime intercepts the envelope shape; plain-protocol callers hit the handler which routes text to the subtitle bar. When `about` is set, auto-borders that element (see below). |
+| `pause` | `{ note? }` | Wait for the user to press Space before the next subject. **Hidden from the CoT tool list** — the runtime auto-pauses after every narrate. |
 | `ask_user` | `{ question }` | Ask a free-text question. |
 | `ask_user_choice` | `{ question, options[], allowFreeText? }` | Multi-choice picker (2–6 options, with optional free-text fallback). |
 
@@ -119,9 +146,18 @@ agent.config.customActions = [
 ];
 ```
 
-## Disabling built-ins you don't need
+## Trimming further with `excludeTools`
 
-Every name in the table above is registered by default so any host works out of the box. Sites with a narrow surface (no `<select>` elements, no destructive operations, no questions to ask the user, etc.) can trim the list with `disableBuiltinActions` — the listed actions are removed from the agent's tool schema entirely, which shrinks per-turn token cost and removes "wrong tool" failure modes.
+`customActions` decides what's INSTALLED. If you want to trim individual entries out of a bundle you mostly want, use `excludeTools`:
+
+```ts
+new WebAgent({
+  customActions: [...formActions],
+  excludeTools: ['select_option', 'clear_input'],  // formActions minus these two
+});
+```
+
+`disableBuiltinActions` from v0.1 is a deprecated alias for `excludeTools`. Rename in place — same shape, same behaviour, no console warning tax after you switch.
 
 ```ts
 new DotDotDuck({

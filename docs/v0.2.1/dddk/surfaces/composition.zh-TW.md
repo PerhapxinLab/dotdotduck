@@ -2,7 +2,7 @@
 
 > 圖 + 文 + 互動選項的版型怎麼組 — 同時避開「每個 piece 都是有邊框的 Card 堆疊起來看起來很重」這個 dddk Pieces 最常見的視覺地雷。
 
-v0.1.0 新增的四個 layout piece（`Group`, `MediaCard`, `OptionGroup`, `ChoiceList`）就是為了組合而設計：選對外層、塞對內項，20 行 JSON 就有電商等級的推薦版型。
+SDK 提供的四個 layout piece（`Group`, `MediaCard`, `OptionGroup`, `ChoiceList`）就是為了組合而設計：選對外層、塞對內項，20 行 JSON 就有電商等級的推薦版型。
 
 ## 組合規則
 

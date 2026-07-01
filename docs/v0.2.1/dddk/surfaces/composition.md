@@ -2,7 +2,7 @@
 
 > Patterns for image + text + interactive option surfaces, without the "every piece is a card with a border" stacking-frames problem.
 
-The four v0.1.0 layout pieces (`Group`, `MediaCard`, `OptionGroup`, `ChoiceList`) are designed to compose: pick the right outer shape, drop in the right inner items, and you get an e-commerce-style recommendation surface in 20 lines of JSON.
+The four layout pieces (`Group`, `MediaCard`, `OptionGroup`, `ChoiceList`) are designed to compose: pick the right outer shape, drop in the right inner items, and you get an e-commerce-style recommendation surface in 20 lines of JSON.
 
 ## The composition rules
 

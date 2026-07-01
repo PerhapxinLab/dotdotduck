@@ -1,8 +1,22 @@
-# webagent — 概述
+# Agent — 概述
 
-## 是什麼
+## 三種 agent class
 
-**webagent 是一個 DOM-grounded 的 agent toolkit。**
+v0.2.0 起 dddk 出貨三種 agent class，各有用途：
+
+| Class | 讀 DOM？ | Protocol | 用途 |
+|---|---|---|---|
+| **`WebAgent`** | ✅ 每 turn 讀整頁 DOM | CoT envelope（或 plain，opt-in） | 操作目前頁面 — navigate / click / fill / narrate + 視覺 overlay。預設的 agent |
+| **`TaskAgent`** | ❌ 不讀 DOM | 純 chat + OpenAI tool-calls | 對話 + host 自定 tool。客服、host 資料上的 RAG、後端 orchestrator |
+| **`InlineAgent`** | ❌ 只看使用者當下 selection | Streaming | Input / textarea / contenteditable 裡的文字 — improve / translate / rewrite / summarize / diff-preview UX |
+
+三者共用 `AgentSession` 形狀，可以共享對話歷史（`dddk.sessions` + `dddk.agents` registry，見 [/api.md#multi-instance](./api.md)）。
+
+本頁講 **`WebAgent`** — DOM-grounded 那個。TaskAgent 在 [/task-agent.md](./task-agent.md)。InlineAgent 在 [../modules/inline-agent.md](../modules/inline-agent.md)。
+
+## WebAgent 是什麼
+
+**一個 DOM-grounded 的 agent toolkit。**
 
 它讓 AI agent 直接在「人正在看的那個網頁」這層工作 — 讀 DOM、點按鈕、填表單、做頁面導頁、在頁面上 highlight / border 元素、跨頁面維持狀態、必要時暫停下來問使用者。
 

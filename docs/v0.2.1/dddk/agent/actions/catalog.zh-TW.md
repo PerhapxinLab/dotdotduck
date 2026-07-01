@@ -9,38 +9,65 @@
 - 失敗回標準化的 error（不會 throw 給 agent loop）
 - DOM 操作前先 `query` 一次確認存在，找不到就回 `{ ok: false, reason: 'not_found' }`
 
-## 完整清單（內建 12 個）
+## Action bundle（v0.2.0 之後改成 opt-in）
+
+預設只裝 `coreActions`（5 個）。其他都要 `customActions` opt-in：
+
+```ts
+import { WebAgent, coreActions, formActions, flowActions, extraActions, builtinActions } from '@perhapxin/dddk';
+
+// 還原 v0.1 行為（全部 15 個都裝）：
+new WebAgent({ ..., customActions: builtinActions });
+
+// 或按 bundle opt-in：
+new WebAgent({ ..., customActions: [...formActions] });
+```
+
+| Bundle | 成員 | 預設？ |
+|---|---|---|
+| `coreActions` | `narrate`, `navigate`, `click`, `border`, `scroll_to` | ✅ 自動裝 |
+| `formActions` | `fill_input`, `select_option`, `clear_input`, `press_key`, `hold_key`, `double_click`, `long_press`, `drag` | opt-in |
+| `flowActions` | `wait`, `pause`, `ask_user`, `ask_user_choice` | opt-in |
+| `extraActions` | `highlight`, `track_intent`, `escalate_to_human` | opt-in |
+| `workflowActions` | `validate_form`, `wait_until` | opt-in |
+
+## 完整清單
 
 ### 導頁 / 頁面控制
 
 | Action | 參數 | 行為 |
 |---|---|---|
-| `navigate` | `{ path }` | SPA-friendly 換頁。固定會走 Space 確認流程（runtime 會先發 `confirm` event） |
-| `scroll_to` | `{ selector }` | 平滑滾到該元素，講某個視窗外的東西之前先 scroll |
-| `wait` | `{ ms?, selector?, timeout? }` | 兩種模式 — 睡 `ms` 毫秒，或輪詢直到 CSS `selector` 出現（搭配 `timeout`），上限 5 秒 |
+| `navigate` | `{ path }` | SPA-friendly 換頁。v0.2.0 起會 reject 不在 `sitemap` 裡的路徑，把 valid path list 回 LLM 重試。固定走 Space 確認流程 |
+| `scroll_to` | `{ selector }` | 平滑滾到該元素。`cursorTrail: true` 時 cursor 會切成滑鼠滾輪圖示、沿捲動路徑走、再切回箭頭 |
+| `wait` | `{ ms?, selector?, timeout? }` | 兩種模式 — 睡 `ms` 毫秒，或輪詢直到 CSS `selector` 出現，上限 5 秒 |
 
 ### DOM 互動
 
 | Action | 參數 | 行為 |
 |---|---|---|
-| `click` | `{ selector }` | 點擊元素。送出表單也用這個 — submit button 就是個 button，沒有獨立的 `submit_form` |
+| `click` | `{ selector }` | 點擊元素。送出表單也用這個 |
+| `double_click` | `{ selector }` | 真的 `dblclick`（不是兩次 `click`），`ondblclick` handler 才會收到 — 開檔 / 展開 / 進入 rename mode |
+| `long_press` | `{ selector, ms? }` | mousedown + touchstart → 等 → mouseup + touchend。預設 600 ms，上限 5 s。Context menu / drag handle / 行動裝置長按 |
+| `drag` | `{ from, to, steps? }` | `from` 上 mousedown → 沿路徑插值 mousemove → `to` 上 mouseup。同時發 HTML5 `dragstart` / `dragover` / `drop` / `dragend`，React-DnD / SortableJS / 原生 DnD 都吃。Sortable list / kanban / slider |
 | `fill_input` | `{ selector, value }` | 填 input / textarea（會 dispatch `input` + `change`） |
 | `select_option` | `{ selector, value }` | 選 `<select>` 的選項 |
 | `clear_input` | `{ selector }` | 清空欄位 |
-| `press_key` | `{ key, selector? }` | Dispatch 鍵盤 event（keydown + keyup）。`key` 是 W3C key 名稱（`"Enter"`、`"Escape"`、`"ArrowDown"`、`" "`、單字元）。`selector` 省略 = `document.activeElement`。Enter 送出、Escape 關閉、Arrow keys 移動等都靠這個 |
+| `press_key` | `{ key, selector?, modifiers? }` | Dispatch keydown + keyup。`key` 是 W3C key 名稱。`modifiers`：`('ctrl' \| 'shift' \| 'alt' \| 'meta')[]` 支援組合鍵 — Ctrl+S / Cmd+K / Shift+Tab。`selector` 省略 = `document.activeElement` |
+| `hold_key` | `{ key, ms, selector?, modifiers? }` | 按住鍵 `ms` 毫秒（keydown → 等 → keyup）。Push-to-talk、按住 Ctrl 多選、按住縮放。上限 5 s |
 
 ### 視覺 overlay（給使用者看）
 
 | Action | 參數 | 行為 |
 |---|---|---|
-| `border` | `{ selector, color?, label? }` | 加框。`border` / `highlight` 會自動清掉之前的 overlay，沒有 `clear_overlays` 工具。**CoT mode 下 `border` 從 model tool list 隱藏** — 框元素是透過 `narrate.about` 設定（見下）。Action 本身還在註冊內、給 classic loop / customActions 用 |
-| `highlight` | `{ selector, color?, label? }` | 加底色 — 適合 inline 段落。同樣自動清掉舊 overlay。預設沒在 builtin set 裡，要 opt-in 透過 `customActions` |
+| `border` | `{ selector, color?, label? }` | 加框。`border` / `highlight` 會自動清掉之前的 overlay。**CoT mode 下 `border` 從 model tool list 隱藏** — 框元素是透過 `narrate.about` 設定（見下） |
+| `highlight` | `{ selector, color?, label? }` | 加底色 — 適合 inline 段落。同樣自動清舊 overlay。`coreActions` 沒有，透過 `extraActions` 或 `customActions` opt-in |
 
-### 跟使用者溝通
+### 講話 + 問使用者
 
 | Action | 參數 | 行為 |
 |---|---|---|
-| `pause` | `{ note? }` | 等使用者按 space。**CoT mode 下隱藏** — runtime 每個 narrate 後會自動 pause，曝露 `pause` 反而會雙 pause。Classic mode 還有 |
+| `narrate` | `{ text, about? }` | v0.2.0 起是 `coreActions` 裡的 first-class action。CoT runtime 在 envelope 攔截；plain-protocol 呼叫者走 handler、text 送到字幕條。`about` 有設時自動 border 該元素 |
+| `pause` | `{ note? }` | 等使用者按 space。**CoT mode 下隱藏** — runtime 每個 narrate 後會自動 pause |
 | `ask_user` | `{ question }` | 問純文字問題 |
 | `ask_user_choice` | `{ question, options[], allowFreeText? }` | 多選 picker（2–6 個選項，可選 free-text fallback） |
 
