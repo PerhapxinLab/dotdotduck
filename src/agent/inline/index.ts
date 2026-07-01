@@ -1962,13 +1962,19 @@ export class InlineAgent {
         startCoords.top + startCoords.height,
         endCoords.top + endCoords.height,
       );
-      // Multi-line selection → anchor the menu at the END of the
-      // selection (where the user's cursor is) with zero width. A
-      // left=0 fallback here would place the menu at viewport-left for
-      // textareas on the right side of the page, far from the selection.
+      // Multi-line selection → anchor the panel at the START-of-
+      // selection left edge, below the LAST line. Menu (single-line
+      // popover, ~200 px wide) previously anchored at endCoords.left
+      // and that stayed close to the selection because it's narrow.
+      // The inline-diff panel is ~500-600 px wide though — anchoring
+      // at endCoords.left pushes its right edge off-screen, then the
+      // panel's viewport clamp shoves it further left, so it lands in
+      // the wrong quadrant of the screen. startCoords.left puts the
+      // panel's left edge directly below the selection's opening line,
+      // which reads as "attached to the selected text".
       const sameLine = Math.abs(endCoords.top - startCoords.top) < startCoords.height * 0.5;
       if (!sameLine) {
-        return new DOMRect(endCoords.left, endCoords.top, 0, endCoords.height);
+        return new DOMRect(startCoords.left, endCoords.top, 0, endCoords.height);
       }
       const left = Math.min(startCoords.left, endCoords.left);
       const right = Math.max(startCoords.left, endCoords.left);
